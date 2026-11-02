@@ -26,6 +26,12 @@ import type {
   InsightHistoryEntryContract,
   DashboardManualToken,
   DashboardMarkViewedPayload,
+  DashboardCancelScrapePayload,
+  DashboardScrapePayload,
+  DashboardSourceSchedulePayload,
+  DashboardSourceScheduleState,
+  ScrapeRunLog,
+  ScrapeRunQuery,
   DashboardPinnedOrderPayload,
   DashboardRunSchedulePayload,
   DashboardSchedulesState,
@@ -205,6 +211,9 @@ export const IpcChannels = {
   DashboardCardCheckAuth: 'dashboard:card-check-auth',
   DashboardSyncSource: 'dashboard:sync-source',
   DashboardGetRunLogs: 'dashboard:get-run-logs',
+  DashboardGetScrapeRuns: 'dashboard:get-scrape-runs',
+  DashboardCancelScrape: 'dashboard:cancel-scrape',
+  DashboardSetSourceSchedule: 'dashboard:set-source-schedule',
   DashboardStartWatchLive: 'dashboard:start-watch-live',
   DashboardStopWatchLive: 'dashboard:stop-watch-live',
   DashboardScrapeEvent: 'dashboard:scrape-event'
@@ -245,6 +254,8 @@ export interface AppSettings {
     profilesHub: boolean
   }
   showScrapeProgressLine?: boolean
+  /** Global gate for scraping personal DMs. Cards may override. Default: false. */
+  scrapePersonalDms?: boolean
   showGoogleEmailInputInSidebar?: boolean
   showProfileScopeSelector?: boolean
   /** When true, show "OBSERVER VIEW" label + divider above the 6 bottom sidebar buttons. Default: false. */
@@ -287,6 +298,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   showLookSwitcher: false,
   showRecentSection: true,
   showScrapeProgressLine: true,
+  scrapePersonalDms: false,
   showGoogleEmailInputInSidebar: true,
   showProfileScopeSelector: false,
   showObserverViewHeader: false,
@@ -476,33 +488,17 @@ export interface IpcApi {
     deleteWorkspaceMapping: (workspaceId: string) => Promise<boolean>
     getProjects: () => Promise<{ id: string; name: string; clientName: string; teamId: string; profileId: string }[]>
     checkCardAuth: (payload: { projectId: string; appId?: AppId }) => Promise<boolean>
-    syncSource: (payload: { projectId: string; sourceId?: string }) => Promise<{
+    syncSource: (payload: DashboardScrapePayload) => Promise<{
+      runId: string
       channelsRead: number
       newMessages: number
-      status: string
+      status: 'success' | 'partial' | 'error' | 'stopped'
       error?: string
     }>
-    getRunLogs: (payload: { projectId: string; limit?: number }) => Promise<Array<{
-      runId: string
-      ts: string
-      trigger: 'scheduled' | 'manual'
-      projectId: string
-      sourceId: string
-      sourceKind: 'token' | 'browser'
-      workspaceId: string
-      channelsRead: number
-      newMessages: number
-      snippets?: Array<{
-        channelId: string
-        channelName?: string
-        sender: string
-        ts: string
-        snippet: string
-      }>
-      durationMs: number
-      status: string
-      error?: string
-    }>>
+    cancelScrape: (payload: DashboardCancelScrapePayload) => Promise<{ ok: boolean; cancelled: number }>
+    setSourceSchedule: (payload: DashboardSourceSchedulePayload) => Promise<DashboardSourceScheduleState>
+    getRunLogs: (payload: ScrapeRunQuery & { projectId: string }) => Promise<ScrapeRunLog[]>
+    getScrapeRuns: (payload: ScrapeRunQuery) => Promise<ScrapeRunLog[]>
     startWatchLive: (payload: {
       projectId: string
       bounds: { x: number; y: number; width: number; height: number }
@@ -510,11 +506,29 @@ export interface IpcApi {
     stopWatchLive: () => Promise<void>
     onScrapeEvent: (
       callback: (event: {
-        type: 'navigate' | 'scroll' | 'highlight' | 'status'
+        type:
+          | 'navigate'
+          | 'scroll'
+          | 'highlight'
+          | 'status'
+          | 'read'
+          | 'queued'
+          | 'run_started'
+          | 'run_finished'
+          | 'run_failed'
+          | 'run_cancelled'
+          | 'paused'
+          | 'waiting_for_user'
+          | 'challenge'
+        runId?: string
+        projectId?: string
+        sourceId?: string
+        workspaceName?: string
         channelName?: string
         scrollIndex?: number
         maxScroll?: number
         messageCount?: number
+        queueLength?: number
         bounds?: { x: number; y: number; width: number; height: number }
         text?: string
       }) => void

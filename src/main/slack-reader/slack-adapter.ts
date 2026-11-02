@@ -113,14 +113,17 @@ export const LIST_CHANNELS_SCRIPT = `
 /**
  * Passive script to read visible messages from the virtualized message list DOM.
  * Performs ZERO typing, ZERO sending, ZERO clicking.
- * Strictly filters messages to the last 1 hour window.
+ * `sinceTs` is an epoch-seconds floor (0 = no floor, so the caller can page
+ * backwards through history instead of being pinned to the last hour).
  */
-export const READ_VISIBLE_MESSAGES_SCRIPT = `
+export function buildReadVisibleMessagesScript(sinceTs = 0): string {
+  const floor = Number.isFinite(sinceTs) && sinceTs > 0 ? sinceTs : 0
+  return `
 (function() {
   const rows = document.querySelectorAll('${SLACK_SELECTORS.messageRow}');
   const results = [];
   let lastAuthor = null;
-  const oneHourAgoSec = (Date.now() - 3600 * 1000) / 1000;
+  const sinceTs = ${floor};
 
   rows.forEach((row) => {
     const senderEl = row.querySelector('${SLACK_SELECTORS.messageSender}');
@@ -144,12 +147,9 @@ export const READ_VISIBLE_MESSAGES_SCRIPT = `
     const permalink = permalinkEl ? permalinkEl.getAttribute('href') : '';
 
     if (rawTs && text) {
-      // Numerical timestamp parsing check for 1 hour window
       const parsedNum = parseFloat(rawTs);
-      if (!isNaN(parsedNum) && parsedNum > 1000000000) {
-        if (parsedNum < oneHourAgoSec) {
-          return; // Skip messages older than 1 hour
-        }
+      if (sinceTs > 0 && !isNaN(parsedNum) && parsedNum > 1000000000 && parsedNum < sinceTs) {
+        return;
       }
 
       results.push({
@@ -164,6 +164,9 @@ export const READ_VISIBLE_MESSAGES_SCRIPT = `
   return results;
 })()
 `
+}
+
+export const READ_VISIBLE_MESSAGES_SCRIPT = buildReadVisibleMessagesScript(0)
 
 export class SlackAdapter {
   async detectState(view: WebContentsView): Promise<SlackSessionState> {
@@ -186,13 +189,39 @@ export class SlackAdapter {
     }
   }
 
-  async readVisibleMessages(view: WebContentsView): Promise<RawScrapedMessage[]> {
+  async readVisibleMessages(
+    view: WebContentsView,
+    options: { sinceTs?: number } = {}
+  ): Promise<RawScrapedMessage[]> {
     if (view.webContents.isDestroyed()) return []
     try {
-      const messages = (await view.webContents.executeJavaScript(READ_VISIBLE_MESSAGES_SCRIPT, true)) as RawScrapedMessage[]
+      const script = buildReadVisibleMessagesScript(options.sinceTs ?? 0)
+      const messages = (await view.webContents.executeJavaScript(script, true)) as RawScrapedMessage[]
       return Array.isArray(messages) ? messages : []
     } catch {
       return []
+    }
+  }
+
+  /** Scroll the message list up (older history) without clicking anything. */
+  async scrollUp(view: WebContentsView, pixels = 600): Promise<boolean> {
+    if (view.webContents.isDestroyed()) return false
+    try {
+      return Boolean(
+        await view.webContents.executeJavaScript(
+          `(function() {
+            const list = document.querySelector('.c-virtual_list__scroll_container') ||
+                         document.querySelector('[data-qa="slack_kit_list"]');
+            if (!list) return false;
+            const before = list.scrollTop;
+            list.scrollTop = Math.max(0, before - ${Math.max(100, pixels)});
+            return list.scrollTop < before;
+          })()`,
+          true
+        )
+      )
+    } catch {
+      return false
     }
   }
 

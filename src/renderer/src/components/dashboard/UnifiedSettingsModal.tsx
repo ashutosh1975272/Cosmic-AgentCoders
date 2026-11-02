@@ -8,12 +8,14 @@ import { DeleteConfirmNoticeModal, type ProfileDeleteTarget } from './DeleteConf
 import { modKey } from '../../lib/shortcut-label'
 import AiSettingsForm from './AiSettingsForm'
 import { LogsObservabilityTab } from './LogsObservabilityTab'
+import { ScrapeLogsTab } from './ScrapeLogsTab'
 export type SettingsTabKey =
   | 'general'
   | 'sidebar'
   | 'ai'
   | 'accounts'
   | 'logs'
+  | 'scrape-logs'
   | 'maintenance'
   | 'advance'
 
@@ -168,7 +170,8 @@ export function UnifiedSettingsModal({
     { key: 'sidebar', label: 'Sidebar & Navigation', icon: '📑' },
     { key: 'ai', label: 'Global AI & NVIDIA NIM', icon: '🤖' },
     { key: 'accounts', label: 'Accounts & Workspaces', icon: '👥' },
-    { key: 'logs', label: 'Logs & Observability', icon: '📜' },
+    { key: 'logs', label: 'App Logs', icon: '📜' },
+    { key: 'scrape-logs', label: 'Scrape Logs', icon: '🕷️' },
     { key: 'maintenance', label: 'System & Maintenance', icon: '🛡️' }
   ]
 
@@ -504,6 +507,20 @@ export function UnifiedSettingsModal({
                         type="checkbox"
                         checked={settings.showScrapeProgressLine ?? true}
                         onChange={(e) => onChangeSettings({ showScrapeProgressLine: e.target.checked })}
+                      />
+                    </label>
+
+                    <label className="settings-row">
+                      <span>
+                        Include personal DMs in scraping
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Global default (off). Individual cards can override this policy.
+                        </span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={settings.scrapePersonalDms ?? false}
+                        onChange={(e) => onChangeSettings({ scrapePersonalDms: e.target.checked })}
                       />
                     </label>
                   </div>
@@ -1526,6 +1543,7 @@ export function UnifiedSettingsModal({
             )}
 
             {activeTab === 'logs' && <LogsObservabilityTab />}
+            {activeTab === 'scrape-logs' && <ScrapeLogsTab />}
           </main>
         </div>
       </div>

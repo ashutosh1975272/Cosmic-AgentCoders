@@ -162,6 +162,49 @@ describe('Slack Control: End-to-End Scrape, Read/Write, Scheduler & Cross-View S
             ]
           }
         ]),
+        getScrapeRuns: vi.fn().mockResolvedValue([
+          {
+            runId: 'run-1',
+            ts: new Date().toISOString(),
+            startedAt: new Date().toISOString(),
+            trigger: 'manual',
+            projectId: 'proj-slack-ctrl-1',
+            projectName: 'Acme Slack Project',
+            sourceId: 'bsrc-1',
+            sourceKind: 'browser',
+            workspaceId: 'T_ACME',
+            workspaceName: 'Acme Web Slack',
+            channelsRead: 2,
+            newMessages: 4,
+            window: { startTs: '0', endTs: '1', backfillHours: 6 },
+            channels: [
+              {
+                channelId: 'C_PUB_1',
+                channelName: 'general',
+                kind: 'public',
+                messagesRead: 11,
+                newMessages: 4,
+                status: 'read'
+              }
+            ],
+            people: [{ name: 'Alice', messages: 4 }],
+            filters: { includeKinds: ['public', 'private'] },
+            durationMs: 1400,
+            llmCalls: 0,
+            status: 'success',
+            snippets: [
+              {
+                channelId: 'C_PUB_1',
+                channelName: 'general',
+                sender: 'Alice',
+                ts: new Date().toISOString(),
+                snippet: 'Proposal approved'
+              }
+            ]
+          }
+        ]),
+        cancelScrape: vi.fn().mockResolvedValue({ ok: true }),
+        setSourceSchedule: vi.fn().mockResolvedValue({}),
         getSchedules: vi.fn().mockResolvedValue({
           settings: { slackSync: { enabled: true, intervalMinutes: 15 } },
           lastRuns: []
@@ -254,13 +297,13 @@ describe('Slack Control: End-to-End Scrape, Read/Write, Scheduler & Cross-View S
       />
     )
 
-    expect(window.api.dashboard.getRunLogs).toHaveBeenCalledWith(
+    expect(window.api.dashboard.getScrapeRuns).toHaveBeenCalledWith(
       expect.objectContaining({ projectId: 'proj-slack-ctrl-1' })
     )
 
     // Wait for modal and logs content to render
     await waitFor(() => {
-      expect(screen.getByText(/Scraping Explorer/i)).toBeTruthy()
+      expect(screen.getByText(/Scrape logs/i)).toBeTruthy()
     })
   })
 

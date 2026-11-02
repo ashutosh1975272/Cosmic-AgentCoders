@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
+  DashboardProject,
   DashboardProjectSnapshot,
   DashboardScheduleRun,
   DashboardUpdateSchedulePayload
@@ -63,6 +64,22 @@ class FakeStore {
       lastRunAt: { ...this.data.lastRunAt, [run.kind]: run.finishedAt }
     }
     return this.data
+  }
+
+  async recordSourceRun(sourceId: string, atIso: string): Promise<void> {
+    this.data = {
+      ...this.data,
+      sourceLastRunAt: { ...(this.data.sourceLastRunAt ?? {}), [sourceId]: atIso }
+    }
+  }
+
+  async pruneSourceRuns(activeSourceIds: string[]): Promise<void> {
+    const active = new Set(activeSourceIds)
+    const next: Record<string, string> = {}
+    for (const [id, at] of Object.entries(this.data.sourceLastRunAt ?? {})) {
+      if (active.has(id)) next[id] = at
+    }
+    this.data = { ...this.data, sourceLastRunAt: next }
   }
 }
 
@@ -237,6 +254,97 @@ describe('DashboardScheduler', () => {
     expect(syncAll).toHaveBeenCalledTimes(1)
     expect(store.data.runs[0].detail).toContain('Manual run')
     expect(state.nextRunAt).toBe(new Date(T0.getTime() + 5 * MINUTE).toISOString())
+    scheduler.stop()
+  })
+
+  it('scrapes each due browser source on its own cadence', async () => {
+    const source = {
+      id: 'src-1',
+      kind: 'browser' as const,
+      name: 'Acme',
+      workspaceId: 'T1',
+      workspaceName: 'Acme',
+      profileId: 'prof-1',
+      enabled: true,
+      scheduleEnabled: true,
+      scheduleIntervalMinutes: 5 as const,
+      channels: []
+    }
+    const project = {
+      id: 'proj-1',
+      name: 'Project 1',
+      sources: [source]
+    } as unknown as DashboardProject
+    const syncProjectSource = vi.fn(async () => ({ status: 'success' as const }))
+    const engine = {
+      syncAll: vi.fn(async () => []),
+      syncProjectSource,
+      isSourceRunning: vi.fn(() => false)
+    } as unknown as DashboardSyncEngine
+    const store = new FakeStore()
+    const scheduler = new DashboardScheduler(engine, store, {
+      now: () => Date.now(),
+      listProjects: async () => [project]
+    })
+
+    await scheduler.start()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(syncProjectSource).toHaveBeenCalledWith('proj-1', 'src-1', {
+      trigger: 'scheduled'
+    })
+    expect(store.data.sourceLastRunAt?.['src-1']).toBe(T0.toISOString())
+
+    const state = await scheduler.getState()
+    expect(state.sources).toHaveLength(1)
+    expect(state.sources?.[0]).toMatchObject({
+      projectId: 'proj-1',
+      projectName: 'Project 1',
+      sourceId: 'src-1',
+      workspaceName: 'Acme',
+      scheduleEnabled: true,
+      intervalMinutes: 5
+    })
+
+    await vi.advanceTimersByTimeAsync(5 * MINUTE)
+    expect(syncProjectSource.mock.calls.length).toBeGreaterThanOrEqual(2)
+    scheduler.stop()
+  })
+
+  it('skips paused sources and leaves their last-run stamp alone', async () => {
+    const project = {
+      id: 'proj-1',
+      name: 'Project 1',
+      sources: [
+        {
+          id: 'src-paused',
+          kind: 'browser',
+          workspaceId: 'T1',
+          profileId: 'prof-1',
+          enabled: true,
+          scheduleEnabled: false,
+          scheduleIntervalMinutes: 5,
+          channels: []
+        }
+      ]
+    } as unknown as DashboardProject
+    const syncProjectSource = vi.fn(async () => ({ status: 'success' as const }))
+    const engine = {
+      syncAll: vi.fn(async () => []),
+      syncProjectSource,
+      isSourceRunning: vi.fn(() => false)
+    } as unknown as DashboardSyncEngine
+    const store = new FakeStore()
+    const scheduler = new DashboardScheduler(engine, store, {
+      now: () => Date.now(),
+      listProjects: async () => [project]
+    })
+
+    await scheduler.start()
+    await vi.advanceTimersByTimeAsync(10 * MINUTE)
+
+    expect(syncProjectSource).not.toHaveBeenCalled()
+    expect(store.data.sourceLastRunAt?.['src-paused']).toBeUndefined()
     scheduler.stop()
   })
 

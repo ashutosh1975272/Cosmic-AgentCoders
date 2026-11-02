@@ -24,6 +24,8 @@ const KINDS: DashboardScheduleKind[] = ['slack-sync', 'agent-analysis', 'daily-r
 export interface StoredSchedules {
   settings: DashboardScheduleSettings
   lastRunAt: Record<DashboardScheduleKind, string | null>
+  /** sourceId → last successful/attempted run ISO (per-source scheduler). */
+  sourceLastRunAt?: Record<string, string>
   runs: DashboardScheduleRun[]
 }
 
@@ -108,7 +110,13 @@ export class DashboardScheduleStore {
           })
           .slice(0, MAX_RUNS)
       : []
-    return { settings, lastRunAt, runs }
+    const sourceLastRunAt: Record<string, string> = {}
+    if (raw.sourceLastRunAt && typeof raw.sourceLastRunAt === 'object') {
+      for (const [sourceId, iso] of Object.entries(raw.sourceLastRunAt)) {
+        if (isIso(iso)) sourceLastRunAt[sourceId] = iso
+      }
+    }
+    return { settings, lastRunAt, sourceLastRunAt, runs }
   }
 
   async update(patch: DashboardUpdateSchedulePayload): Promise<StoredSchedules> {
@@ -133,6 +141,26 @@ export class DashboardScheduleStore {
     return result ?? (await this.read())
   }
 
+  /** Record one source's last run so per-source catch-up survives a restart. */
+  async recordSourceRun(sourceId: string, atIso: string): Promise<void> {
+    await this.mutate((current) => ({
+      ...current,
+      sourceLastRunAt: { ...(current.sourceLastRunAt ?? {}), [sourceId]: atIso }
+    }))
+  }
+
+  /** Drop stale per-source timestamps when a source is removed. */
+  async pruneSourceRuns(activeSourceIds: string[]): Promise<void> {
+    const active = new Set(activeSourceIds)
+    await this.mutate((current) => {
+      const next: Record<string, string> = {}
+      for (const [id, iso] of Object.entries(current.sourceLastRunAt ?? {})) {
+        if (active.has(id)) next[id] = iso
+      }
+      return { ...current, sourceLastRunAt: next }
+    })
+  }
+
   private async mutate(fn: (current: StoredSchedules) => StoredSchedules): Promise<void> {
     const run = async (): Promise<void> => {
       const next = fn(await this.read())
@@ -148,6 +176,7 @@ export class DashboardScheduleStore {
   private async readFile(): Promise<{
     settings?: unknown
     lastRunAt?: Partial<Record<DashboardScheduleKind, unknown>>
+    sourceLastRunAt?: Record<string, unknown>
     runs?: unknown[]
   }> {
     try {
@@ -155,6 +184,7 @@ export class DashboardScheduleStore {
       return {
         settings: parsed.settings,
         lastRunAt: (parsed.lastRunAt ?? {}) as Partial<Record<DashboardScheduleKind, unknown>>,
+        sourceLastRunAt: (parsed.sourceLastRunAt ?? {}) as Record<string, unknown>,
         runs: Array.isArray(parsed.runs) ? parsed.runs : []
       }
     } catch {

@@ -427,6 +427,10 @@ if (!gotSingleInstanceLock) {
         browserViewManager.getExistingView(profileId, appId),
       getExistingCardView: (projectId, appId) =>
         browserViewManager.getExistingCardView(projectId, appId),
+      getScrapePersonalDms: async () => (await settingsStore.get()).scrapePersonalDms === true,
+      onSourceRun: (sourceId, atIso) => {
+        void dashboardScheduleStore.recordSourceRun(sourceId, atIso)
+      },
       onSynced: () => {
         void refreshDigestNow().catch((err) =>
           log.warn('[dashboard] digest refresh failed', { err: String(err) })
@@ -513,6 +517,7 @@ if (!gotSingleInstanceLock) {
       }
     }
     const dashboardScheduler = new DashboardScheduler(dashboardEngine, dashboardScheduleStore, {
+      listProjects: () => dashboardMonitorStore.listProjects(),
       runDailyRecheck: async () => {
         const projects = await dashboardMonitorStore.listProjects()
         let checked = 0

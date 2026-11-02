@@ -1,26 +1,421 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import type {
+  ScrapeRunChannel,
+  ScrapeRunLog,
+  ScrapeRunStatus,
+  ScrapeTrigger
+} from '../../../../shared/dashboard-contract'
 
-export interface RunLogItem {
-  runId: string
-  ts: string
-  trigger: 'scheduled' | 'manual'
-  projectId: string
-  sourceId: string
-  sourceKind: 'token' | 'browser'
-  workspaceId: string
-  channelsRead: number
-  newMessages: number
-  snippets?: Array<{
-    channelId: string
-    channelName?: string
-    sender: string
-    ts: string
-    snippet: string
-  }>
-  durationMs: number
-  status: string
-  error?: string
-  errorCode?: string
+const STATUS_LABEL: Record<ScrapeRunStatus, string> = {
+  success: 'Success',
+  partial: 'Partial',
+  error: 'Error',
+  stopped: 'Stopped'
+}
+
+const STATUS_COLOR: Record<ScrapeRunStatus, { bg: string; fg: string }> = {
+  success: { bg: 'rgba(34, 197, 94, 0.15)', fg: '#22c55e' },
+  partial: { bg: 'rgba(251, 191, 36, 0.15)', fg: '#fbbf24' },
+  error: { bg: 'rgba(239, 68, 68, 0.15)', fg: '#ef4444' },
+  stopped: { bg: 'rgba(148, 163, 184, 0.15)', fg: '#94a3b8' }
+}
+
+function channelKindLabel(kind: ScrapeRunChannel['kind']): string {
+  if (kind === 'dm') return 'DM'
+  if (kind === 'group-dm') return 'Group DM'
+  if (kind === 'private') return 'Private'
+  return 'Public'
+}
+
+function timeOf(iso: string): string {
+  const date = new Date(iso)
+  return Number.isNaN(date.getTime())
+    ? iso
+    : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+export interface ScrapeLogExplorerProps {
+  /** undefined = every card (unified logs tab). */
+  projectId?: string
+  projectName?: string
+  showProjectColumn?: boolean
+  compact?: boolean
+}
+
+export function ScrapeLogExplorer({
+  projectId,
+  projectName,
+  showProjectColumn = false,
+  compact = false
+}: ScrapeLogExplorerProps): React.JSX.Element {
+  const [runs, setRuns] = useState<ScrapeRunLog[]>([])
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+  const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null)
+  const [statusFilter, setStatusFilter] = useState<ScrapeRunStatus | 'all'>('all')
+  const [triggerFilter, setTriggerFilter] = useState<ScrapeTrigger | 'all'>('all')
+  const [busy, setBusy] = useState(false)
+
+  const fetchRuns = useCallback(async () => {
+    try {
+      const data = await window.api.dashboard.getScrapeRuns({
+        projectId,
+        limit: 100,
+        status: statusFilter,
+        trigger: triggerFilter
+      })
+      const rows = (data ?? []) as ScrapeRunLog[]
+      setRuns(rows)
+      setSelectedRunId((current) => current ?? rows[0]?.runId ?? null)
+    } catch {
+      setRuns([])
+    }
+  }, [projectId, statusFilter, triggerFilter])
+
+  useEffect(() => {
+    void fetchRuns()
+    if (!window.api?.dashboard?.onScrapeEvent) return undefined
+    const unsubscribe = window.api.dashboard.onScrapeEvent((event: { type?: string }) => {
+      if (
+        event.type === 'run_started' ||
+        event.type === 'run_finished' ||
+        event.type === 'run_failed' ||
+        event.type === 'run_cancelled'
+      ) {
+        void fetchRuns()
+      }
+    })
+    return () => unsubscribe()
+  }, [fetchRuns])
+
+  const activeRun = useMemo(
+    () => runs.find((run) => run.runId === selectedRunId) ?? runs[0] ?? null,
+    [runs, selectedRunId]
+  )
+
+  const activeChannel = useMemo(() => {
+    if (!activeRun) return null
+    return (
+      activeRun.channels.find((channel) => channel.channelId === selectedChannelId) ??
+      activeRun.channels.find((channel) => channel.status === 'read') ??
+      activeRun.channels[0] ??
+      null
+    )
+  }, [activeRun, selectedChannelId])
+
+  const snippets = useMemo(() => {
+    if (!activeRun || !activeChannel) return []
+    return (activeRun.snippets ?? []).filter(
+      (snippet) => snippet.channelId === activeChannel.channelId
+    )
+  }, [activeRun, activeChannel])
+
+  const cancelRun = async (): Promise<void> => {
+    if (!activeRun) return
+    setBusy(true)
+    try {
+      await window.api.dashboard.cancelScrape({ runId: activeRun.runId, projectId })
+      await fetchRuns()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%', minHeight: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0' }}>
+          {projectName ? `${projectName} · ` : ''}Scrape run history ({runs.length})
+        </span>
+        <select
+          value={statusFilter}
+          onChange={(event) => setStatusFilter(event.target.value as ScrapeRunStatus | 'all')}
+          style={{ fontSize: 12, padding: '4px 8px' }}
+        >
+          <option value="all">All statuses</option>
+          <option value="success">Success</option>
+          <option value="partial">Partial</option>
+          <option value="error">Error</option>
+          <option value="stopped">Stopped</option>
+        </select>
+        <select
+          value={triggerFilter}
+          onChange={(event) => setTriggerFilter(event.target.value as ScrapeTrigger | 'all')}
+          style={{ fontSize: 12, padding: '4px 8px' }}
+        >
+          <option value="all">All triggers</option>
+          <option value="manual">Manual</option>
+          <option value="scheduled">Scheduled</option>
+        </select>
+        <button type="button" className="btn ghost btn-sm" onClick={() => void fetchRuns()}>
+          ⟳ Refresh
+        </button>
+        {activeRun ? (
+          <button
+            type="button"
+            className="btn ghost btn-sm"
+            disabled={busy}
+            onClick={() => void cancelRun()}
+            title="Stop this scrape run"
+          >
+            ■ Stop
+          </button>
+        ) : null}
+      </div>
+
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, gap: 12 }}>
+        <div
+          style={{
+            width: compact ? 260 : 320,
+            flexShrink: 0,
+            overflowY: 'auto',
+            border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: 8,
+            background: 'rgba(15, 23, 42, 0.35)',
+            padding: 8,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6
+          }}
+        >
+          {runs.length === 0 ? (
+            <div style={{ padding: 18, fontSize: 12, color: '#64748b', textAlign: 'center' }}>
+              No scrape runs yet.
+            </div>
+          ) : (
+            runs.map((run) => {
+              const selected = activeRun?.runId === run.runId
+              const colors = STATUS_COLOR[run.status]
+              return (
+                <button
+                  key={run.runId}
+                  type="button"
+                  onClick={() => {
+                    setSelectedRunId(run.runId)
+                    setSelectedChannelId(null)
+                  }}
+                  style={{
+                    textAlign: 'left',
+                    padding: '8px 10px',
+                    borderRadius: 6,
+                    border: `1px solid ${selected ? '#38bdf8' : 'rgba(255,255,255,0.06)'}`,
+                    background: selected ? 'rgba(56,189,248,0.1)' : 'rgba(255,255,255,0.02)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 3
+                  }}
+                >
+                  <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        padding: '1px 6px',
+                        borderRadius: 3,
+                        background: colors.bg,
+                        color: colors.fg
+                      }}
+                    >
+                      {STATUS_LABEL[run.status]}
+                    </span>
+                    <span style={{ fontSize: 11, color: '#94a3b8' }}>{timeOf(run.ts)}</span>
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: '#f8fafc' }}>
+                    {showProjectColumn ? `${run.projectName} · ` : ''}
+                    {run.workspaceName}
+                  </span>
+                  <span style={{ fontSize: 11, color: '#64748b', display: 'flex', justifyContent: 'space-between' }}>
+                    <span>
+                      {run.trigger} · {run.channelsRead} ch
+                    </span>
+                    <span style={{ color: run.newMessages > 0 ? '#22c55e' : 'inherit' }}>
+                      +{run.newMessages}
+                    </span>
+                  </span>
+                </button>
+              )
+            })
+          )}
+        </div>
+
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {!activeRun ? (
+            <div style={{ padding: 30, color: '#64748b', fontSize: 13, textAlign: 'center' }}>
+              Select a run to inspect what was scraped.
+            </div>
+          ) : (
+            <>
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 14,
+                  flexWrap: 'wrap',
+                  fontSize: 12,
+                  padding: '10px 12px',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: 8,
+                  background: 'rgba(255,255,255,0.02)'
+                }}
+              >
+                <span>
+                  Window:{' '}
+                  <b>
+                    {activeRun.window.backfillHours}h
+                    {activeRun.window.gapSeconds
+                      ? ` · gap ${activeRun.window.gapSeconds}s`
+                      : ''}
+                  </b>
+                </span>
+                <span>
+                  Channels: <b>{activeRun.channelsRead}</b>
+                </span>
+                <span>
+                  New: <b>{activeRun.newMessages}</b>
+                </span>
+                <span>
+                  Duration: <b>{(activeRun.durationMs / 1000).toFixed(1)}s</b>
+                </span>
+                <span style={{ color: '#64748b' }}>Run {activeRun.runId}</span>
+              </div>
+
+              {activeRun.error ? (
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: '#f87171',
+                    background: 'rgba(239,68,68,0.08)',
+                    padding: '8px 12px',
+                    borderRadius: 6,
+                    borderLeft: '4px solid #ef4444'
+                  }}
+                >
+                  {activeRun.error}
+                </div>
+              ) : null}
+
+              <div style={{ display: 'flex', gap: 10, minHeight: 0, flex: 1 }}>
+                <div
+                  style={{
+                    width: 250,
+                    flexShrink: 0,
+                    overflowY: 'auto',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: 8,
+                    padding: 8,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 4
+                  }}
+                >
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>
+                    Channels
+                  </div>
+                  {activeRun.channels.length === 0 ? (
+                    <div style={{ fontSize: 12, color: '#64748b' }}>No channel detail recorded.</div>
+                  ) : (
+                    activeRun.channels.map((channel) => {
+                      const selected = activeChannel?.channelId === channel.channelId
+                      return (
+                        <button
+                          key={channel.channelId}
+                          type="button"
+                          onClick={() => setSelectedChannelId(channel.channelId)}
+                          style={{
+                            textAlign: 'left',
+                            padding: '6px 8px',
+                            borderRadius: 5,
+                            border: `1px solid ${selected ? '#38bdf8' : 'transparent'}`,
+                            background: selected ? 'rgba(56,189,248,0.1)' : 'transparent',
+                            cursor: 'pointer',
+                            color: '#e2e8f0',
+                            fontSize: 12,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 2
+                          }}
+                        >
+                          <span style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
+                            <span>
+                              {channel.kind === 'dm' ? '💬' : channel.kind === 'private' ? '🔒' : '#'}{' '}
+                              {channel.channelName}
+                            </span>
+                            <span style={{ color: '#64748b' }}>{channel.messagesRead}</span>
+                          </span>
+                          <span style={{ fontSize: 10, color: '#64748b' }}>
+                            {channelKindLabel(channel.kind)} · {channel.status}
+                            {channel.skippedReason ? ` · ${channel.skippedReason}` : ''}
+                          </span>
+                        </button>
+                      )
+                    })
+                  )}
+                </div>
+
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden' }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>
+                    People ({activeRun.people.length})
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {activeRun.people.length === 0 ? (
+                      <span style={{ fontSize: 12, color: '#64748b' }}>No messages captured.</span>
+                    ) : (
+                      activeRun.people.map((person) => (
+                        <span
+                          key={person.name}
+                          style={{
+                            fontSize: 11,
+                            padding: '2px 8px',
+                            borderRadius: 12,
+                            background: 'rgba(99,102,241,0.12)',
+                            border: '1px solid rgba(99,102,241,0.3)',
+                            color: '#c7d2fe'
+                          }}
+                        >
+                          {person.name} · {person.messages}
+                        </span>
+                      ))
+                    )}
+                  </div>
+
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>
+                    Messages
+                  </div>
+                  <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {snippets.length === 0 ? (
+                      <div style={{ fontSize: 12, color: '#64748b' }}>
+                        No snippets for this channel in this run.
+                      </div>
+                    ) : (
+                      snippets.map((snippet, index) => (
+                        <div
+                          key={`${snippet.channelId}-${snippet.ts}-${index}`}
+                          style={{
+                            padding: '8px 10px',
+                            borderRadius: 6,
+                            background: 'rgba(255,255,255,0.03)',
+                            border: '1px solid rgba(255,255,255,0.06)'
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                            <b style={{ fontSize: 12, color: '#f8fafc' }}>{snippet.sender}</b>
+                            <span style={{ fontSize: 10, color: '#64748b' }}>{snippet.ts}</span>
+                          </div>
+                          <div style={{ fontSize: 12, color: '#cbd5e1', whiteSpace: 'pre-wrap' }}>
+                            {snippet.snippet}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 interface RunLogsModalProps {
@@ -30,71 +425,19 @@ interface RunLogsModalProps {
   onClose: () => void
 }
 
-export function RunLogsModal({ open, projectId, projectName, onClose }: RunLogsModalProps): React.JSX.Element | null {
-  const [logs, setLogs] = useState<RunLogItem[]>([])
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
-  const [selectedWorkspace, setSelectedWorkspace] = useState<string>('all')
-  const [selectedChannel, setSelectedChannel] = useState<string | null>(null)
-
-  const selectedRunIdRef = useRef(selectedRunId)
-  selectedRunIdRef.current = selectedRunId
-
-  const fetchLogs = async () => {
-    try {
-      const data = await window.api.dashboard.getRunLogs({ projectId })
-      setLogs(data)
-      if (data.length > 0 && !selectedRunIdRef.current) {
-        setSelectedRunId(data[0].runId)
-      }
-    } finally {
-      // loaded
-    }
-  }
-
-  useEffect(() => {
-    if (open) {
-      void fetchLogs()
-
-      // Live subscription: auto-refresh whenever a scrape finishes or emits an event
-      if (window.api?.dashboard?.onScrapeEvent) {
-        const unsubscribe = window.api.dashboard.onScrapeEvent((event: any) => {
-          if (event.type === 'run_finished' || event.type === 'status' || event.type === 'queued') {
-            void fetchLogs()
-          }
-        })
-        return () => {
-          unsubscribe()
-        }
-      }
-    }
-    return undefined
-  }, [open, projectId])
-
+export function RunLogsModal({
+  open,
+  projectId,
+  projectName,
+  onClose
+}: RunLogsModalProps): React.JSX.Element | null {
   if (!open) return null
-
-  const workspaces = Array.from(new Set(logs.map((l) => l.workspaceId).filter(Boolean)))
-  const filteredLogs = selectedWorkspace === 'all' ? logs : logs.filter((l) => l.workspaceId === selectedWorkspace)
-  const activeRun = logs.find((l) => l.runId === selectedRunId) || filteredLogs[0] || null
-
-  // Group snippets by channel for the active run
-  const channelGroups: Record<string, typeof logs[0]['snippets']> = {}
-  if (activeRun && activeRun.snippets) {
-    for (const snip of activeRun.snippets) {
-      const key = snip.channelName || snip.channelId
-      if (!channelGroups[key]) channelGroups[key] = []
-      channelGroups[key]!.push(snip)
-    }
-  }
-
-  const activeChannelName = selectedChannel || Object.keys(channelGroups)[0] || null
-  const activeSnippets = activeChannelName ? channelGroups[activeChannelName] || [] : []
-
   return (
     <div
       className="platform-settings-backdrop"
       role="presentation"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose()
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose()
       }}
       style={{ zIndex: 1200 }}
     >
@@ -102,312 +445,31 @@ export function RunLogsModal({ open, projectId, projectName, onClose }: RunLogsM
         className="platform-settings-panel"
         role="dialog"
         aria-modal="true"
-        aria-label="Automation Scraping Explorer"
+        aria-label="Scrape logs"
         style={{
           width: '98%',
-          maxWidth: '1440px',
-          height: '95vh',
-          maxHeight: '95vh',
+          maxWidth: 1440,
+          height: '92vh',
           display: 'flex',
           flexDirection: 'column',
           background: '#0b0f19',
-          borderRadius: '12px',
-          border: '1px solid rgba(255, 255, 255, 0.12)',
-          boxShadow: '0 30px 80px rgba(0, 0, 0, 0.9)',
-          overflow: 'hidden'
+          borderRadius: 12,
+          border: '1px solid rgba(255,255,255,0.12)',
+          padding: 16,
+          gap: 12
         }}
       >
-        {/* Top Header */}
-        <header
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            padding: '14px 20px',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-            background: 'rgba(15, 23, 42, 0.7)'
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={{ fontSize: '18px' }}>🚀</span>
-            <div>
-              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 600, color: '#f8fafc' }}>
-                Cosmic Automation &amp; Scraping Explorer
-              </h2>
-              <div style={{ fontSize: '12px', color: '#94a3b8' }}>
-                Project: <b style={{ color: '#38bdf8' }}>{projectName}</b> · Full workspace message captures
-              </div>
-            </div>
+        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 17, color: '#f8fafc' }}>Scrape logs</h2>
+            <div style={{ fontSize: 12, color: '#94a3b8' }}>{projectName}</div>
           </div>
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-            <button type="button" className="btn ghost btn-sm" onClick={() => void fetchLogs()} title="Refresh logs">
-              ⟳ Refresh
-            </button>
-            <button
-              type="button"
-              className="btn ghost btn-sm"
-              onClick={onClose}
-              style={{ fontSize: '14px', padding: '4px 10px' }}
-            >
-              ✕ Close
-            </button>
-          </div>
-        </header>
-
-        {/* Workspace Selector Bar */}
-        <div
-          style={{
-            display: 'flex',
-            gap: '8px',
-            padding: '10px 20px',
-            background: 'rgba(15, 23, 42, 0.4)',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
-            alignItems: 'center'
-          }}
-        >
-          <span style={{ fontSize: '12px', color: '#94a3b8', marginRight: '4px' }}>Filter Workspace:</span>
-          <button
-            type="button"
-            className={`btn btn-sm ${selectedWorkspace === 'all' ? 'primary' : 'ghost'}`}
-            onClick={() => setSelectedWorkspace('all')}
-            style={{ fontSize: '12px', padding: '3px 10px' }}
-          >
-            All Workspaces ({logs.length})
+          <button type="button" className="btn ghost btn-sm" onClick={onClose}>
+            ✕ Close
           </button>
-          {workspaces.map((ws) => (
-            <button
-              key={ws}
-              type="button"
-              className={`btn btn-sm ${selectedWorkspace === ws ? 'primary' : 'ghost'}`}
-              onClick={() => setSelectedWorkspace(ws)}
-              style={{ fontSize: '12px', padding: '3px 10px' }}
-            >
-              {ws} ({logs.filter((l) => l.workspaceId === ws).length})
-            </button>
-          ))}
-        </div>
-
-        {/* Main 2-Column Explorer */}
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-          {/* Left Column: Run History Rail */}
-          <div
-            style={{
-              width: '320px',
-              borderRight: '1px solid rgba(255, 255, 255, 0.08)',
-              overflowY: 'auto',
-              background: 'rgba(15, 23, 42, 0.25)',
-              padding: '12px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '8px'
-            }}
-          >
-            <div style={{ fontSize: '11px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>
-              Scrape Run History ({filteredLogs.length})
-            </div>
-            {filteredLogs.map((log) => {
-              const isSelected = activeRun?.runId === log.runId
-              const dateStr = new Date(log.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-              const isSuccess = log.status === 'connected'
-
-              return (
-                <div
-                  key={log.runId}
-                  onClick={() => {
-                    setSelectedRunId(log.runId)
-                    setSelectedChannel(null)
-                  }}
-                  style={{
-                    padding: '10px 12px',
-                    borderRadius: '6px',
-                    border: `1px solid ${isSelected ? '#38bdf8' : 'rgba(255, 255, 255, 0.06)'}`,
-                    background: isSelected ? 'rgba(56, 189, 248, 0.1)' : 'rgba(255, 255, 255, 0.02)',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '4px',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span
-                      style={{
-                        fontSize: '10px',
-                        fontWeight: 600,
-                        padding: '1px 6px',
-                        borderRadius: '3px',
-                        background: isSuccess ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                        color: isSuccess ? '#22c55e' : '#ef4444'
-                      }}
-                    >
-                      {isSuccess ? 'Success' : log.status}
-                    </span>
-                    <span style={{ fontSize: '11px', color: '#94a3b8' }}>{dateStr}</span>
-                  </div>
-
-                  <div style={{ fontSize: '12px', fontWeight: 500, color: '#f8fafc', marginTop: '2px' }}>
-                    {log.workspaceId}
-                  </div>
-
-                  <div style={{ fontSize: '11px', display: 'flex', justifyContent: 'space-between', color: '#64748b' }}>
-                    <span>{log.channelsRead} channels read</span>
-                    <span style={{ color: log.newMessages > 0 ? '#22c55e' : 'inherit', fontWeight: log.newMessages > 0 ? 600 : 400 }}>
-                      +{log.newMessages} msgs
-                    </span>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-
-          {/* Right Column: Scraped Channels & Messages Detail */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            {activeRun ? (
-              <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-                {/* Run Metadata Strip */}
-                <div
-                  style={{
-                    padding: '14px 20px',
-                    borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-                    background: 'rgba(255, 255, 255, 0.02)',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center'
-                  }}
-                >
-                  <div style={{ display: 'flex', gap: '20px', alignItems: 'center', fontSize: '13px' }}>
-                    <span>Workspace: <b style={{ color: '#38bdf8' }}>{activeRun.workspaceId}</b></span>
-                    <span>Channels Scraped: <b>{activeRun.channelsRead}</b></span>
-                    <span>New Messages: <b style={{ color: activeRun.newMessages > 0 ? '#22c55e' : '#f8fafc' }}>{activeRun.newMessages}</b></span>
-                    <span>Duration: <b>{(activeRun.durationMs / 1000).toFixed(1)}s</b></span>
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#94a3b8' }}>
-                    Run ID: {activeRun.runId} · {new Date(activeRun.ts).toLocaleString()}
-                  </div>
-                </div>
-
-                {/* Error Banner if any */}
-                {(activeRun.error || activeRun.errorCode) && (
-                  <div
-                    style={{
-                      margin: '12px 20px 0 20px',
-                      fontSize: '12px',
-                      color: '#f87171',
-                      background: 'rgba(239, 68, 68, 0.08)',
-                      padding: '8px 12px',
-                      borderRadius: '6px',
-                      borderLeft: '4px solid #ef4444'
-                    }}
-                  >
-                    <b>Error occurred:</b> {activeRun.error || activeRun.errorCode}
-                  </div>
-                )}
-
-                {/* Channel Selector Cards */}
-                <div style={{ padding: '16px 20px 8px 20px' }}>
-                  <div style={{ fontSize: '11px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', marginBottom: '8px' }}>
-                    Select Scraped Channel to View Messages:
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px' }}>
-                    {Object.keys(channelGroups).length === 0 ? (
-                      <div style={{ fontSize: '12px', color: '#64748b' }}>No messages captured in this run.</div>
-                    ) : (
-                      Object.entries(channelGroups).map(([chName, msgs]) => {
-                        const isSelected = activeChannelName === chName
-                        return (
-                          <button
-                            key={chName}
-                            type="button"
-                            onClick={() => setSelectedChannel(chName)}
-                            style={{
-                              padding: '6px 12px',
-                              borderRadius: '6px',
-                              border: `1px solid ${isSelected ? '#38bdf8' : 'rgba(255, 255, 255, 0.1)'}`,
-                              background: isSelected ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255, 255, 255, 0.04)',
-                              color: isSelected ? '#38bdf8' : '#f8fafc',
-                              fontSize: '12px',
-                              fontWeight: 500,
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '6px',
-                              whiteSpace: 'nowrap'
-                            }}
-                          >
-                            <span>#{chName}</span>
-                            <span
-                              style={{
-                                fontSize: '10px',
-                                background: isSelected ? '#0284c7' : 'rgba(255, 255, 255, 0.1)',
-                                color: '#ffffff',
-                                padding: '1px 5px',
-                                borderRadius: '10px'
-                              }}
-                            >
-                              {msgs?.length || 0}
-                            </span>
-                          </button>
-                        )
-                      })
-                    )}
-                  </div>
-                </div>
-
-                {/* Messages Feed View */}
-                <div style={{ flex: 1, overflowY: 'auto', padding: '12px 20px 20px 20px' }}>
-                  {activeSnippets.length === 0 ? (
-                    <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>
-                      No message snippets recorded for this channel in this run.
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      {activeSnippets.map((snip, idx) => (
-                        <div
-                          key={idx}
-                          style={{
-                            padding: '12px 16px',
-                            background: 'rgba(255, 255, 255, 0.03)',
-                            border: '1px solid rgba(255, 255, 255, 0.06)',
-                            borderRadius: '8px',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '4px'
-                          }}
-                        >
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <span style={{ fontWeight: 600, color: '#f8fafc', fontSize: '13px' }}>
-                                {snip.sender}
-                              </span>
-                              <span style={{ fontSize: '11px', color: '#38bdf8' }}>
-                                #{snip.channelName || snip.channelId}
-                              </span>
-                            </div>
-                            <span style={{ fontSize: '11px', color: '#64748b' }}>{snip.ts}</span>
-                          </div>
-                          <div
-                            style={{
-                              fontSize: '13px',
-                              color: '#cbd5e1',
-                              lineHeight: 1.5,
-                              whiteSpace: 'pre-wrap',
-                              marginTop: '2px'
-                            }}
-                          >
-                            {snip.snippet}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>
-                Select a scrape run from the left panel to inspect captured messages.
-              </div>
-            )}
-          </div>
+        </header>
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <ScrapeLogExplorer projectId={projectId} projectName={projectName} />
         </div>
       </div>
     </div>

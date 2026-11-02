@@ -412,15 +412,27 @@ const api: IpcApi = {
       }>>,
     checkCardAuth: (payload: { projectId: string; appId?: AppId }) =>
       ipcRenderer.invoke(IpcChannels.DashboardCardCheckAuth, payload) as Promise<boolean>,
-    syncSource: (payload: { projectId: string; sourceId?: string }) =>
+    syncSource: (payload) =>
       ipcRenderer.invoke(IpcChannels.DashboardSyncSource, payload) as Promise<{
+        runId: string
         channelsRead: number
         newMessages: number
-        status: string
+        status: 'success' | 'partial' | 'error' | 'stopped'
         error?: string
       }>,
-    getRunLogs: (payload: { projectId: string; limit?: number }) =>
-      ipcRenderer.invoke(IpcChannels.DashboardGetRunLogs, payload) as Promise<any>,
+    cancelScrape: (payload: { projectId?: string; runId?: string }) =>
+      ipcRenderer.invoke(IpcChannels.DashboardCancelScrape, payload) as Promise<{
+        ok: boolean
+        cancelled: number
+      }>,
+    setSourceSchedule: (payload: import('../shared/dashboard-contract').DashboardSourceSchedulePayload) =>
+      ipcRenderer.invoke(IpcChannels.DashboardSetSourceSchedule, payload) as Promise<
+        import('../shared/dashboard-contract').DashboardSourceScheduleState
+      >,
+    getRunLogs: (payload: { projectId: string; limit?: number; status?: string; trigger?: string }) =>
+      ipcRenderer.invoke(IpcChannels.DashboardGetRunLogs, payload),
+    getScrapeRuns: (payload?: { projectId?: string; limit?: number; status?: string; trigger?: string }) =>
+      ipcRenderer.invoke(IpcChannels.DashboardGetScrapeRuns, payload ?? {}),
     startWatchLive: (payload: {
       projectId: string
       bounds: { x: number; y: number; width: number; height: number }

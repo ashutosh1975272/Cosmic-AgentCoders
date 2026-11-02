@@ -4,7 +4,9 @@ import type {
   DashboardScheduleKind,
   DashboardScheduleRun,
   DashboardScheduleRunSource,
-  DashboardSchedulesState
+  DashboardSchedulesState,
+  DashboardSourceSchedulePayload,
+  DashboardSourceScheduleState
 } from '../../../../shared/dashboard-contract'
 
 const INTERVALS = [1, 5, 15, 30, 60] as const
@@ -125,6 +127,25 @@ export default function SchedulesPage(): React.ReactElement {
     []
   )
 
+  const updateSource = useCallback(
+    async (
+      source: DashboardSourceScheduleState,
+      patch: Omit<DashboardSourceSchedulePayload, 'projectId' | 'sourceId'>
+    ) => {
+      setBusy(true)
+      setError(null)
+      try {
+        await window.api.dashboard.setSourceSchedule({ ...patch, projectId: source.projectId, sourceId: source.sourceId })
+        setState(await window.api.dashboard.getSchedules())
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not save the source schedule.')
+      } finally {
+        setBusy(false)
+      }
+    },
+    []
+  )
+
   const runNow = useCallback(async (kind: 'slack-sync' | 'daily-recheck') => {
     setBusy(true)
     setError(null)
@@ -155,6 +176,72 @@ export default function SchedulesPage(): React.ReactElement {
         Schedules run for every card while Cosmic is open. Nothing runs in the background after the
         app quits.
       </p>
+
+      {(state.sources ?? []).length > 0 ? (
+        <section className="sched-card">
+          <div className="sched-card-head">
+            <div>
+              <h5>Card sources</h5>
+              <p className="dash-muted">
+                Each browser source scrapes on its own cadence. Turning a source off stops automatic
+                runs but keeps manual Scrape available on the card.
+              </p>
+            </div>
+          </div>
+          <ul className="sched-runs">
+            {(state.sources ?? []).map((source) => (
+              <li className="sched-run" key={source.sourceId}>
+                <div className="sched-run-head">
+                  <span className={`sched-status ${source.enabled && source.scheduleEnabled ? 'is-ok' : 'is-skipped'}`}>
+                    {source.running
+                      ? 'running'
+                      : !source.enabled
+                        ? 'source off'
+                        : source.scheduleEnabled
+                          ? 'active'
+                          : 'manual only'}
+                  </span>
+                  <span className="sched-run-kind">{source.workspaceName}</span>
+                  <span className="sched-run-time">{source.lastStatus ?? '—'}</span>
+                </div>
+                <p className="sched-run-detail">{source.projectName}</p>
+                <div className="sched-run-meta" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span>Last: {age(source.lastRunAt, now)}</span>
+                  <span>Next: {countdown(source.nextRunAt, now)}</span>
+                  <label className="sched-field">
+                    <span>Every</span>
+                    <select
+                      value={source.intervalMinutes}
+                      disabled={disabled}
+                      onChange={(event) =>
+                        void updateSource(source, {
+                          scheduleIntervalMinutes: Number(event.target.value) as 1 | 5 | 15 | 30 | 60
+                        })
+                      }
+                    >
+                      {INTERVALS.map((minutes) => (
+                        <option key={minutes} value={minutes}>
+                          {minutes} min
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className="dash-link"
+                    disabled={disabled}
+                    onClick={() =>
+                      void updateSource(source, { scheduleEnabled: !source.scheduleEnabled })
+                    }
+                  >
+                    {source.scheduleEnabled ? 'Pause auto' : 'Enable auto'}
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <section className="sched-card">
         <div className="sched-card-head">

@@ -137,6 +137,15 @@ export default function WorkspaceContent({
     }
   }, [project?.id, authBusyApp])
 
+  useEffect(() => {
+    if (nav.selection !== 'm:schedules') return
+    const scheduled = (project.sources ?? []).some(
+      (source) =>
+        source.kind === 'browser' && source.enabled !== false && source.scheduleEnabled !== false
+    )
+    if (!scheduled) onSelect('m:project')
+  }, [nav.selection, project.sources, onSelect])
+
   // Resolve genuine Slack team ID strictly for THIS card / profile, without cross-profile leakage
   const effectiveSlackTeamId = useMemo(() => {
     if (project?.teamId && /^T[A-Z0-9]+$/i.test(project.teamId)) {

@@ -11,10 +11,11 @@ export const SLACK_SELECTORS = {
   challengeIndicator:
     'input[name="password"], [data-qa="signin_password_input"], .p-signin_password, [data-qa="two_factor_auth_input"], #challenge, iframe[src*="recaptcha"]',
 
-  // Channel sidebar elements (Only public & private channels — personal DMs excluded)
+  // Channel + DM sidebar elements. DMs are included but flagged by the reader
+  // script (`isDm`); the sync engine decides whether they are in scope.
   channelListContainer: '[data-qa="channel_sidebar_name_page"], .p-channel_sidebar__list',
   channelItem:
-    '[data-qa="channel_sidebar_name_page"] [role="treeitem"]:not([data-qa-channel-sidebar-item="user"]):not(.p-channel_sidebar__item--user), .p-channel_sidebar__channel:not(.p-channel_sidebar__item--user), [data-qa-channel-sidebar-item="true"]:not([data-qa-channel-sidebar-item="user"]), [data-qa-channel-sidebar-channel-id]',
+    '[data-qa="channel_sidebar_name_page"] [role="treeitem"], .p-channel_sidebar__channel, .p-channel_sidebar__item--user, [data-qa-channel-sidebar-item="true"], [data-qa-channel-sidebar-channel-id]',
   channelName: '.p-channel_sidebar__name, [data-qa="channel_sidebar_name"], span[data-qa="channel_sidebar_name"]',
   channelUnreadBadge:
     '.p-channel_sidebar__badge, [data-qa="channel-sidebar-unread-badge"], .c-mention_badge',

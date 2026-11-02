@@ -63,10 +63,18 @@ export interface DashboardMonitor {
   channelName: string
 }
 
+export type ProjectSourceChannelKind = 'public' | 'private' | 'dm' | 'group-dm'
+
+/** Effective at scrape time: card override wins, otherwise the global setting. */
+export type ProjectSourceDmPolicy = 'inherit' | 'on' | 'off'
+
 export interface ProjectSourceChannel {
   id: string
   name: string
   isPrivate?: boolean
+  isDm?: boolean
+  /** Explicit kind; kept optional so older stored sources stay valid. */
+  kind?: ProjectSourceChannelKind
   enabled?: boolean
 }
 
@@ -94,11 +102,146 @@ export interface ProjectSource {
   status?: ProjectSourceStatus
   lastReadAt?: string
   lastReadNewCount?: number
+  /** Per-source auto-scrape. Absent = legacy behaviour (enabled, 5 min). */
+  scheduleEnabled?: boolean
+  scheduleIntervalMinutes?: DashboardScheduleInterval
+  /** Hours of history a run tries to cover. Default 6. */
+  backfillHours?: number
+  /** DM scraping override; effective policy = this, else global AppSettings. */
+  allowDms?: ProjectSourceDmPolicy
+  /** Persisted sender allow-list (display names). Empty = everyone. */
+  selectedPeople?: string[]
+  lastScrapeAt?: string
+  lastScrapeStatus?: ScrapeRunStatus
+  lastScrapeError?: string
+  lastScrapeRunId?: string
   createdAt: string
   updatedAt: string
 }
 
 export type ProjectWorkflowStatus = 'active' | 'stopped' | 'removed' | 'completed'
+
+export type ScrapeTrigger = 'scheduled' | 'manual'
+export type ScrapeRunStatus = 'success' | 'partial' | 'error' | 'stopped'
+export type ScrapeChannelKind = 'public' | 'private' | 'dm' | 'group-dm'
+
+export interface ScrapeRunWindow {
+  /** Slack ts (or ISO for token sources) the window starts at. */
+  startTs: string
+  /** Slack ts (or ISO) the window ends at. */
+  endTs: string
+  backfillHours: number
+  /** Seconds of history the reader could not reach (scroll/DOM cap). */
+  gapSeconds?: number
+}
+
+export interface ScrapeRunChannel {
+  channelId: string
+  channelName: string
+  kind: ScrapeChannelKind
+  messagesRead: number
+  newMessages: number
+  status: 'read' | 'empty' | 'skipped' | 'error'
+  skippedReason?: string
+  error?: string
+}
+
+export interface ScrapeRunPerson {
+  name: string
+  messages: number
+}
+
+export interface ScrapeRunFilters {
+  includeKinds: ScrapeChannelKind[]
+  channelIds?: string[]
+  people?: string[]
+}
+
+export interface ScrapeRunMessageSnippet {
+  channelId: string
+  channelName?: string
+  sender: string
+  ts: string
+  snippet: string
+}
+
+/** One persisted audit row for a scrape (scheduled or manual). */
+export interface ScrapeRunLog {
+  runId: string
+  ts: string
+  startedAt: string
+  trigger: ScrapeTrigger
+  projectId: string
+  projectName: string
+  sourceId: string
+  sourceKind: 'token' | 'browser'
+  workspaceId: string
+  workspaceName: string
+  channelsRead: number
+  newMessages: number
+  snippets?: ScrapeRunMessageSnippet[]
+  window: ScrapeRunWindow
+  channels: ScrapeRunChannel[]
+  people: ScrapeRunPerson[]
+  filters: ScrapeRunFilters
+  durationMs: number
+  llmCalls: number
+  status: ScrapeRunStatus
+  error?: string
+  errorCode?: string
+}
+
+export interface ScrapeRunQuery {
+  projectId?: string
+  limit?: number
+  status?: ScrapeRunStatus | 'all'
+  trigger?: ScrapeTrigger | 'all'
+}
+
+/** Per-run overrides. Never persisted unless the user saves them. */
+export interface DashboardScrapeOptions {
+  channelIds?: string[]
+  people?: string[]
+  includePublic?: boolean
+  includePrivate?: boolean
+  includeDms?: boolean
+}
+
+export interface DashboardScrapePayload {
+  projectId: string
+  sourceId?: string
+  trigger?: ScrapeTrigger
+  options?: DashboardScrapeOptions
+}
+
+export interface DashboardCancelScrapePayload {
+  projectId?: string
+  runId?: string
+}
+
+export interface DashboardSourceSchedulePayload {
+  projectId: string
+  sourceId: string
+  scheduleEnabled?: boolean
+  scheduleIntervalMinutes?: DashboardScheduleInterval
+  backfillHours?: number
+  allowDms?: ProjectSourceDmPolicy
+  selectedPeople?: string[]
+}
+
+export interface DashboardSourceScheduleState {
+  projectId: string
+  projectName: string
+  sourceId: string
+  workspaceName: string
+  enabled: boolean
+  scheduleEnabled: boolean
+  intervalMinutes: DashboardScheduleInterval
+  lastRunAt: string | null
+  lastStatus?: ScrapeRunStatus
+  nextRunAt: string | null
+  running: boolean
+}
 
 export interface DashboardProject {
   id: string
@@ -278,6 +421,8 @@ export interface DashboardSchedulesState {
   nextDailyRunAt: string | null
   running: boolean
   runs: DashboardScheduleRun[]
+  /** Per-source schedules derived from each card's `sources[]`. */
+  sources?: DashboardSourceScheduleState[]
 }
 
 export interface DashboardUpdateSchedulePayload {

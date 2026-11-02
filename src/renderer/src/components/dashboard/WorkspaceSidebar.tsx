@@ -338,26 +338,38 @@ export default function WorkspaceSidebar({
   }, [globalProfileGroups])
 
   const activeSections = useMemo(() => {
+    const scheduled = (sources ?? []).some(
+      (source) =>
+        source.kind === 'browser' && source.enabled !== false && source.scheduleEnabled !== false
+    )
+    const keep = (sections: typeof NAV_SECTIONS): typeof NAV_SECTIONS =>
+      sections.map((section) => ({
+        ...section,
+        rows: section.rows.filter((row) => row.id !== 'm:schedules' || scheduled)
+      }))
+
     if (isMinimal) {
-      return NAV_SECTIONS.filter((s) => s.key === 'slack')
+      return keep(NAV_SECTIONS.filter((s) => s.key === 'slack'))
     }
     if (layout.mode === 'full') {
-      return NAV_SECTIONS
+      return keep(NAV_SECTIONS)
     }
     // custom layout mode
     const hidden = new Set(layout.custom.hiddenSections)
     const order = layout.custom.sectionOrder
     const visible = NAV_SECTIONS.filter((s) => !hidden.has(s.key))
-    if (!order || order.length === 0) return visible
-    return [...visible].sort((a, b) => {
-      const idxA = order.indexOf(a.key)
-      const idxB = order.indexOf(b.key)
-      if (idxA === -1 && idxB === -1) return 0
-      if (idxA === -1) return 1
-      if (idxB === -1) return -1
-      return idxA - idxB
-    })
-  }, [isMinimal, layout])
+    if (!order || order.length === 0) return keep(visible)
+    return keep(
+      [...visible].sort((a, b) => {
+        const idxA = order.indexOf(a.key)
+        const idxB = order.indexOf(b.key)
+        if (idxA === -1 && idxB === -1) return 0
+        if (idxA === -1) return 1
+        if (idxB === -1) return -1
+        return idxA - idxB
+      })
+    )
+  }, [isMinimal, layout, sources])
 
   const rowActive = (row: NavRow): boolean =>
     nav.openGroup === sectionOfSelection(row.id) && nav.selection === row.id

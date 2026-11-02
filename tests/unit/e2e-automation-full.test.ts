@@ -630,19 +630,27 @@ describe('[L8] RunLogStore', () => {
   })
 
   function makeEntry(overrides: Partial<RunLogEntry> = {}): RunLogEntry {
+    const ts = new Date().toISOString()
     return {
       runId: `run-${randomUUID()}`,
-      ts: new Date().toISOString(),
+      ts,
+      startedAt: ts,
       trigger: 'manual',
       projectId: 'proj-1',
+      projectName: 'Project 1',
       sourceId: 'src-1',
       sourceKind: 'browser',
       workspaceId: 'T123',
+      workspaceName: 'Acme',
       channelsRead: 3,
       newMessages: 12,
+      window: { startTs: '0', endTs: '1', backfillHours: 6 },
+      channels: [],
+      people: [],
+      filters: { includeKinds: ['public', 'private'] },
       durationMs: 1234,
       llmCalls: 0,
-      status: 'connected',
+      status: 'success',
       ...overrides
     }
   }
@@ -655,7 +663,7 @@ describe('[L8] RunLogStore', () => {
     expect(read[0]!.runId).toBe(entry.runId)
     expect(read[0]!.channelsRead).toBe(3)
     expect(read[0]!.newMessages).toBe(12)
-    expect(read[0]!.status).toBe('connected')
+    expect(read[0]!.status).toBe('success')
   })
 
   it('returns entries in descending order (most recent first)', async () => {
@@ -672,7 +680,7 @@ describe('[L8] RunLogStore', () => {
     const entry = makeEntry({
       snippets: [{ channelId: 'C1', channelName: 'general', sender: 'Priya', ts: '1730000000.1', snippet: 'Deploy done.' }],
       errorCode: undefined,
-      status: 'connected'
+      status: 'success'
     })
     await store.append(entry)
     const [read] = await store.read('proj-1')
@@ -706,10 +714,10 @@ describe('[L8] RunLogStore', () => {
   })
 
   it('appends successfully on the error path (adapter-broken)', async () => {
-    const entry = makeEntry({ status: 'adapter-broken', errorCode: 'network timeout' })
+    const entry = makeEntry({ status: 'error', errorCode: 'network timeout' })
     await store.append(entry)
     const [read] = await store.read('proj-1')
-    expect(read!.status).toBe('adapter-broken')
+    expect(read!.status).toBe('error')
     expect(read!.errorCode).toBe('network timeout')
   })
 })
@@ -821,7 +829,7 @@ describe('[L9+L10] DashboardSyncEngine.syncProjectSource — E2E scrape pipeline
     expect(logs.length).toBeGreaterThan(0)
     expect(logs[0]!.sourceKind).toBe('browser')
     expect(logs[0]!.channelsRead).toBe(2)
-    expect(logs[0]!.status).toBe('connected')
+    expect(logs[0]!.status).toBe('success')
 
     vi.restoreAllMocks()
   })
@@ -844,8 +852,8 @@ describe('[L9+L10] DashboardSyncEngine.syncProjectSource — E2E scrape pipeline
     const logStore = new RunLogStore({ rootDir: tmpDir })
     const logs = await logStore.read('proj-e2e')
     expect(logs.length).toBeGreaterThan(0)
-    expect(logs[0]!.status).toBe('adapter-broken')
-    expect(logs[0]!.errorCode).toContain('renderer crashed')
+    expect(['error', 'partial']).toContain(logs[0]!.status)
+    expect(logs[0]!.error ?? logs[0]!.errorCode ?? '').toContain('renderer crashed')
 
     vi.restoreAllMocks()
   })

@@ -256,6 +256,23 @@ export default function ProjectSettingsTab({
     setTimeout(() => setSourceNotice(null), 3000)
   }
 
+  const handleUpdateSourceSettings = async (
+    sourceId: string,
+    patch: Partial<ProjectSource>
+  ): Promise<void> => {
+    const updatedSources = (project.sources ?? []).map((source) =>
+      source.id === sourceId
+        ? { ...source, ...patch, updatedAt: new Date().toISOString() }
+        : source
+    )
+    await useDashboardStore.getState().upsertProject({
+      ...project,
+      sources: updatedSources
+    })
+    setSourceNotice('Scrape settings saved')
+    setTimeout(() => setSourceNotice(null), 2500)
+  }
+
   const handleAddWorkspaceSourceDirect = async (
     targetProfileId: string,
     teamId: string,
@@ -780,6 +797,131 @@ export default function ProjectSettingsTab({
                           </div>
                         </div>
 
+                        {/* Per-source scrape policy (schedule, DMs, backfill, people) */}
+                        {src.kind === 'browser' && (
+                          <div
+                            style={{
+                              marginTop: 6,
+                              padding: '10px 14px',
+                              background: 'rgba(255, 255, 255, 0.02)',
+                              border: '1px solid var(--border)',
+                              borderRadius: 8,
+                              display: 'flex',
+                              gap: 14,
+                              flexWrap: 'wrap',
+                              alignItems: 'center',
+                              fontSize: 12
+                            }}
+                          >
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                              <input
+                                type="checkbox"
+                                checked={src.scheduleEnabled !== false}
+                                onChange={(e) =>
+                                  void handleUpdateSourceSettings(src.id, {
+                                    scheduleEnabled: e.target.checked
+                                  })
+                                }
+                              />
+                              Auto-scrape
+                            </label>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              Every
+                              <select
+                                value={src.scheduleIntervalMinutes ?? 5}
+                                disabled={src.scheduleEnabled === false}
+                                onChange={(e) =>
+                                  void handleUpdateSourceSettings(src.id, {
+                                    scheduleIntervalMinutes: Number(
+                                      e.target.value
+                                    ) as ProjectSource['scheduleIntervalMinutes']
+                                  })
+                                }
+                              >
+                                {[1, 5, 15, 30, 60].map((minutes) => (
+                                  <option key={minutes} value={minutes}>
+                                    {minutes} min
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              DMs
+                              <select
+                                value={src.allowDms ?? 'inherit'}
+                                onChange={(e) =>
+                                  void handleUpdateSourceSettings(src.id, {
+                                    allowDms: e.target.value as ProjectSource['allowDms']
+                                  })
+                                }
+                              >
+                                <option value="inherit">Inherit global</option>
+                                <option value="on">Include</option>
+                                <option value="off">Exclude</option>
+                              </select>
+                            </label>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              Backfill
+                              <select
+                                value={src.backfillHours ?? 6}
+                                onChange={(e) =>
+                                  void handleUpdateSourceSettings(src.id, {
+                                    backfillHours: Number(e.target.value)
+                                  })
+                                }
+                              >
+                                {[1, 3, 6, 12, 24].map((hours) => (
+                                  <option key={hours} value={hours}>
+                                    {hours}h
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 220 }}>
+                              People
+                              <input
+                                type="text"
+                                defaultValue={(src.selectedPeople ?? []).join(', ')}
+                                placeholder="Everyone (comma-separated names)"
+                                style={{ flex: 1, minWidth: 150 }}
+                                onBlur={(e) => {
+                                  const people = e.target.value
+                                    .split(',')
+                                    .map((name) => name.trim())
+                                    .filter(Boolean)
+                                  void handleUpdateSourceSettings(src.id, {
+                                    selectedPeople: people.length > 0 ? people : undefined
+                                  })
+                                }}
+                              />
+                            </label>
+                            {src.lastScrapeStatus ? (
+                              <span
+                                style={{
+                                  fontSize: 11,
+                                  padding: '2px 8px',
+                                  borderRadius: 10,
+                                  background:
+                                    src.lastScrapeStatus === 'success'
+                                      ? 'rgba(34, 197, 94, 0.15)'
+                                      : src.lastScrapeStatus === 'error'
+                                        ? 'rgba(239, 68, 68, 0.15)'
+                                        : 'rgba(251, 191, 36, 0.15)',
+                                  color:
+                                    src.lastScrapeStatus === 'success'
+                                      ? '#4ade80'
+                                      : src.lastScrapeStatus === 'error'
+                                        ? '#f87171'
+                                        : '#fbbf24'
+                                }}
+                                title={src.lastScrapeError ?? ''}
+                              >
+                                last: {src.lastScrapeStatus}
+                              </span>
+                            ) : null}
+                          </div>
+                        )}
+
                         {/* Discovered Channels Checklist for Browser Source */}
                         {src.kind === 'browser' && src.channels && src.channels.length > 0 && (
                           <div
@@ -824,7 +966,12 @@ export default function ProjectSettingsTab({
                                     onChange={() => void handleToggleChannelEnabled(src.id, ch.id, ch.enabled !== false)}
                                   />
                                   <span>
-                                    {ch.isPrivate ? '🔒' : '#'} {ch.name || ch.id}
+                                    {ch.isDm || ch.kind === 'dm'
+                                      ? '💬'
+                                      : ch.isPrivate || ch.kind === 'private'
+                                        ? '🔒'
+                                        : '#'}{' '}
+                                    {ch.name || ch.id}
                                   </span>
                                 </label>
                               ))}

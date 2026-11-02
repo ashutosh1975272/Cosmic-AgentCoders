@@ -11,10 +11,12 @@
  */
 
 import type {
+  DashboardProject,
   DashboardScheduleRun,
   DashboardScheduleRunSource,
   DashboardScheduleSettings,
   DashboardSchedulesState,
+  DashboardSourceScheduleState,
   DashboardUpdateSchedulePayload
 } from '../../shared/dashboard-contract'
 import type { DashboardProjectSnapshot } from '../../shared/dashboard-contract'
@@ -35,11 +37,15 @@ export interface ScheduleStoreLike {
   read(): Promise<StoredSchedules>
   update(patch: DashboardUpdateSchedulePayload): Promise<StoredSchedules>
   recordRun(run: DashboardScheduleRun): Promise<StoredSchedules>
+  recordSourceRun?(sourceId: string, atIso: string): Promise<void>
+  pruneSourceRuns?(activeSourceIds: string[]): Promise<void>
 }
 
 export interface DashboardSchedulerDeps {
   /** Runs the morning re-ground for every project that has a token. */
   runDailyRecheck?: () => Promise<DailyRecheckResult>
+  /** Card sources, so the per-source scheduler can read schedule fields. */
+  listProjects?: () => Promise<DashboardProject[]>
   /** Called after every state transition so the renderer can refresh. */
   onChanged?: (state: DashboardSchedulesState) => void
   /** Injectable clock for tests. */
@@ -57,6 +63,8 @@ export class DashboardScheduler {
 
   private slackTimer: ReturnType<typeof setTimeout> | null = null
   private dailyTimer: ReturnType<typeof setTimeout> | null = null
+  private sourceTimer: ReturnType<typeof setInterval> | null = null
+  private sourcesRunning = false
   private nextAt: number | null = null
   private nextDailyAt: number | null = null
   private running = false
@@ -82,22 +90,28 @@ export class DashboardScheduler {
     const stored = await this.store.read()
     this.armDaily(stored.settings)
     this.armSlack(stored, this.catchUpDue(stored))
+    this.armSources()
   }
 
   stop(): void {
     this.started = false
     if (this.slackTimer) clearTimeout(this.slackTimer)
     if (this.dailyTimer) clearTimeout(this.dailyTimer)
+    if (this.sourceTimer) clearInterval(this.sourceTimer)
     this.slackTimer = null
     this.dailyTimer = null
+    this.sourceTimer = null
     this.nextAt = null
     this.nextDailyAt = null
     this.running = false
+    this.sourcesRunning = false
   }
 
   async getState(): Promise<DashboardSchedulesState> {
     const stored = await this.store.read()
-    return this.stateOf(stored)
+    const state = this.stateOf(stored)
+    state.sources = await this.buildSourceStates(stored)
+    return state
   }
 
   async updateSettings(patch: DashboardUpdateSchedulePayload): Promise<DashboardSchedulesState> {
@@ -145,6 +159,110 @@ export class DashboardScheduler {
     )
   }
 
+  /** Per-source cadence: tick often, scrape only what is due. */
+  private armSources(): void {
+    if (this.sourceTimer) clearInterval(this.sourceTimer)
+    this.sourceTimer = setInterval(() => void this.tickSources(), 30_000)
+    void this.tickSources()
+  }
+
+  private async tickSources(): Promise<void> {
+    if (!this.started || this.sourcesRunning || !this.deps.listProjects) return
+    this.sourcesRunning = true
+    try {
+      const projects = await this.deps.listProjects()
+      const stored = await this.store.read()
+      const activeIds: string[] = []
+
+      for (const project of projects) {
+        for (const source of project.sources ?? []) {
+          if (source.kind !== 'browser' || source.enabled === false) continue
+          if (source.scheduleEnabled === false) continue
+          if (!source.profileId || !source.workspaceId) continue
+
+          activeIds.push(source.id)
+          if (this.engine.isSourceRunning(source.id)) continue
+
+          const intervalMs = (source.scheduleIntervalMinutes ?? 5) * 60_000
+          const last =
+            stored.sourceLastRunAt?.[source.id] ??
+            source.lastScrapeAt ??
+            source.lastReadAt ??
+            null
+          const lastMs = last ? new Date(last).getTime() : null
+          const due = lastMs === null || !Number.isFinite(lastMs) || this.now() >= lastMs + intervalMs
+          if (!due) continue
+
+          const result = await this.engine.syncProjectSource(project.id, source.id, {
+            trigger: 'scheduled'
+          })
+          await this.store.recordSourceRun?.(
+            source.id,
+            new Date(this.now()).toISOString()
+          )
+          if (result.status === 'error') {
+            await this.store.recordRun({
+              id: this.newId(),
+              kind: 'slack-sync',
+              startedAt: new Date(this.now()).toISOString(),
+              finishedAt: new Date(this.now()).toISOString(),
+              status: 'error',
+              detail: `Scheduled scrape failed for ${source.workspaceName || source.workspaceId}: ${result.error ?? 'unknown error'}`,
+              projects: 1
+            })
+          }
+        }
+      }
+
+      await this.store.pruneSourceRuns?.(activeIds)
+      await this.emit()
+    } catch {
+      // A malformed project must not kill the scheduler loop.
+    } finally {
+      this.sourcesRunning = false
+    }
+  }
+
+  private async buildSourceStates(
+    stored: StoredSchedules
+  ): Promise<DashboardSourceScheduleState[]> {
+    if (!this.deps.listProjects) return []
+    const projects = await this.deps.listProjects()
+    const out: DashboardSourceScheduleState[] = []
+    for (const project of projects) {
+      for (const source of project.sources ?? []) {
+        if (source.kind !== 'browser') continue
+        const intervalMinutes = source.scheduleIntervalMinutes ?? 5
+        const lastRunAt =
+          stored.sourceLastRunAt?.[source.id] ??
+          source.lastScrapeAt ??
+          source.lastReadAt ??
+          null
+        const scheduleEnabled = source.scheduleEnabled ?? true
+        out.push({
+          projectId: project.id,
+          projectName: project.name,
+          sourceId: source.id,
+          workspaceName: source.workspaceName || source.workspaceId,
+          enabled: source.enabled !== false,
+          scheduleEnabled,
+          intervalMinutes,
+          lastRunAt,
+          lastStatus: source.lastScrapeStatus,
+          nextRunAt:
+            scheduleEnabled && source.enabled !== false
+              ? new Date(
+                  (lastRunAt ? new Date(lastRunAt).getTime() : this.now()) +
+                    intervalMinutes * 60_000
+                ).toISOString()
+              : null,
+          running: this.engine.isSourceRunning(source.id)
+        })
+      }
+    }
+    return out
+  }
+
   private armSlack(stored: StoredSchedules, immediate: boolean): void {
     if (this.slackTimer) clearTimeout(this.slackTimer)
     this.slackTimer = null
@@ -180,7 +298,7 @@ export class DashboardScheduler {
     await this.emit()
     const startedAt = new Date(this.now()).toISOString()
     try {
-      const results = await this.engine.syncAll()
+      const results = await this.engine.syncAll({ includeBrowserSources: false })
       const finishedAt = new Date(this.now()).toISOString()
       const run = this.slackRun(trigger, results, startedAt, finishedAt)
       await this.store.recordRun(run)

@@ -7,7 +7,23 @@ import { deduplicateMessages, normalizeScrapedMessage } from './normalizer'
 import type { DashboardStoredMessage } from '../dashboard/delta-store'
 
 export interface ScrapeStepEvent {
-  type: 'navigate' | 'scroll' | 'highlight' | 'status' | 'run_finished' | 'run_failed' | 'paused' | 'waiting_for_user' | 'challenge' | 'read' | 'queued'
+  type:
+    | 'navigate'
+    | 'scroll'
+    | 'highlight'
+    | 'status'
+    | 'run_started'
+    | 'run_finished'
+    | 'run_failed'
+    | 'run_cancelled'
+    | 'paused'
+    | 'waiting_for_user'
+    | 'challenge'
+    | 'read'
+    | 'queued'
+  runId?: string
+  projectId?: string
+  sourceId?: string
   workspaceName?: string
   channelName?: string
   scrollIndex?: number
@@ -27,6 +43,26 @@ export interface SlackReaderOptions {
   projectId?: string
   existingView?: WebContentsView | null
   onEvent?: (event: ScrapeStepEvent) => void
+}
+
+export interface ReadChannelWindowOptions {
+  /** Epoch-seconds floor; 0 = only what is currently visible. */
+  sinceTs?: number
+  /** Hard cap on scroll-back steps before reporting a gap. */
+  maxScrolls?: number
+  /** Hard cap on collected messages per channel. */
+  maxMessages?: number
+  signal?: AbortSignal
+}
+
+export interface ReadChannelWindowResult {
+  messages: DashboardStoredMessage[]
+  /** Oldest Slack ts reached (epoch seconds), or null when nothing was read. */
+  oldestTs: number | null
+  /** Seconds of requested history the DOM/scroll cap could not reach. */
+  gapSeconds: number
+  scrolls: number
+  cancelled: boolean
 }
 
 export class SlackReaderView {
@@ -220,6 +256,87 @@ export class SlackReaderView {
   }
 
   /**
+   * Reads a channel with bounded scroll-back to reach `sinceTs`.
+   * The first read reuses `readChannelMessages` (navigation + bounds + event
+   * emission); further reads only scroll the already-open conversation.
+   */
+  async readChannelWindow(
+    channelId: string,
+    options: ReadChannelWindowOptions = {}
+  ): Promise<ReadChannelWindowResult> {
+    const sinceTs = Number.isFinite(options.sinceTs) && (options.sinceTs ?? 0) > 0 ? options.sinceTs! : 0
+    const maxScrolls = Math.max(0, options.maxScrolls ?? 40)
+    const maxMessages = Math.max(1, options.maxMessages ?? 3000)
+    const signal = options.signal
+
+    const first = await this.readChannelMessages(channelId)
+    const collected = new Map<string, DashboardStoredMessage>()
+    for (const message of first) collected.set(message.ts, message)
+
+    let scrolls = 0
+    let cancelled = signal?.aborted === true
+    let canScroll = true
+    while (
+      !cancelled &&
+      canScroll &&
+      scrolls < maxScrolls &&
+      collected.size < maxMessages
+    ) {
+      const oldest = oldestNumericTs(collected)
+      // Visible history already reaches the requested floor.
+      if (sinceTs > 0 && oldest !== null && oldest <= sinceTs) break
+
+      this.onEvent?.({
+        type: 'scroll',
+        channelName: channelId,
+        scrollIndex: scrolls + 1,
+        maxScroll: maxScrolls,
+        messageCount: collected.size,
+        text: `Scrolling history in ${channelId} (${collected.size} messages)…`
+      })
+
+      canScroll = await this.adapter.scrollUp(this.view!, 600)
+      if (!canScroll) break
+      await new Promise((resolve) => setTimeout(resolve, 900))
+      if (signal?.aborted) {
+        cancelled = true
+        break
+      }
+
+      const raw = await this.adapter.readVisibleMessages(this.view!)
+      for (const item of raw) {
+        if (item.permalink && !item.permalink.includes(`/archives/${channelId}/`)) continue
+        const msg = normalizeScrapedMessage(item, channelId)
+        if (!msg) continue
+        collected.set(msg.ts, msg)
+        if (collected.size >= maxMessages) break
+      }
+      scrolls++
+    }
+
+    const all = deduplicateMessages(this.workspaceId, channelId, [...collected.values()])
+    const messages = sinceTs > 0 ? all.filter((m) => Number(m.ts) >= sinceTs) : all
+    const oldest = oldestNumericTs(new Map(all.map((m) => [m.ts, m])))
+    const gapSeconds =
+      sinceTs > 0 && oldest !== null && oldest > sinceTs
+        ? Math.max(0, Math.floor(oldest - sinceTs))
+        : 0
+
+    this.onEvent?.({
+      type: 'read',
+      channelName: channelId,
+      messageCount: messages.length,
+      scrollIndex: scrolls,
+      maxScroll: maxScrolls,
+      text: `Read ${messages.length} messages in ${channelId}${
+        gapSeconds > 0 ? ` (gap ${gapSeconds}s)` : ''
+      }`
+    })
+
+    return { messages, oldestTs: oldest, gapSeconds, scrolls, cancelled }
+  }
+
+  /**
    * Navigates to the channel and posts a message via DOM input fallback.
    */
   async postChannelMessage(channelId: string, text: string): Promise<boolean> {
@@ -254,4 +371,14 @@ export class SlackReaderView {
     }
     this.view = null
   }
+}
+
+function oldestNumericTs(messages: Map<string, DashboardStoredMessage>): number | null {
+  let oldest: number | null = null
+  for (const ts of messages.keys()) {
+    const n = Number(ts)
+    if (!Number.isFinite(n)) continue
+    if (oldest === null || n < oldest) oldest = n
+  }
+  return oldest
 }

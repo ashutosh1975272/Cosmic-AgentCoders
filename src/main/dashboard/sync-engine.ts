@@ -4,14 +4,23 @@ import type { InsightEngine } from './insight-engine'
 import { SlackReaderView, type ScrapeStepEvent } from '../slack-reader/slack-reader-view'
 import { RunLogStore } from './run-log-store'
 import type {
+  DashboardCancelScrapePayload,
   DashboardChannelDelta,
   DashboardMetrics,
   DashboardMonitor,
   DashboardProject,
   DashboardProjectSnapshot,
+  DashboardScrapeOptions,
   DashboardSource,
   DashboardSyncProgressPayload,
-  ProjectInsight
+  ProjectInsight,
+  ProjectSource,
+  ProjectSourceChannel,
+  ScrapeChannelKind,
+  ScrapeRunChannel,
+  ScrapeRunLog,
+  ScrapeRunStatus,
+  ScrapeTrigger
 } from '../../shared/dashboard-contract'
 import type { DashboardDeltaStore, DashboardStoredMessage } from './delta-store'
 import type { InsightHistoryEntry } from './history-store'
@@ -106,6 +115,10 @@ export interface DashboardSyncEngineDeps {
   onSynced?: (snapshots: DashboardProjectSnapshot[]) => void
   getExistingBrowserView?: (profileId: string, appId: 'slack') => any
   getExistingCardView?: (projectId: string, appId: 'slack') => any
+  /** Global DM gate (AppSettings.scrapePersonalDms); cards may override. */
+  getScrapePersonalDms?: () => boolean | Promise<boolean>
+  /** Persist a source's last run so the scheduler survives restarts. */
+  onSourceRun?: (sourceId: string, atIso: string) => void
 }
 
 export class DashboardSyncEngine {
@@ -125,10 +138,15 @@ export class DashboardSyncEngine {
   private readonly onSynced: ((snapshots: DashboardProjectSnapshot[]) => void) | undefined
   private readonly getExistingBrowserView?: (profileId: string, appId: 'slack') => any
   private readonly getExistingCardView?: (projectId: string, appId: 'slack') => any
+  private readonly getScrapePersonalDms: () => boolean | Promise<boolean>
+  private readonly onSourceRun?: (sourceId: string, atIso: string) => void
   private scrapeEventListener: ((event: ScrapeStepEvent) => void) | null = null
   private activeWatchReader: SlackReaderView | null = null
   private scrapeQueuePromise: Promise<any> = Promise.resolve()
   private scrapeQueueLength = 0
+  private readonly runControllers = new Map<string, AbortController>()
+  private readonly runningSources = new Set<string>()
+  private readonly runProject = new Map<string, string>()
 
   setScrapeEventListener(listener: ((event: ScrapeStepEvent) => void) | null): void {
     this.scrapeEventListener = listener
@@ -156,6 +174,8 @@ export class DashboardSyncEngine {
     this.onSynced = deps.onSynced
     this.getExistingBrowserView = deps.getExistingBrowserView
     this.getExistingCardView = deps.getExistingCardView
+    this.getScrapePersonalDms = deps.getScrapePersonalDms ?? (() => false)
+    this.onSourceRun = deps.onSourceRun
     if (deps.onProgress) this.progressCallbacks.push(deps.onProgress)
   }
 
@@ -369,7 +389,8 @@ export class DashboardSyncEngine {
 
   async syncProject(
     projectId: string,
-    historyCache?: CycleHistoryCache
+    historyCache?: CycleHistoryCache,
+    options: { includeBrowserSources?: boolean } = {}
   ): Promise<DashboardProjectSnapshot | null> {
     const projects = await this.monitorStore.listProjects()
     const project = projects.find((p) => p.id === projectId)
@@ -428,104 +449,12 @@ export class DashboardSyncEngine {
         }
       }
 
-      // If project has active browser sources, scrape channels via SlackReaderView
-      if (browserSources.length > 0) {
+      // If project has active browser sources, scrape them through the same
+      // runner used by manual and scheduled runs (single code path).
+      if (options.includeBrowserSources !== false && browserSources.length > 0) {
         for (const bSrc of browserSources) {
-          if (!bSrc.profileId || !bSrc.workspaceId) continue
-          const startTime = Date.now()
-          let channelsRead = 0
-          let newMessagesCount = 0
-          const snippets: { channelId: string; channelName?: string; sender: string; ts: string; snippet: string }[] = []
-          const effectiveWorkspaceName = bSrc.workspaceName || bSrc.workspaceId
-
-          try {
-            const existingView =
-              this.getExistingCardView?.(project.id, 'slack') ??
-              this.getExistingBrowserView?.(bSrc.profileId, 'slack')
-            const reader = new SlackReaderView({
-              profileId: bSrc.profileId,
-              projectId: project.id,
-              workspaceId: bSrc.workspaceId,
-              existingView: existingView ?? null,
-              onEvent: (ev) => this.scrapeEventListener?.({ ...ev, workspaceName: effectiveWorkspaceName })
-            })
-            this.activeWatchReader = reader
-            const activeChannels = (bSrc.channels ?? []).filter((c) => c.enabled !== false)
-            for (const ch of activeChannels) {
-              const messages = await reader.readChannelMessages(ch.id)
-              channelsRead++
-              if (messages.length > 0) {
-                const appendRes = await this.deltaStore.appendMessages({
-                  profileId: bSrc.profileId,
-                  teamId: bSrc.workspaceId,
-                  channelId: ch.id,
-                  channelName: ch.name,
-                  messages,
-                  source: 'client'
-                })
-                newMessagesCount += appendRes.added
-                for (const m of messages.slice(-5)) {
-                  snippets.push({
-                    channelId: ch.id,
-                    channelName: ch.name,
-                    sender: m.user || 'Anonymous',
-                    ts: m.ts,
-                    snippet: (m.text || '').slice(0, 100)
-                  })
-                }
-                clientDeltas.push({
-                  channelId: ch.id,
-                  channelName: ch.name,
-                  messageCount: messages.length,
-                  latestMessageAt: messages[messages.length - 1]?.ts ?? null,
-                  cursor: appendRes.cursor,
-                  lastSyncAt: appendRes.lastSyncAt
-                })
-              }
-            }
-            reader.destroy()
-            if (this.activeWatchReader === reader) {
-              this.activeWatchReader = null
-            }
-
-            // Update source stats
-            const nowIso = new Date().toISOString()
-            const updatedSources = (project.sources ?? []).map((s) =>
-              s.id === bSrc.id
-                ? {
-                    ...s,
-                    status: 'connected' as const,
-                    lastReadAt: nowIso,
-                    lastReadNewCount: newMessagesCount
-                  }
-                : s
-            )
-            await this.monitorStore.upsertProject({
-              project: {
-                ...project,
-                sources: updatedSources
-              }
-            })
-
-            const runLogStore = new RunLogStore({ rootDir: this.deltaStore.rootDir })
-            await runLogStore.append({
-              runId: `run-${Date.now().toString(36)}`,
-              ts: nowIso,
-              trigger: 'manual',
-              projectId: project.id,
-              sourceId: bSrc.id,
-              sourceKind: 'browser',
-              workspaceId: bSrc.workspaceId,
-              channelsRead,
-              newMessages: newMessagesCount,
-              snippets: snippets.slice(0, 20),
-              durationMs: Date.now() - startTime,
-              llmCalls: 0,
-              status: 'connected'
-            })
-          } catch (err) {
-            this.log(`[dashboard] browser source ${bSrc.id} scrape error: ${String(err)}`)
-          }
+          const result = await this.scrapeSource(project, bSrc, { trigger: 'manual' })
+          clientDeltas.push(...result.deltas)
         }
       }
 
@@ -623,8 +552,15 @@ export class DashboardSyncEngine {
 
   async syncProjectSource(
     projectId: string,
-    sourceId?: string
-  ): Promise<{ channelsRead: number; newMessages: number; status: string; error?: string }> {
+    sourceId?: string,
+    extra: { trigger?: ScrapeTrigger; options?: DashboardScrapeOptions } = {}
+  ): Promise<{
+    runId: string
+    channelsRead: number
+    newMessages: number
+    status: ScrapeRunStatus
+    error?: string
+  }> {
     this.scrapeQueueLength++
     if (this.scrapeQueueLength > 1) {
       this.scrapeEventListener?.({
@@ -636,7 +572,7 @@ export class DashboardSyncEngine {
 
     const task = async () => {
       try {
-        return await this.executeSyncProjectSource(projectId, sourceId)
+        return await this.executeSyncProjectSource(projectId, sourceId, extra)
       } finally {
         this.scrapeQueueLength = Math.max(0, this.scrapeQueueLength - 1)
       }
@@ -648,234 +584,520 @@ export class DashboardSyncEngine {
     return execution
   }
 
+  /** Abort one run (by id/project) or every run for a project. Returns count. */
+  cancelScrape(payload: DashboardCancelScrapePayload): number {
+    let cancelled = 0
+    for (const [runId, controller] of this.runControllers) {
+      if (payload.runId && payload.runId !== runId) continue
+      if (payload.projectId && this.runProject.get(runId) !== payload.projectId) continue
+      if (!controller.signal.aborted) {
+        controller.abort()
+        cancelled++
+      }
+    }
+    return cancelled
+  }
+
+  isSourceRunning(sourceId: string): boolean {
+    return this.runningSources.has(sourceId)
+  }
+
   private async executeSyncProjectSource(
     projectId: string,
-    sourceId?: string
-  ): Promise<{ channelsRead: number; newMessages: number; status: string; error?: string }> {
+    sourceId?: string,
+    extra: { trigger?: ScrapeTrigger; options?: DashboardScrapeOptions } = {}
+  ): Promise<{
+    runId: string
+    channelsRead: number
+    newMessages: number
+    status: ScrapeRunStatus
+    error?: string
+  }> {
     const projects = await this.monitorStore.listProjects()
     const project = projects.find((p) => p.id === projectId)
-    if (!project) return { channelsRead: 0, newMessages: 0, status: 'error', error: 'Project not found' }
+    if (!project) {
+      return {
+        runId: '',
+        channelsRead: 0,
+        newMessages: 0,
+        status: 'error',
+        error: 'Project not found'
+      }
+    }
 
     const browserSources = (project.sources ?? []).filter(
       (s) => s.kind === 'browser' && s.enabled !== false && (!sourceId || s.id === sourceId)
     )
 
     if (browserSources.length === 0) {
-      return { channelsRead: 0, newMessages: 0, status: 'error', error: 'No active browser sources found' }
-    }
-
-    let totalChannelsRead = 0
-    let totalNewMessages = 0
-
-    for (const bSrc of browserSources) {
-      if (!bSrc.profileId || !bSrc.workspaceId) continue
-      const startTime = Date.now()
-      let channelsRead = 0
-      let newMessagesCount = 0
-      const snippets: { channelId: string; channelName?: string; sender: string; ts: string; snippet: string }[] = []
-      let runStatus: 'connected' | 'challenge' | 'needs-login' | 'adapter-broken' | 'error' = 'connected'
-      let runError: string | undefined = undefined
-
-      const effectiveWorkspaceName = bSrc.workspaceName || bSrc.workspaceId
-
-      try {
-        const existingView =
-          this.getExistingCardView?.(project.id, 'slack') ??
-          this.getExistingBrowserView?.(bSrc.profileId, 'slack')
-        const reader = new SlackReaderView({
-          profileId: bSrc.profileId,
-          projectId: project.id,
-          workspaceId: bSrc.workspaceId,
-          existingView: existingView ?? null,
-          onEvent: (ev) => this.scrapeEventListener?.({ ...ev, workspaceName: effectiveWorkspaceName })
-        })
-        this.activeWatchReader = reader
-
-        // Broadcast initial starting event
-        this.scrapeEventListener?.({
-          type: 'navigate',
-          workspaceName: effectiveWorkspaceName,
-          text: `Starting scrape for ${effectiveWorkspaceName}…`
-        })
-
-        // Auto-discover live channels from sidebar if not matching or requested
-        let targetChannels = bSrc.channels
-        try {
-          const discovered = await reader.listChannels()
-          if (discovered.length > 0) {
-            // Preserve any user-toggled enabled states
-            const existingMap = new Map((bSrc.channels ?? []).map((c) => [c.id, c.enabled]))
-            const discoveredChannels = discovered.map((c) => ({
-              id: c.id,
-              name: c.name,
-              isPrivate: c.isPrivate,
-              // If user previously configured this channel, respect their choice; default to true
-              enabled: existingMap.has(c.id) ? existingMap.get(c.id) : true
-            }))
-
-            // Persist discovered channels onto the source
-            const updated = (project.sources ?? []).map((s) =>
-              s.id === bSrc.id ? { ...s, channels: discoveredChannels } : s
-            )
-            void this.monitorStore.upsertProject({
-              project: { ...project, sources: updated }
-            })
-
-            // Only scrape channels that are enabled (enabled !== false)
-            targetChannels = discoveredChannels.filter((c) => c.enabled !== false)
-          } else {
-            targetChannels = (bSrc.channels ?? []).filter((c) => c.enabled !== false)
-          }
-        } catch {
-          // fallback to original list, filtering for enabled
-          targetChannels = (bSrc.channels ?? []).filter((c) => c.enabled !== false)
-        }
-
-        const totalChannels = targetChannels.length
-        let channelIndex = 0
-
-        for (const ch of targetChannels) {
-          channelIndex++
-          this.scrapeEventListener?.({
-            type: 'navigate',
-            workspaceName: effectiveWorkspaceName,
-            channelName: ch.name || ch.id,
-            scrollIndex: channelIndex,
-            maxScroll: totalChannels,
-            messageCount: newMessagesCount,
-            text: `Reading #${ch.name || ch.id} (${channelIndex}/${totalChannels})…`
-          })
-
-          // Calculate 5-minute safety overlap cursor from DeltaStore
-          let overlapCursorTs = 0
-          try {
-            const existingDelta = await this.deltaStore.load(bSrc.profileId, bSrc.workspaceId, ch.id)
-            if (existingDelta?.cursor) {
-              const numericCursor = parseFloat(existingDelta.cursor)
-              if (!Number.isNaN(numericCursor) && numericCursor > 0) {
-                // 5 minutes = 300 seconds safety buffer
-                overlapCursorTs = Math.max(0, numericCursor - 300)
-              }
-            }
-          } catch {
-            // ignore
-          }
-
-          const rawScraped = await reader.readChannelMessages(ch.id)
-          channelsRead++
-
-          // Filter against overlapCursorTs if present (ensures we re-evaluate past 5 min for boundary messages)
-          const messages = overlapCursorTs > 0
-            ? rawScraped.filter((m) => {
-                const nTs = parseFloat(m.ts)
-                return Number.isNaN(nTs) || nTs >= overlapCursorTs
-              })
-            : rawScraped
-
-          if (messages.length > 0) {
-            const appendRes = await this.deltaStore.appendMessages({
-              profileId: bSrc.profileId,
-              teamId: bSrc.workspaceId,
-              channelId: ch.id,
-              channelName: ch.name,
-              messages,
-              source: 'client'
-            })
-            newMessagesCount += appendRes.added
-            for (const m of messages.slice(-5)) {
-              snippets.push({
-                channelId: ch.id,
-                channelName: ch.name,
-                sender: m.user || 'Anonymous',
-                ts: m.ts,
-                snippet: (m.text || '').slice(0, 100)
-              })
-            }
-          }
-        }
-        reader.destroy()
-        if (this.activeWatchReader === reader) {
-          this.activeWatchReader = null
-        }
-        totalChannelsRead += channelsRead
-        totalNewMessages += newMessagesCount
-
-        const nowIso = new Date().toISOString()
-        const updatedSources = (project.sources ?? []).map((s) =>
-          s.id === bSrc.id
-            ? {
-                ...s,
-                status: 'connected' as const,
-                lastReadAt: nowIso,
-                lastReadNewCount: newMessagesCount
-              }
-            : s
-        )
-        await this.monitorStore.upsertProject({
-          project: {
-            ...project,
-            sources: updatedSources
-          }
-        })
-      } catch (err: any) {
-        runStatus = 'error'
-        runError = err instanceof Error ? err.message : String(err)
-        this.log(`[dashboard] manual scrape source ${bSrc.id} error: ${runError}`)
-      } finally {
-        if (this.activeWatchReader) {
-          this.activeWatchReader.destroy()
-          this.activeWatchReader = null
-        }
-        // Guaranteed audit log write - runs on EVERY scrape attempt (success, 0 messages, or error)
-        try {
-          const runLogStore = new RunLogStore({ rootDir: this.deltaStore.rootDir })
-          await runLogStore.append({
-            runId: `run-${Date.now().toString(36)}`,
-            ts: new Date().toISOString(),
-            trigger: 'manual',
-            projectId: project.id,
-            sourceId: bSrc.id,
-            sourceKind: 'browser',
-            workspaceId: bSrc.workspaceId,
-            channelsRead,
-            newMessages: newMessagesCount,
-            snippets: snippets.slice(0, 20),
-            durationMs: Date.now() - startTime,
-            llmCalls: 0,
-            status: runStatus === 'error' ? 'adapter-broken' : runStatus,
-            errorCode: runError
-          })
-        } catch {
-          // ignore log write failure
-        }
-
-        // Emit final run completion event so buttons never stay stuck in "Scraping..."
-        this.scrapeEventListener?.({
-          type: 'run_finished',
-          workspaceName: effectiveWorkspaceName,
-          channelName: bSrc.workspaceId,
-          messageCount: newMessagesCount,
-          text: runError
-            ? `Scrape stopped: ${runError}`
-            : `Scraped ${channelsRead} channels. ${newMessagesCount} new messages captured.`
-        })
+      return {
+        runId: '',
+        channelsRead: 0,
+        newMessages: 0,
+        status: 'error',
+        error: 'No active browser sources found'
       }
     }
 
+    let channelsRead = 0
+    let newMessages = 0
+    let lastRunId = ''
+    let runError: string | undefined
+    let status: ScrapeRunStatus = 'success'
+
+    for (const source of browserSources) {
+      const result = await this.scrapeSource(project, source, extra)
+      lastRunId = result.runId || lastRunId
+      channelsRead += result.channelsRead
+      newMessages += result.newMessages
+      if (result.error) runError = result.error
+      if (result.status === 'error') status = 'error'
+      else if (result.status === 'stopped') status = status === 'error' ? 'error' : 'stopped'
+      else if (result.status === 'partial' && status === 'success') status = 'partial'
+    }
+
+    return { runId: lastRunId, channelsRead, newMessages, status, error: runError }
+  }
+
+  /**
+   * The one browser scrape path. Manual "Scrape", "Sync now", and the
+   * per-source scheduler all land here so windowing, DM policy, filtering,
+   * cancellation, and logging cannot drift apart.
+   */
+  private async scrapeSource(
+    project: DashboardProject,
+    source: ProjectSource,
+    extra: { trigger?: ScrapeTrigger; options?: DashboardScrapeOptions } = {}
+  ): Promise<{
+    runId: string
+    channelsRead: number
+    newMessages: number
+    status: ScrapeRunStatus
+    error?: string
+    deltas: DashboardChannelDelta[]
+  }> {
+    const empty = { runId: '', channelsRead: 0, newMessages: 0, deltas: [] as DashboardChannelDelta[] }
+    if (!source.profileId || !source.workspaceId) {
+      return { ...empty, status: 'error', error: 'Source has no profile/workspace' }
+    }
+    if (this.runningSources.has(source.id)) {
+      return { ...empty, status: 'stopped', error: 'Scrape already running for this source' }
+    }
+
+    const runId = `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+    const trigger: ScrapeTrigger = extra.trigger ?? 'manual'
+    const startedAt = new Date().toISOString()
+    const startTime = Date.now()
+    const controller = new AbortController()
+    const signal = controller.signal
+    this.runControllers.set(runId, controller)
+    this.runProject.set(runId, project.id)
+    this.runningSources.add(source.id)
+
+    const backfillHours = clampNumber(source.backfillHours ?? 6, 1, 24)
+    const windowEndSec = Date.now() / 1000
+    const floorTs = windowEndSec - backfillHours * 3600
+    const options = extra.options
+    const allowDms = resolveDmPolicy(
+      source,
+      options,
+      await this.getScrapePersonalDms()
+    )
+
+    const includeKinds = new Set<ScrapeChannelKind>()
+    if (options?.includePublic !== false) includeKinds.add('public')
+    if (options?.includePrivate !== false) includeKinds.add('private')
+    if (allowDms) {
+      includeKinds.add('dm')
+      includeKinds.add('group-dm')
+    }
+
+    const peopleFilter = new Set(
+      (options?.people ?? source.selectedPeople ?? [])
+        .map((person) => person.trim().toLowerCase())
+        .filter(Boolean)
+    )
+
+    const channels: ScrapeRunChannel[] = []
+    const deltas: DashboardChannelDelta[] = []
+    const snippets: Array<{
+      channelId: string
+      channelName?: string
+      sender: string
+      ts: string
+      snippet: string
+    }> = []
+    const peopleCounts = new Map<string, number>()
+    let channelsRead = 0
+    let newMessages = 0
+    let gapSeconds = 0
+    let windowStart = floorTs
+    let status: ScrapeRunStatus = 'success'
+    let runError: string | undefined
+    let channelErrors = 0
+
+    const effectiveWorkspaceName = source.workspaceName || source.workspaceId
+    const reader = new SlackReaderView({
+      profileId: source.profileId,
+      projectId: project.id,
+      workspaceId: source.workspaceId,
+      existingView:
+        this.getExistingCardView?.(project.id, 'slack') ??
+        this.getExistingBrowserView?.(source.profileId, 'slack') ??
+        null,
+      onEvent: (ev) =>
+        this.scrapeEventListener?.({
+          ...ev,
+          runId,
+          projectId: project.id,
+          sourceId: source.id,
+          workspaceName: effectiveWorkspaceName
+        })
+    })
+    this.activeWatchReader = reader
+
+    this.scrapeEventListener?.({
+      type: 'run_started',
+      runId,
+      projectId: project.id,
+      sourceId: source.id,
+      workspaceName: effectiveWorkspaceName,
+      text: `Starting ${trigger} scrape for ${effectiveWorkspaceName}…`
+    })
+
+    try {
+      let targetChannels: ProjectSourceChannel[] = source.channels ?? []
+
+      // Auto-discover the live sidebar, preserving user toggles + DM metadata.
+      try {
+        const discovered = await reader.listChannels()
+        if (discovered.length > 0) {
+          const existing = new Map(targetChannels.map((ch) => [ch.id, ch]))
+          targetChannels = discovered.map((ch) => {
+            const previous = existing.get(ch.id)
+            const kind = channelKind({
+              id: ch.id,
+              name: ch.name,
+              isPrivate: ch.isPrivate,
+              isDm: ch.isDm
+            })
+            return {
+              id: ch.id,
+              name: ch.name,
+              isPrivate: ch.isPrivate,
+              isDm: ch.isDm,
+              kind,
+              enabled: previous ? previous.enabled !== false : true
+            }
+          })
+          await this.mergeSource(project.id, source.id, (current) => ({
+            ...current,
+            channels: targetChannels,
+            updatedAt: new Date().toISOString()
+          }))
+        }
+      } catch {
+        targetChannels = (source.channels ?? []).filter((ch) => ch.enabled !== false)
+      }
+
+      for (const ch of targetChannels) {
+        if (signal.aborted) {
+          status = 'stopped'
+          runError = 'Cancelled by user'
+          break
+        }
+
+        const kind = channelKind(ch)
+        const name = ch.name || ch.id
+
+        if (ch.enabled === false) {
+          channels.push({
+            channelId: ch.id,
+            channelName: name,
+            kind,
+            messagesRead: 0,
+            newMessages: 0,
+            status: 'skipped',
+            skippedReason: 'channel-disabled'
+          })
+          continue
+        }
+        if (!includeKinds.has(kind)) {
+          channels.push({
+            channelId: ch.id,
+            channelName: name,
+            kind,
+            messagesRead: 0,
+            newMessages: 0,
+            status: 'skipped',
+            skippedReason: kind === 'dm' || kind === 'group-dm' ? 'dm-disabled' : 'kind-disabled'
+          })
+          continue
+        }
+        if (options?.channelIds?.length && !options.channelIds.includes(ch.id)) {
+          channels.push({
+            channelId: ch.id,
+            channelName: name,
+            kind,
+            messagesRead: 0,
+            newMessages: 0,
+            status: 'skipped',
+            skippedReason: 'not-selected'
+          })
+          continue
+        }
+
+        this.scrapeEventListener?.({
+          type: 'navigate',
+          runId,
+          projectId: project.id,
+          sourceId: source.id,
+          workspaceName: effectiveWorkspaceName,
+          channelName: name,
+          text: `Reading ${kind === 'dm' ? 'DM' : '#'}${name}…`
+        })
+
+        const anchor = (await this.channelCursor(source, ch.id)) ?? sourceLastReadSec(source) ?? floorTs
+        const sinceTs = Math.max(floorTs, anchor - 120)
+        windowStart = Math.min(windowStart, sinceTs)
+
+        try {
+          const result = await reader.readChannelWindow(ch.id, {
+            sinceTs,
+            maxScrolls: 40,
+            maxMessages: 3000,
+            signal
+          })
+          gapSeconds = Math.max(gapSeconds, result.gapSeconds)
+          channelsRead++
+
+          let messages = result.messages
+          if (peopleFilter.size > 0) {
+            messages = messages.filter((m) =>
+              peopleFilter.has((m.user ?? '').trim().toLowerCase())
+            )
+          }
+
+          if (messages.length === 0) {
+            channels.push({
+              channelId: ch.id,
+              channelName: name,
+              kind,
+              messagesRead: 0,
+              newMessages: 0,
+              status: 'empty'
+            })
+            continue
+          }
+
+          const append = await this.deltaStore.appendMessages({
+            profileId: source.profileId,
+            teamId: source.workspaceId,
+            channelId: ch.id,
+            channelName: name,
+            messages,
+            source: 'client'
+          })
+          newMessages += append.added
+
+          const latestTs = messages[messages.length - 1]?.ts
+          deltas.push({
+            channelId: ch.id,
+            channelName: name,
+            source: 'client',
+            messageCount: messages.length,
+            newMessageCount: append.added,
+            latestMessageAt: latestTs
+              ? new Date(Number(latestTs) * 1000).toISOString()
+              : append.lastSyncAt,
+            cursor: append.cursor,
+            lastSyncAt: append.lastSyncAt
+          })
+
+          channels.push({
+            channelId: ch.id,
+            channelName: name,
+            kind,
+            messagesRead: messages.length,
+            newMessages: append.added,
+            status: 'read'
+          })
+
+          for (const message of messages) {
+            const person = (message.user || 'Anonymous').trim() || 'Anonymous'
+            peopleCounts.set(person, (peopleCounts.get(person) ?? 0) + 1)
+          }
+          for (const message of messages.slice(-5)) {
+            snippets.push({
+              channelId: ch.id,
+              channelName: name,
+              sender: message.user || 'Anonymous',
+              ts: message.ts,
+              snippet: (message.text || '').slice(0, 100)
+            })
+          }
+        } catch (err) {
+          channelErrors++
+          channels.push({
+            channelId: ch.id,
+            channelName: name,
+            kind,
+            messagesRead: 0,
+            newMessages: 0,
+            status: 'error',
+            error: err instanceof Error ? err.message : String(err)
+          })
+          if (!runError) runError = err instanceof Error ? err.message : String(err)
+        }
+      }
+    } catch (err) {
+      status = 'error'
+      runError = err instanceof Error ? err.message : String(err)
+      this.log(`[dashboard] scrape source ${source.id} error: ${runError}`)
+    } finally {
+      const cancelled = signal.aborted
+      reader.destroy()
+      if (this.activeWatchReader === reader) this.activeWatchReader = null
+      this.runControllers.delete(runId)
+      this.runProject.delete(runId)
+      this.runningSources.delete(source.id)
+
+      if (cancelled) {
+        status = 'stopped'
+        runError = runError ?? 'Cancelled by user'
+      } else if (status !== 'error' && channelErrors > 0) {
+        status = 'partial'
+      }
+      if (status === 'success' && gapSeconds > 0) status = 'partial'
+
+      const finishedAt = new Date().toISOString()
+      const readChannels = channels.filter((ch) => ch.status === 'read' || ch.status === 'empty')
+      const entry: ScrapeRunLog = {
+        runId,
+        ts: finishedAt,
+        startedAt,
+        trigger,
+        projectId: project.id,
+        projectName: project.name,
+        sourceId: source.id,
+        sourceKind: 'browser',
+        workspaceId: source.workspaceId,
+        workspaceName: effectiveWorkspaceName,
+        channelsRead: readChannels.length,
+        newMessages,
+        snippets: snippets.slice(0, 20),
+        window: {
+          startTs: String(windowStart),
+          endTs: String(windowEndSec),
+          backfillHours,
+          gapSeconds
+        },
+        channels,
+        people: [...peopleCounts.entries()]
+          .map(([name, count]) => ({ name, messages: count }))
+          .sort((a, b) => b.messages - a.messages),
+        filters: {
+          includeKinds: [...includeKinds],
+          channelIds: options?.channelIds,
+          people: peopleFilter.size > 0 ? [...peopleFilter] : undefined
+        },
+        durationMs: Date.now() - startTime,
+        llmCalls: 0,
+        status,
+        error: runError,
+        errorCode: status === 'error' ? runError : undefined
+      }
+
+      const previousStatus =
+        status === 'error' ? 'adapter-broken' : status === 'stopped' ? 'paused' : 'connected'
+      await this.mergeSource(project.id, source.id, (current) => ({
+        ...current,
+        status: previousStatus,
+        lastReadAt: status === 'error' || status === 'stopped' ? current.lastReadAt : finishedAt,
+        lastReadNewCount: newMessages,
+        lastScrapeAt: finishedAt,
+        lastScrapeStatus: status,
+        lastScrapeError: runError,
+        lastScrapeRunId: runId,
+        updatedAt: finishedAt
+      }))
+
+      try {
+        const runLogStore = new RunLogStore({ rootDir: this.deltaStore.rootDir })
+        await runLogStore.append(entry)
+      } catch {
+        // ignore log write failure
+      }
+
+      this.onSourceRun?.(source.id, finishedAt)
+
+      this.scrapeEventListener?.({
+        type: status === 'error' ? 'run_failed' : status === 'stopped' ? 'run_cancelled' : 'run_finished',
+        runId,
+        projectId: project.id,
+        sourceId: source.id,
+        workspaceName: effectiveWorkspaceName,
+        channelName: source.workspaceId,
+        messageCount: newMessages,
+        text:
+          status === 'error'
+            ? `Scrape stopped: ${runError ?? 'error'}`
+            : status === 'stopped'
+              ? `Scrape cancelled. ${newMessages} new messages kept from completed channels.`
+              : `Scraped ${readChannels.length} channels. ${newMessages} new messages captured.${
+                  gapSeconds > 0 ? ` History gap: ${gapSeconds}s.` : ''
+                }`
+      })
+    }
+
     return {
-      channelsRead: totalChannelsRead,
-      newMessages: totalNewMessages,
-      status: 'success'
+      runId,
+      channelsRead,
+      newMessages,
+      status,
+      error: runError,
+      deltas
     }
   }
 
-  async syncAll(): Promise<DashboardProjectSnapshot[]> {
+  /** Re-read the project so concurrent source updates never clobber each other. */
+  private async mergeSource(
+    projectId: string,
+    sourceId: string,
+    patch: (source: ProjectSource) => ProjectSource
+  ): Promise<void> {
+    try {
+      const fresh = (await this.monitorStore.listProjects()).find((p) => p.id === projectId)
+      if (!fresh) return
+      const sources = (fresh.sources ?? []).map((source) =>
+        source.id === sourceId ? patch(source) : source
+      )
+      await this.monitorStore.upsertProject({ project: { ...fresh, sources } })
+    } catch (err) {
+      this.log(`[dashboard] source update failed (${sourceId}): ${String(err)}`)
+    }
+  }
+
+  private async channelCursor(source: ProjectSource, channelId: string): Promise<number | null> {
+    if (!source.profileId) return null
+    try {
+      const delta = await this.deltaStore.load(source.profileId, source.workspaceId, channelId)
+      const cursor = delta?.cursor ? Number.parseFloat(delta.cursor) : Number.NaN
+      return Number.isFinite(cursor) && cursor > 0 ? cursor : null
+    } catch {
+      return null
+    }
+  }
+
+  async syncAll(
+    options: { includeBrowserSources?: boolean } = {}
+  ): Promise<DashboardProjectSnapshot[]> {
     const projects = await this.monitorStore.listProjects()
     const results: DashboardProjectSnapshot[] = []
     // One cache per cycle: cards watching the same channel share the page fetch.
     const historyCache: CycleHistoryCache = new Map()
     for (const project of projects) {
-      const snap = await this.syncProject(project.id, historyCache)
+      const snap = await this.syncProject(project.id, historyCache, options)
       if (snap) results.push(snap)
     }
     try {
@@ -1090,9 +1312,10 @@ export class DashboardInsightSyncEngine extends DashboardSyncEngine {
 
   override async syncProject(
     projectId: string,
-    historyCache?: CycleHistoryCache
+    historyCache?: CycleHistoryCache,
+    options: { includeBrowserSources?: boolean } = {}
   ): Promise<DashboardProjectSnapshot | null> {
-    const snapshot = await super.syncProject(projectId, historyCache)
+    const snapshot = await super.syncProject(projectId, historyCache, options)
     if (!snapshot || !this.insightEngine) return snapshot
     const projects = await this.monitorStore.listProjects()
     const project = projects.find((p) => p.id === projectId)
@@ -1104,4 +1327,39 @@ export class DashboardInsightSyncEngine extends DashboardSyncEngine {
     }
     return await this.enrich(project, snapshot, token)
   }
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min
+  return Math.min(max, Math.max(min, value))
+}
+
+/** Classify a sidebar row without trusting a single attribute. */
+function channelKind(channel: ProjectSourceChannel): ScrapeChannelKind {
+  if (channel.kind) return channel.kind
+  if (channel.isDm) return 'dm'
+  if (channel.isPrivate) return 'private'
+  const id = channel.id ?? ''
+  if (id.startsWith('D')) return 'dm'
+  if (id.startsWith('G')) return 'private'
+  return 'public'
+}
+
+/** Effective DM gate: per-run override → card policy → global setting. */
+function resolveDmPolicy(
+  source: ProjectSource,
+  options: DashboardScrapeOptions | undefined,
+  globalEnabled: boolean
+): boolean {
+  if (typeof options?.includeDms === 'boolean') return options.includeDms
+  const policy = source.allowDms ?? 'inherit'
+  if (policy === 'on') return true
+  if (policy === 'off') return false
+  return globalEnabled
+}
+
+function sourceLastReadSec(source: ProjectSource): number | null {
+  if (!source.lastReadAt) return null
+  const ms = Date.parse(source.lastReadAt)
+  return Number.isFinite(ms) ? ms / 1000 : null
 }

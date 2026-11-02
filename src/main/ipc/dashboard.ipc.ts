@@ -25,6 +25,11 @@ import type {
   DashboardSnapshot,
   DashboardSyncProgressPayload,
   DashboardUpdateSchedulePayload,
+  DashboardScrapePayload,
+  DashboardCancelScrapePayload,
+  DashboardSourceSchedulePayload,
+  DashboardSourceScheduleState,
+  ScrapeRunQuery,
   DashboardTeamWorkspaceCandidate,
   DashboardTeamWorkspaceChannelsPayload,
   DashboardTeamWorkspaceConnectPayload,
@@ -246,26 +251,104 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
 
   handleInvoke(
     IpcChannels.DashboardSyncSource,
-    async (payload: { projectId: string; sourceId?: string }) => {
-      const res = await deps.engine.syncProjectSource(payload.projectId, payload.sourceId)
+    async (payload: DashboardScrapePayload) => {
+      const res = await deps.engine.syncProjectSource(payload.projectId, payload.sourceId, {
+        trigger: payload.trigger,
+        options: payload.options
+      })
       await broadcastSnapshot()
       return res
     }
   )
 
   handleInvoke(
+    IpcChannels.DashboardCancelScrape,
+    async (payload: DashboardCancelScrapePayload) => {
+      const cancelled = deps.engine.cancelScrape(payload)
+      return { ok: cancelled > 0, cancelled }
+    }
+  )
+
+  handleInvoke(
+    IpcChannels.DashboardSetSourceSchedule,
+    async (payload: DashboardSourceSchedulePayload): Promise<DashboardSourceScheduleState> => {
+      const projects = await deps.monitorStore.listProjects()
+      const project = projects.find((p) => p.id === payload.projectId)
+      if (!project) throw new Error('Project not found')
+      const sources = (project.sources ?? []).map((source) =>
+        source.id === payload.sourceId
+          ? {
+              ...source,
+              scheduleEnabled: payload.scheduleEnabled ?? source.scheduleEnabled,
+              scheduleIntervalMinutes:
+                payload.scheduleIntervalMinutes ?? source.scheduleIntervalMinutes,
+              backfillHours: payload.backfillHours ?? source.backfillHours,
+              allowDms: payload.allowDms ?? source.allowDms,
+              selectedPeople: payload.selectedPeople ?? source.selectedPeople,
+              updatedAt: new Date().toISOString()
+            }
+          : source
+      )
+      await deps.monitorStore.upsertProject({ project: { ...project, sources } })
+      await broadcastSnapshot()
+      const updated = sources.find((source) => source.id === payload.sourceId)!
+      const interval = updated.scheduleIntervalMinutes ?? 5
+      const lastRunAt = updated.lastScrapeAt ?? updated.lastReadAt ?? null
+      const scheduleEnabled = updated.scheduleEnabled ?? true
+      return {
+        projectId: project.id,
+        projectName: project.name,
+        sourceId: updated.id,
+        workspaceName: updated.workspaceName || updated.workspaceId,
+        enabled: updated.enabled !== false,
+        scheduleEnabled,
+        intervalMinutes: interval,
+        lastRunAt,
+        lastStatus: updated.lastScrapeStatus,
+        nextRunAt:
+          scheduleEnabled && lastRunAt
+            ? new Date(new Date(lastRunAt).getTime() + interval * 60_000).toISOString()
+            : scheduleEnabled
+              ? new Date(Date.now() + interval * 60_000).toISOString()
+              : null,
+        running: deps.engine.isSourceRunning(updated.id)
+      }
+    }
+  )
+
+  handleInvoke(
     IpcChannels.DashboardGetRunLogs,
-    async (payload: { projectId: string; limit?: number }) => {
+    async (payload: ScrapeRunQuery & { projectId: string }) => {
+      const query: ScrapeRunQuery = {
+        limit: payload.limit,
+        status: payload.status,
+        trigger: payload.trigger
+      }
       if (deps.runLogStore) {
-        return deps.runLogStore.read(payload.projectId, payload.limit ?? 50)
+        const rows = await deps.runLogStore.read(payload.projectId, payload.limit ?? 50)
+        return filterRuns(rows, query)
       }
       if (deps.deltaStore?.rootDir) {
         const store = new RunLogStore({ rootDir: deps.deltaStore.rootDir })
-        return store.read(payload.projectId, payload.limit ?? 50)
+        const rows = await store.read(payload.projectId, payload.limit ?? 50)
+        return filterRuns(rows, query)
       }
       return []
     }
   )
+
+  handleInvoke(IpcChannels.DashboardGetScrapeRuns, async (payload: ScrapeRunQuery) => {
+    const store = deps.runLogStore ?? (deps.deltaStore?.rootDir ? new RunLogStore({ rootDir: deps.deltaStore.rootDir }) : null)
+    if (!store) return []
+    if (payload.projectId) {
+      return filterRuns(await store.read(payload.projectId, payload.limit ?? 100), payload)
+    }
+    const projects = await deps.monitorStore.listProjects()
+    return store.readMany(
+      projects.map((project) => project.id),
+      payload
+    )
+  })
 
   // Wire scrape event listener to broadcast events to renderer for Watch Live overlay
   deps.engine.setScrapeEventListener((event) => {
@@ -752,4 +835,17 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
       unsubscribeProgress()
     }
   }
+}
+
+function filterRuns<T extends { status: string; trigger: string }>(
+  rows: T[],
+  query: { status?: string; trigger?: string; limit?: number }
+): T[] {
+  const filtered = rows.filter((row) => {
+    if (query.status && query.status !== 'all' && row.status !== query.status) return false
+    if (query.trigger && query.trigger !== 'all' && row.trigger !== query.trigger) return false
+    return true
+  })
+  const limit = Number(query.limit)
+  return Number.isFinite(limit) && limit > 0 ? filtered.slice(0, limit) : filtered
 }

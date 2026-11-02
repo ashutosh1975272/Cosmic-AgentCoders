@@ -86,6 +86,10 @@ export function normalizeAppSettings(parsed: Partial<AppSettings>): AppSettings 
       typeof parsed.showScrapeProgressLine === 'boolean'
         ? parsed.showScrapeProgressLine
         : DEFAULT_APP_SETTINGS.showScrapeProgressLine ?? true,
+    scrapePersonalDms:
+      typeof parsed.scrapePersonalDms === 'boolean'
+        ? parsed.scrapePersonalDms
+        : DEFAULT_APP_SETTINGS.scrapePersonalDms ?? false,
     showGoogleEmailInputInSidebar:
       typeof parsed.showGoogleEmailInputInSidebar === 'boolean'
         ? parsed.showGoogleEmailInputInSidebar
