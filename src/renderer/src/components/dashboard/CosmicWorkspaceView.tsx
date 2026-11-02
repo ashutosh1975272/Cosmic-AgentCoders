@@ -304,7 +304,9 @@ export function CosmicWorkspaceView({
             className={`ws-body${nav.collapsed ? ' is-collapsed' : ''}`}
             style={{
               '--ws-nav-w': `${nav.width}px`,
-              flex: 1,
+              flex: '1 1 0%',
+              height: '100%',
+              minHeight: 0,
               overflow: 'hidden'
             } as React.CSSProperties}
           >

@@ -362,6 +362,7 @@ export class BrowserViewManager {
     const view = new WebContentsView({
       webPreferences: profileSessionWebPreferences(profileId, appId)
     })
+    view.setBackgroundColor('#0C0D11')
 
     view.webContents.setZoomFactor(1)
 
@@ -414,6 +415,7 @@ export class BrowserViewManager {
         preload: join(__dirname, '../preload/index.js')
       }
     })
+    view.setBackgroundColor('#0C0D11')
 
     if (appId === 'teams') {
       applyTeamsWebContentsTweaks(view.webContents)
@@ -916,6 +918,7 @@ export class BrowserViewManager {
           sandbox: true
         }
       })
+      view.setBackgroundColor('#0C0D11')
       view.webContents.setWindowOpenHandler(({ url: openUrl }) => {
         void view?.webContents.loadURL(openUrl)
         return { action: 'deny' }

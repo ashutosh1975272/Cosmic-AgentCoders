@@ -332,9 +332,30 @@ export function applySlackWebContentsTweaks(contents: WebContents): void {
   contents.setUserAgent(BRAVE_USER_AGENT)
 }
 
-/** WhatsApp Web: Chrome UA so WA treats us like a normal desktop browser. */
+/** WhatsApp Web: Chrome UA so WA treats us like a normal desktop browser + official dark theme injection */
 export function applyWhatsAppWebContentsTweaks(contents: WebContents): void {
   contents.setUserAgent(CHROME_USER_AGENT)
+
+  const injectDarkTheme = (): void => {
+    void contents
+      .executeJavaScript(
+        `(() => {
+          try {
+            if (document.body && !document.body.classList.contains('dark')) {
+              document.body.classList.add('dark');
+            }
+            if (window.localStorage && window.localStorage.getItem('theme') !== '"dark"') {
+              window.localStorage.setItem('theme', '"dark"');
+            }
+          } catch (_) {}
+        })()`,
+        true
+      )
+      .catch(() => undefined)
+  }
+
+  contents.on('dom-ready', injectDarkTheme)
+  contents.on('did-finish-load', injectDarkTheme)
 }
 
 const HIDE_DM_CSS = `

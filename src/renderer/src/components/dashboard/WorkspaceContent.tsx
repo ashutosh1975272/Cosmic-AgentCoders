@@ -295,7 +295,7 @@ export default function WorkspaceContent({
       const icon = presetItem?.icon || '🌐'
 
       body = (
-        <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: 'var(--bg-page)' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: 'var(--bg-page)' }}>
           <div style={{
             display: 'flex',
             alignItems: 'center',
@@ -344,7 +344,7 @@ export default function WorkspaceContent({
               </button>
             </div>
           </div>
-          <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+          <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
             <iframe
               src={url}
               title={name}
@@ -363,7 +363,7 @@ export default function WorkspaceContent({
       const teamsStatus = targetProfile?.apps?.teams?.sessionStatus ?? 'not-signed-in'
       if (teamsStatus === 'signed-in') {
         body = (
-          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: 'var(--bg-page)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: 'var(--bg-page)' }}>
             <div style={{
               display: 'flex',
               alignItems: 'center',
@@ -412,14 +412,14 @@ export default function WorkspaceContent({
                 </button>
               </div>
             </div>
-            <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+            <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
               <CardLiveSlackEmbed appId="teams" profileId={targetProfile?.id} />
             </div>
           </div>
         )
       } else if (teamsStatus === 'signing-in' || authBusyApp === 'teams') {
         body = (
-          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: 'var(--bg-page)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: 'var(--bg-page)' }}>
             <div style={{
               display: 'flex',
               alignItems: 'center',
@@ -451,7 +451,7 @@ export default function WorkspaceContent({
                 Cancel
               </button>
             </div>
-            <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+            <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
               <CardLiveSlackEmbed appId="teams" profileId={targetProfile?.id} />
             </div>
           </div>
@@ -509,7 +509,7 @@ export default function WorkspaceContent({
       const whatsappStatus = targetProfile?.apps?.whatsapp?.sessionStatus ?? 'not-signed-in'
       if (whatsappStatus === 'signed-in') {
         body = (
-          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: 'var(--bg-page)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: 'var(--bg-page)' }}>
             <div style={{
               display: 'flex',
               alignItems: 'center',
@@ -558,14 +558,14 @@ export default function WorkspaceContent({
                 </button>
               </div>
             </div>
-            <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+            <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
               <CardLiveSlackEmbed appId="whatsapp" profileId={targetProfile?.id} />
             </div>
           </div>
         )
       } else {
         body = (
-          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: 'var(--bg-page)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: 'var(--bg-page)' }}>
             <div style={{
               display: 'flex',
               alignItems: 'center',
@@ -600,7 +600,7 @@ export default function WorkspaceContent({
                 {authBusyApp === 'whatsapp' ? 'Watching for QR Scan…' : 'Start QR Scan'}
               </button>
             </div>
-            <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+            <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
               <CardLiveSlackEmbed appId="whatsapp" profileId={targetProfile?.id} />
             </div>
           </div>
@@ -669,7 +669,7 @@ export default function WorkspaceContent({
 
       if (isWholeWorkspace && slackViewMode === 'live' && (cardAuthenticated === true || effectiveSlackTeamId || project.teamId || channels.teamConnected)) {
         body = (
-          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: 'var(--bg-page)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: 'var(--bg-page)' }}>
             <div style={{
               display: 'flex',
               alignItems: 'center',
@@ -738,7 +738,7 @@ export default function WorkspaceContent({
                 </div>
               </div>
             </div>
-            <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+            <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
               <CardLiveSlackEmbed
                 projectId={project.id}
                 appId="slack"
@@ -850,14 +850,22 @@ export default function WorkspaceContent({
 
   if (bare) {
     return (
-      <section className="ws-content is-bare" aria-label={title}>
+      <section
+        className="ws-content is-bare"
+        aria-label={title}
+        style={{ flex: '1 1 0%', height: '100%', minHeight: 0, width: '100%' }}
+      >
         {body}
       </section>
     )
   }
 
   return (
-    <section className="ws-content" aria-label={title}>
+    <section
+      className="ws-content"
+      aria-label={title}
+      style={{ flex: '1 1 0%', height: '100%', minHeight: 0, width: '100%' }}
+    >
       <div className="ws-content-scroll">
         <div className="ws-content-inner">
           <p className="ws-content-eyebrow">{identity.name}</p>

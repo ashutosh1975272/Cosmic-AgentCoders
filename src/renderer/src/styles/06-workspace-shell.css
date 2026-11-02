@@ -141,6 +141,8 @@
 .ws-content {
   display: flex;
   flex-direction: column;
+  flex: 1 1 0%;
+  height: 100%;
   min-height: 0;
   min-width: 0;
   background: var(--content-bg);
@@ -179,7 +181,24 @@
   color: var(--text-muted);
 }
 .ws-content-body { min-width: 0; }
-.ws-content.is-bare { padding: 0; }
+.ws-content.is-bare {
+  padding: 0;
+  flex: 1 1 0%;
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.cosmic-full-workspace .ws-content,
+.basic-mode-workspace .ws-content,
+.cosmic-full-workspace .ws-body {
+  flex: 1 1 0%;
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+}
 
 /* ===== Dashboard page (expanded card) ===== */
 .dash-page {

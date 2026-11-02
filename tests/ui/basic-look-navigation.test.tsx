@@ -3,6 +3,7 @@ import { render, fireEvent, cleanup } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { BasicSidebarProjectTree } from '../../src/renderer/src/components/dashboard/BasicSidebarProjectTree'
 import { ProfileSidebar } from '../../src/renderer/src/components/ProfileSidebar'
+import CardLiveSlackEmbed from '../../src/renderer/src/components/dashboard/CardLiveSlackEmbed'
 import { useDashboardStore } from '../../src/renderer/src/hooks/useDashboard'
 
 describe('BasicSidebarProjectTree & Basic Look Navigation', () => {
@@ -52,6 +53,29 @@ describe('BasicSidebarProjectTree & Basic Look Navigation', () => {
       cosmicSelectedCardId: 'proj-1',
       basicActiveTab: 'dashboard'
     })
+
+    window.api = {
+      app: {
+        getSettings: vi.fn().mockResolvedValue({}),
+        onSettingsChanged: vi.fn().mockReturnValue(() => undefined)
+      },
+      dashboard: {
+        onScrapeEvent: vi.fn().mockReturnValue(() => undefined)
+      },
+      profiles: {
+        activateCardSlackEmbed: vi.fn().mockResolvedValue(undefined),
+        updateCardSlackEmbedBounds: vi.fn().mockResolvedValue(undefined),
+        clearCardSlackEmbed: vi.fn().mockResolvedValue(undefined)
+      }
+    } as any
+
+    class MockResizeObserver {
+      observe = vi.fn()
+      unobserve = vi.fn()
+      disconnect = vi.fn()
+    }
+    window.ResizeObserver = MockResizeObserver as any
+    global.ResizeObserver = MockResizeObserver as any
   })
 
   it('renders project names as collapsible tree rows without card wrapper boxes', () => {
@@ -153,5 +177,18 @@ describe('BasicSidebarProjectTree & Basic Look Navigation', () => {
 
     expect(getByText('Rajesh-test-03')).not.toBeNull()
     expect(getByText('Continue with Google')).not.toBeNull()
+  })
+
+  it('renders CardLiveSlackEmbed with full-height container and canonical background', () => {
+    const { container } = render(
+      <CardLiveSlackEmbed appId="whatsapp" profileId="prof-1" />
+    )
+
+    const embedDiv = container.firstChild as HTMLElement
+    expect(embedDiv).not.toBeNull()
+    // Must not be clamped to 480px or have radius/hardcoded colors
+    expect(embedDiv.style.minHeight).toBe('0px')
+    expect(embedDiv.style.borderRadius).toBe('0px')
+    expect(embedDiv.style.background).toBe('var(--bg-page)')
   })
 })

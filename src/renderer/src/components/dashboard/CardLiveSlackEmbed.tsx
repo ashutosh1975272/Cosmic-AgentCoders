@@ -195,11 +195,11 @@ export default function CardLiveSlackEmbed({
       style={{
         width: '100%',
         height: '100%',
-        minHeight: 480,
-        flex: 1,
+        minHeight: 0,
+        flex: '1 1 0%',
         position: 'relative',
-        background: '#1a1d21',
-        borderRadius: 8,
+        background: 'var(--bg-page)',
+        borderRadius: 0,
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column'
@@ -259,9 +259,11 @@ export default function CardLiveSlackEmbed({
         ref={embedRef}
         style={{
           width: '100%',
-          flex: 1,
+          flex: '1 1 0%',
+          height: '100%',
+          minHeight: 0,
           position: 'relative',
-          background: '#1a1d21',
+          background: 'var(--bg-page)',
           overflow: 'hidden'
         }}
       >
@@ -277,7 +279,7 @@ export default function CardLiveSlackEmbed({
               gap: 12,
               color: '#94a3b8',
               fontSize: 13,
-              background: '#1a1d21'
+              background: 'var(--bg-page)'
             }}
           >
             <div
