@@ -63,6 +63,7 @@ if (loadedEnvPath) {
 }
 
 /** One process / one tray — second launches focus the existing window. */
+app.setName(APP_DISPLAY_NAME)
 app.disableHardwareAcceleration()
 app.commandLine.appendSwitch('disable-gpu')
 app.commandLine.appendSwitch('no-sandbox')
@@ -74,9 +75,11 @@ if (!gotSingleInstanceLock) {
   if (process.defaultApp) {
     if (process.argv.length >= 2) {
       app.setAsDefaultProtocolClient('slack-dashboard', process.execPath, [join(process.argv[1])])
+      app.setAsDefaultProtocolClient('cosmic', process.execPath, [join(process.argv[1])])
     }
   } else {
     app.setAsDefaultProtocolClient('slack-dashboard')
+    app.setAsDefaultProtocolClient('cosmic')
   }
 
   app.userAgentFallback = CHROME_USER_AGENT
@@ -145,6 +148,7 @@ if (!gotSingleInstanceLock) {
   })
 
   function createWindow(): void {
+    const appWindowIcon = nativeImage.createFromPath(icon)
     mainWindow = new BrowserWindow({
       width: 1280,
       height: 800,
@@ -152,7 +156,7 @@ if (!gotSingleInstanceLock) {
       autoHideMenuBar: true,
       title: APP_DISPLAY_NAME,
       backgroundColor: '#14121c',
-      icon,
+      icon: appWindowIcon.isEmpty() ? icon : appWindowIcon,
       webPreferences: {
         preload: join(__dirname, '../preload/index.js'),
         sandbox: true,
@@ -160,6 +164,10 @@ if (!gotSingleInstanceLock) {
         nodeIntegration: false
       }
     })
+
+    if (!appWindowIcon.isEmpty()) {
+      mainWindow.setIcon(appWindowIcon)
+    }
 
     applyChromeUserAgent(mainWindow.webContents)
     // Undo accidental ⌘+/trackpad zoom from prior sessions.

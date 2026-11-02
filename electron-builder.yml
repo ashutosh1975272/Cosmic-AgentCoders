@@ -1,5 +1,6 @@
-appId: com.orbit.app
-productName: Orbit
+appId: com.cosmic.app
+productName: Cosmic
+executableName: Cosmic
 afterPack: build/afterPack.cjs
 directories:
   buildResources: build
@@ -18,16 +19,16 @@ extraResources:
   - from: .env
     to: .env
 win:
-  executableName: Orbit
+  executableName: Cosmic
   icon: icon.ico
 nsis:
-  artifactName: ${name}-${version}-setup.${ext}
-  shortcutName: Orbit
-  uninstallDisplayName: Orbit
+  artifactName: Cosmic-${version}-setup.${ext}
+  shortcutName: Cosmic
+  uninstallDisplayName: Cosmic
   createDesktopShortcut: always
 dmg:
-  artifactName: ${name}-${version}-${arch}.${ext}
-  title: Orbit
+  artifactName: Cosmic-${version}-${arch}.${ext}
+  title: Cosmic
 mac:
   icon: icon.icns
   category: public.app-category.productivity
@@ -37,10 +38,10 @@ mac:
   entitlementsInherit: build/entitlements.mac.plist
   # Must be a map (not a YAML list) or electron-builder writes broken numeric Info.plist keys.
   extendInfo:
-    CFBundleDisplayName: Orbit
-    CFBundleName: Orbit
+    CFBundleDisplayName: Cosmic
+    CFBundleName: Cosmic
     NSUserNotificationAlertStyle: alert
-    NSUserNotificationsUsageDescription: Orbit shows alerts for unread Slack, Teams, and WhatsApp messages.
+    NSUserNotificationsUsageDescription: Cosmic shows alerts for unread Slack, Teams, and WhatsApp messages.
     NSCameraUsageDescription: Application requests access to the device's camera.
     NSMicrophoneUsageDescription: Application requests access to the device's microphone.
     NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
@@ -53,12 +54,11 @@ linux:
   syncDesktopName: true
   target:
     - AppImage
-    - snap
     - deb
   maintainer: electronjs.org
   category: Utility
 appImage:
-  artifactName: ${name}-${version}.${ext}
+  artifactName: Cosmic-${version}.${ext}
 npmRebuild: false
 publish:
   provider: generic

@@ -13,6 +13,7 @@ import {
 } from '../../../shared/types'
 import { modKey } from '../lib/shortcut-label'
 import { formatUnreadBadge, unreadKey } from '../lib/unread-badge'
+import appIcon from '../assets/app-icon.png'
 import { AppIcon } from './AppIcon'
 import { SidebarPanelIcon } from './SidebarPanelIcon'
 import { CosmicSidebarContent } from './dashboard/CosmicSidebarNav'
@@ -449,7 +450,22 @@ export const ProfileSidebar = memo(function ProfileSidebar({
     <aside className="sidebar" aria-label="Profiles">
       <div className="sidebar-brand">
         <div className="sidebar-brand-row">
-          <h1 className="brand">{APP_DISPLAY_NAME}</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <img
+              src={appIcon}
+              alt=""
+              aria-hidden="true"
+              style={{
+                width: '24px',
+                height: '24px',
+                borderRadius: '6px',
+                boxShadow: '0 0 10px rgba(139, 92, 246, 0.35)',
+                objectFit: 'cover',
+                display: 'block'
+              }}
+            />
+            <h1 className="brand" style={{ margin: 0 }}>{APP_DISPLAY_NAME}</h1>
+          </div>
           <div className="sidebar-brand-actions">
             <button
               type="button"
