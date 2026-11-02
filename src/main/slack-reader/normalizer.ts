@@ -58,6 +58,12 @@ export function normalizeSlackTimestamp(rawTs?: string | number): string | null 
       return (Number(trimmed) / 1000).toFixed(6)
     }
 
+    // Permalink 'p1730630000000100' format
+    const pMatch = trimmed.match(/^p?(\d{10})(\d{6})$/)
+    if (pMatch) {
+      return `${pMatch[1]}.${pMatch[2]}`
+    }
+
     // Try parsing ISO/date string
     const parsed = Date.parse(trimmed)
     if (!Number.isNaN(parsed) && parsed > 0) {

@@ -138,13 +138,47 @@ export function buildReadVisibleMessagesScript(sinceTs = 0): string {
       }
     }
 
-    // Extract timestamp from data-ts attribute, datetime, or text
-    let rawTs = tsEl ? (tsEl.getAttribute('data-ts') || tsEl.getAttribute('datetime') || tsEl.textContent.trim()) : '';
-    const sender = lastAuthor || 'Anonymous';
-    const text = bodyEl ? (bodyEl.innerText || bodyEl.textContent || '').trim() : '';
-
+    // Extract permalink if present
     const permalinkEl = row.querySelector('a[href*="/archives/"]');
     const permalink = permalinkEl ? permalinkEl.getAttribute('href') : '';
+
+    // Extract exact timestamp from data-ts, data-item-key, archives permalink, or ts element
+    let pTs = '';
+    if (permalink && permalink.indexOf('/p') !== -1) {
+      const pIdx = permalink.lastIndexOf('/p');
+      const pDigits = permalink.slice(pIdx + 2).replace(/[^0-9]/g, '');
+      if (pDigits.length >= 16) {
+        pTs = pDigits.slice(0, 10) + '.' + pDigits.slice(10, 16);
+      }
+    }
+
+    let rawTs =
+      (tsEl ? tsEl.getAttribute('data-ts') : '') ||
+      (row.getAttribute('data-item-key') && row.getAttribute('data-item-key').length >= 10 ? row.getAttribute('data-item-key') : '') ||
+      (row.getAttribute('data-ts') || '') ||
+      pTs ||
+      (tsEl ? (tsEl.getAttribute('datetime') || tsEl.textContent.trim()) : '');
+
+    const sender = lastAuthor || 'Anonymous';
+
+    // Extract attachments, files (e.g. Word .docx, pdfs, images)
+    const attachmentEls = row.querySelectorAll(
+      '[data-qa="file_container"], .c-file_container, .c-file__title, .p-file_title, [data-qa="file_title"], .c-message_attachment, a[href*="/files/"]'
+    );
+    const fileNames = [];
+    attachmentEls.forEach((att) => {
+      const titleEl = att.querySelector('.c-file__title, [data-qa="file_title"], .p-file_title') || att;
+      const fName = (titleEl.textContent || titleEl.innerText || '').trim();
+      if (fName && fileNames.indexOf(fName) === -1 && fName.indexOf(String.fromCharCode(10)) === -1 && fName.length < 200) {
+        fileNames.push(fName);
+      }
+    });
+
+    let text = bodyEl ? (bodyEl.innerText || bodyEl.textContent || '').trim() : '';
+    if (fileNames.length > 0) {
+      const fileText = fileNames.map((fn) => '[Document: ' + fn + ']').join(' ');
+      text = text ? text + ' ' + fileText : fileText;
+    }
 
     if (rawTs && text) {
       const parsedNum = parseFloat(rawTs);
@@ -170,7 +204,7 @@ export const READ_VISIBLE_MESSAGES_SCRIPT = buildReadVisibleMessagesScript(0)
 
 export class SlackAdapter {
   async detectState(view: WebContentsView): Promise<SlackSessionState> {
-    if (view.webContents.isDestroyed()) return 'unknown'
+    if (!view || view.webContents?.isDestroyed()) return 'unknown'
     try {
       const state = (await view.webContents.executeJavaScript(DETECT_STATE_SCRIPT, true)) as SlackSessionState
       return state ?? 'unknown'
@@ -180,7 +214,7 @@ export class SlackAdapter {
   }
 
   async listChannels(view: WebContentsView): Promise<ScrapedChannelItem[]> {
-    if (view.webContents.isDestroyed()) return []
+    if (!view || view.webContents?.isDestroyed()) return []
     try {
       const channels = (await view.webContents.executeJavaScript(LIST_CHANNELS_SCRIPT, true)) as ScrapedChannelItem[]
       return Array.isArray(channels) ? channels : []
@@ -193,7 +227,7 @@ export class SlackAdapter {
     view: WebContentsView,
     options: { sinceTs?: number } = {}
   ): Promise<RawScrapedMessage[]> {
-    if (view.webContents.isDestroyed()) return []
+    if (!view || view.webContents?.isDestroyed()) return []
     try {
       const script = buildReadVisibleMessagesScript(options.sinceTs ?? 0)
       const messages = (await view.webContents.executeJavaScript(script, true)) as RawScrapedMessage[]
@@ -205,7 +239,7 @@ export class SlackAdapter {
 
   /** Scroll the message list up (older history) without clicking anything. */
   async scrollUp(view: WebContentsView, pixels = 600): Promise<boolean> {
-    if (view.webContents.isDestroyed()) return false
+    if (!view || view.webContents?.isDestroyed()) return false
     try {
       return Boolean(
         await view.webContents.executeJavaScript(
@@ -226,7 +260,7 @@ export class SlackAdapter {
   }
 
   async postMessageViaDom(view: WebContentsView, text: string): Promise<boolean> {
-    if (view.webContents.isDestroyed()) return false
+    if (!view || view.webContents?.isDestroyed()) return false
     const script = `
 (function() {
   const editor = document.querySelector('${SLACK_SELECTORS.composerEditor}');

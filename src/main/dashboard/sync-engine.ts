@@ -137,8 +137,6 @@ export class DashboardSyncEngine {
   private readonly viewedStore: { get(projectId: string): Promise<string | null> } | undefined
   private readonly metricsCache: Map<string, { key: string; value: DashboardMetrics }> = new Map()
   protected readonly onSynced: ((snapshots: DashboardProjectSnapshot[]) => void) | undefined
-  private readonly getExistingBrowserView?: (profileId: string, appId: 'slack') => any
-  private readonly getExistingCardView?: (projectId: string, appId: 'slack') => any
   private readonly getScrapePersonalDms: () => boolean | Promise<boolean>
   private readonly onSourceRun?: (sourceId: string, atIso: string) => void
   private scrapeEventListener: ((event: ScrapeStepEvent) => void) | null = null
@@ -173,8 +171,6 @@ export class DashboardSyncEngine {
     this.historyReader = deps.historyReader
     this.viewedStore = deps.viewedStore
     this.onSynced = deps.onSynced
-    this.getExistingBrowserView = deps.getExistingBrowserView
-    this.getExistingCardView = deps.getExistingCardView
     this.getScrapePersonalDms = deps.getScrapePersonalDms ?? (() => false)
     this.onSourceRun = deps.onSourceRun
     if (deps.onProgress) this.progressCallbacks.push(deps.onProgress)
@@ -789,10 +785,9 @@ export class DashboardSyncEngine {
       profileId: source.profileId,
       projectId: project.id,
       workspaceId: source.workspaceId,
-      existingView:
-        this.getExistingCardView?.(project.id, 'slack') ??
-        this.getExistingBrowserView?.(source.profileId, 'slack') ??
-        null,
+      // Run scrape in an isolated background WebContentsView sharing the card partition.
+      // Do NOT borrow the foreground active view so the user's visible Slack tab never reloads or flickers.
+      existingView: null,
       onEvent: (ev) =>
         this.scrapeEventListener?.({
           ...ev,
@@ -902,20 +897,18 @@ export class DashboardSyncEngine {
         })
 
         const cursor = await this.channelCursor(source, ch.id)
-        // Manual and scheduled runs share one rule: per-channel cursor − 2 min.
-        // A cursorless channel (newly selected) uses the configured backfill.
-        // Sleep/wake catch-up is not capped by backfillHours; only the 7-day
-        // hard cap applies. source.lastReadAt is deliberately not an anchor:
-        // it would skip history for a channel that was just selected.
-        const anchor = cursor ?? floorTs
-        const sinceTs = Math.max(cursor ? catchUpFloorTs : floorTs, anchor - 120)
-        windowStart = Math.min(windowStart, sinceTs)
+        // If first time scraping this channel (no cursor yet), scrape full history from channel genesis (sinceTs = 0).
+        // On subsequent runs, scrape incrementally from cursor - 120s (last scrape minus 2 min buffer).
+        const isFirstScrape = !cursor
+        const sinceTs = isFirstScrape ? 0 : Math.max(catchUpFloorTs, cursor - 120)
+        const maxScrolls = isFirstScrape ? 150 : 40
+        windowStart = isFirstScrape ? 0 : Math.min(windowStart, sinceTs)
 
         try {
           const result = await reader.readChannelWindow(ch.id, {
             sinceTs,
-            maxScrolls: 40,
-            maxMessages: 3000,
+            maxScrolls,
+            maxMessages: isFirstScrape ? 5000 : 3000,
             signal
           })
           gapSeconds = Math.max(gapSeconds, result.gapSeconds)

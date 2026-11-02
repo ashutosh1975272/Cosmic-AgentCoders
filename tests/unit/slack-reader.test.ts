@@ -33,6 +33,11 @@ describe('Slack Reader Core (SLK-2)', () => {
       expect(normalizeSlackTimestamp('1730000000000')).toBe('1730000000.000000')
     })
 
+    it('normalizes archive permalink timestamp format (p1730000000123456)', () => {
+      expect(normalizeSlackTimestamp('p1730000000123456')).toBe('1730000000.123456')
+      expect(normalizeSlackTimestamp('1730000000123456')).toBe('1730000000.123456')
+    })
+
     it('returns null when timestamp is missing or empty (avoids fabricating fake time)', () => {
       expect(normalizeSlackTimestamp('')).toBeNull()
       expect(normalizeSlackTimestamp('invalid')).toBeNull()

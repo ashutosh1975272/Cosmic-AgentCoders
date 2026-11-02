@@ -273,6 +273,13 @@ export class SlackReaderView {
     const collected = new Map<string, DashboardStoredMessage>()
     for (const message of first) collected.set(message.ts, message)
 
+    if (!this.view) {
+      const all = deduplicateMessages(this.workspaceId, channelId, [...collected.values()])
+      const messages = sinceTs > 0 ? all.filter((m) => Number(m.ts) >= sinceTs) : all
+      const oldest = oldestNumericTs(new Map(all.map((m) => [m.ts, m])))
+      return { messages, oldestTs: oldest, gapSeconds: 0, scrolls: 0, cancelled: false }
+    }
+
     let scrolls = 0
     let cancelled = signal?.aborted === true
     let canScroll = true
