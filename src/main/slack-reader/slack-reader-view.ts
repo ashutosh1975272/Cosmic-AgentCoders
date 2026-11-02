@@ -128,8 +128,46 @@ export class SlackReaderView {
     return this.adapter.detectState(this.view!)
   }
 
+  async waitForContent(timeoutMs = 12000): Promise<boolean> {
+    if (!this.view || this.view.webContents.isDestroyed()) return false
+    const start = Date.now()
+    while (Date.now() - start < timeoutMs) {
+      if (this.view.webContents.isDestroyed()) return false
+      try {
+        const state = await this.adapter.detectState(this.view)
+        if (state === 'logged_in') {
+          const isDomReady = await this.view.webContents.executeJavaScript(`
+            Boolean(
+              document.querySelector('${SLACK_SELECTORS.messageRow}') ||
+              document.querySelector('${SLACK_SELECTORS.channelItem}') ||
+              document.querySelector('${SLACK_SELECTORS.channelListContainer}') ||
+              document.querySelector('${SLACK_SELECTORS.loggedInIndicator}')
+            )
+          `, true)
+          if (isDomReady) return true
+        } else if (state === 'needs_login' || state === 'challenge') {
+          return false
+        }
+      } catch {
+        // ignore navigation transition errors
+      }
+      await new Promise((resolve) => setTimeout(resolve, 350))
+    }
+    return false
+  }
+
   async listChannels(): Promise<ScrapedChannelItem[]> {
     if (!this.view) await this.initialize()
+    const currentUrl = this.view!.webContents.getURL()
+    if (!currentUrl.includes('slack.com')) {
+      const targetUrl = `https://app.slack.com/client/${this.workspaceId}`
+      try {
+        await this.view!.webContents.loadURL(targetUrl)
+      } catch (err: any) {
+        if (!err.message?.includes('ERR_ABORTED')) throw err
+      }
+      await this.waitForContent(12000)
+    }
     const state = await this.checkState()
     if (state !== 'logged_in') return []
     return this.adapter.listChannels(this.view!)
@@ -141,14 +179,27 @@ export class SlackReaderView {
    */
   async readChannelMessages(channelId: string): Promise<DashboardStoredMessage[]> {
     if (!this.view) await this.initialize()
+
+    const channelUrl = `https://app.slack.com/client/${this.workspaceId}/${channelId}`
+    let currentUrl = this.view!.webContents.getURL()
+
+    // If the view is unnavigated (e.g. fresh background view at about:blank), navigate immediately to the channel
+    if (!currentUrl.includes('slack.com')) {
+      try {
+        await this.view!.webContents.loadURL(channelUrl)
+      } catch (err: any) {
+        if (!err.message?.includes('ERR_ABORTED')) throw err
+      }
+      await this.waitForContent(12000)
+    }
+
     const state = await this.checkState()
     if (state !== 'logged_in') {
       log.info('slack reader cannot read channel: session not logged in', { state })
       return []
     }
 
-    const channelUrl = `https://app.slack.com/client/${this.workspaceId}/${channelId}`
-    let currentUrl = this.view!.webContents.getURL()
+    currentUrl = this.view!.webContents.getURL()
 
     this.onEvent?.({
       type: 'navigate',

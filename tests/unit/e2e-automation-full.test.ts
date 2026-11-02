@@ -450,6 +450,28 @@ describe('[L5] SlackReaderView', () => {
     expect(events).toContain('status')
   })
 
+  it('readChannelMessages on unnavigated view (about:blank) loads channel URL first', async () => {
+    let url = 'about:blank'
+    const view = makeMockView({ url })
+    view.webContents.getURL = () => url
+    view.webContents.loadURL = vi.fn().mockImplementation((newUrl: string) => {
+      url = newUrl
+      return Promise.resolve()
+    })
+    view.webContents.executeJavaScript = vi.fn().mockImplementation((code: string) => {
+      if (code.includes('messageRow')) return Promise.resolve(true)
+      if (url.includes('slack.com')) return Promise.resolve('logged_in')
+      return Promise.resolve('unknown')
+    })
+    const reader = new SlackReaderView({
+      profileId: 'p-blank',
+      workspaceId: 'T123',
+      existingView: view as any
+    })
+    await reader.readChannelMessages('C999')
+    expect(view.webContents.loadURL).toHaveBeenCalledWith('https://app.slack.com/client/T123/C999')
+  })
+
   it('destroy does not destroy a borrowed view', () => {
     const view = makeMockView({ jsResult: 'logged_in' })
     const reader = new SlackReaderView({
