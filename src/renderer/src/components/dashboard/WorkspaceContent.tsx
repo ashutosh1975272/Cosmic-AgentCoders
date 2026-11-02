@@ -372,6 +372,7 @@ export default function WorkspaceContent({
           profileId={pId}
           teamId={tId}
           appId="slack"
+          hidden={Boolean(channelPickerSourceId)}
         />
       )
     } else if (sel && sel.startsWith('c:preset:')) {
@@ -500,7 +501,7 @@ export default function WorkspaceContent({
               </div>
             </div>
             <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
-              <CardLiveSlackEmbed appId="teams" profileId={targetProfile?.id} />
+              <CardLiveSlackEmbed appId="teams" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId)} />
             </div>
           </div>
         )
@@ -539,7 +540,7 @@ export default function WorkspaceContent({
               </button>
             </div>
             <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
-              <CardLiveSlackEmbed appId="teams" profileId={targetProfile?.id} />
+              <CardLiveSlackEmbed appId="teams" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId)} />
             </div>
           </div>
         )
@@ -646,7 +647,7 @@ export default function WorkspaceContent({
               </div>
             </div>
             <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
-              <CardLiveSlackEmbed appId="whatsapp" profileId={targetProfile?.id} />
+              <CardLiveSlackEmbed appId="whatsapp" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId)} />
             </div>
           </div>
         )
@@ -688,7 +689,7 @@ export default function WorkspaceContent({
               </button>
             </div>
             <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
-              <CardLiveSlackEmbed appId="whatsapp" profileId={targetProfile?.id} />
+              <CardLiveSlackEmbed appId="whatsapp" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId)} />
             </div>
           </div>
         )
@@ -859,6 +860,7 @@ export default function WorkspaceContent({
                 projectId={project.id}
                 appId="slack"
                 profileId={targetProfile?.id}
+                hidden={Boolean(channelPickerSourceId)}
                 teamId={
                   effectiveSlackTeamId ||
                   (project.teamId &&

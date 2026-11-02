@@ -116,14 +116,14 @@ describe('SourceChannelPicker', () => {
     ).toEqual(['D1'])
   })
 
-  it('renders centered with z-index 9999 so it sits on top of all views', async () => {
+  it('renders centered with z-index 99999 so it sits on top of all views', async () => {
     render(
       <SourceChannelPicker projectId="proj-1" source={source} open onClose={vi.fn()} />
     )
 
     const dialog = screen.getByRole('dialog', { name: /select channels to scrape/i })
     expect(dialog.style.position).toBe('fixed')
-    expect(dialog.style.zIndex).toBe('9999')
+    expect(dialog.style.zIndex).toBe('99999')
     expect(dialog.style.display).toBe('flex')
     expect(dialog.style.alignItems).toBe('center')
     expect(dialog.style.justifyContent).toBe('center')

@@ -218,9 +218,9 @@ export function SourceChannelPicker({
       style={{
         position: 'fixed',
         inset: 0,
-        zIndex: 9999,
-        background: 'rgba(2, 6, 23, 0.8)',
-        backdropFilter: 'blur(6px)',
+        zIndex: 99999,
+        background: 'rgba(2, 6, 23, 0.85)',
+        backdropFilter: 'blur(8px)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -229,14 +229,14 @@ export function SourceChannelPicker({
     >
       <div
         style={{
-          width: 'min(860px, 94vw)',
-          maxHeight: 'min(780px, 90vh)',
+          width: 'min(840px, 92vw)',
+          maxHeight: 'min(80vh, 720px)',
           overflowY: 'auto',
           background: 'var(--panel, #141824)',
-          border: '1px solid rgba(255, 255, 255, 0.12)',
+          border: '1px solid rgba(255, 255, 255, 0.14)',
           borderRadius: 14,
           padding: 24,
-          boxShadow: '0 24px 70px rgba(0,0,0,0.65)'
+          boxShadow: '0 25px 75px rgba(0, 0, 0, 0.8)'
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start' }}>

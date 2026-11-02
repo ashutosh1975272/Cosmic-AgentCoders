@@ -1125,10 +1125,12 @@ export class BrowserViewManager {
       return
     }
 
-    if (!mainWindow.contentView.children.includes(view)) {
-      mainWindow.contentView.addChildView(view)
+    if (!this.embedHidden) {
+      if (!mainWindow.contentView.children.includes(view)) {
+        mainWindow.contentView.addChildView(view)
+      }
+      view.setBounds(bounds)
     }
-    view.setBounds(bounds)
     this.noteActivity()
     log.info('custom link view activated', { profileId, linkId, url })
   }
@@ -1202,10 +1204,12 @@ export class BrowserViewManager {
     this.cardEmbedKey = key
     this.cardEmbedBounds = bounds
 
-    if (!mainWindow.contentView.children.includes(view)) {
-      mainWindow.contentView.addChildView(view)
+    if (!this.embedHidden) {
+      if (!mainWindow.contentView.children.includes(view)) {
+        mainWindow.contentView.addChildView(view)
+      }
+      view.setBounds(bounds)
     }
-    view.setBounds(bounds)
 
     // Ensure we are navigated appropriately
     if (appId === 'slack') {
@@ -1273,6 +1277,15 @@ export class BrowserViewManager {
 
   updateCardSlackEmbedBounds(mainWindow: BrowserWindow, bounds: Rectangle): void {
     this.cardEmbedBounds = bounds
+    if (this.embedHidden) {
+      if (this.cardEmbedKey) {
+        const view = this.views.get(this.cardEmbedKey)
+        if (view && mainWindow.contentView.children.includes(view)) {
+          mainWindow.contentView.removeChildView(view)
+        }
+      }
+      return
+    }
     if (this.cardEmbedKey) {
       const view = this.views.get(this.cardEmbedKey)
       if (view) {
@@ -1389,10 +1402,12 @@ export class BrowserViewManager {
     if (!view) {
       return
     }
-    if (!mainWindow.contentView.children.includes(view)) {
-      mainWindow.contentView.addChildView(view)
+    if (!this.embedHidden) {
+      if (!mainWindow.contentView.children.includes(view)) {
+        mainWindow.contentView.addChildView(view)
+      }
+      view.setBounds(bounds)
     }
-    view.setBounds(bounds)
   }
 
   setEmbedVisible(mainWindow: BrowserWindow, visible: boolean): void {

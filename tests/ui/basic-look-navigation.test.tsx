@@ -94,7 +94,8 @@ describe('BasicSidebarProjectTree & Basic Look Navigation', () => {
       profiles: {
         activateCardSlackEmbed: vi.fn().mockResolvedValue(undefined),
         updateCardSlackEmbedBounds: vi.fn().mockResolvedValue(undefined),
-        clearCardSlackEmbed: vi.fn().mockResolvedValue(undefined)
+        clearCardSlackEmbed: vi.fn().mockResolvedValue(undefined),
+        setEmbedVisible: vi.fn().mockResolvedValue(undefined)
       }
     } as any
 
@@ -219,6 +220,19 @@ describe('BasicSidebarProjectTree & Basic Look Navigation', () => {
     expect(embedDiv.style.minHeight).toBe('0px')
     expect(embedDiv.style.borderRadius).toBe('0px')
     expect(embedDiv.style.background).toBe('var(--bg-page)')
+  })
+
+  it('hides and clears CardLiveSlackEmbed when hidden prop is true', () => {
+    const { container } = render(
+      <CardLiveSlackEmbed appId="slack" profileId="prof-1" hidden />
+    )
+
+    const embedDiv = container.firstChild as HTMLElement
+    expect(embedDiv.style.display).toBe('none')
+    expect(embedDiv.style.visibility).toBe('hidden')
+    expect(window.api.profiles.clearCardSlackEmbed).toHaveBeenCalled()
+    expect(window.api.profiles.setEmbedVisible).toHaveBeenCalledWith(false)
+    expect(window.api.profiles.activateCardSlackEmbed).not.toHaveBeenCalled()
   })
 
   it('renders pin button on project rows and sorts pinned projects to the top', () => {

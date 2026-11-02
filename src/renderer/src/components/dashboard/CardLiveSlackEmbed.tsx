@@ -5,6 +5,7 @@ interface CardLiveSlackEmbedProps {
   profileId: string
   teamId?: string
   appId?: 'slack' | 'teams' | 'whatsapp'
+  hidden?: boolean
 }
 
 interface ScrapeEventState {
@@ -24,7 +25,8 @@ export default function CardLiveSlackEmbed({
   projectId,
   profileId,
   teamId,
-  appId = 'slack'
+  appId = 'slack',
+  hidden = false
 }: CardLiveSlackEmbedProps): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
   const embedRef = useRef<HTMLDivElement>(null)
@@ -72,6 +74,12 @@ export default function CardLiveSlackEmbed({
   }, [])
 
   useEffect(() => {
+    if (hidden) {
+      void window.api.profiles.clearCardSlackEmbed()
+      void window.api.profiles.setEmbedVisible(false)
+      return undefined
+    }
+
     const el = embedRef.current ?? containerRef.current
     if (!el) return
 
@@ -185,7 +193,7 @@ export default function CardLiveSlackEmbed({
       document.removeEventListener('animationend', onTransitionEnd)
       void window.api.profiles.clearCardSlackEmbed()
     }
-  }, [projectId, profileId, teamId, appId])
+  }, [projectId, profileId, teamId, appId, hidden])
 
   const isScrapingActive = appId === 'slack' && scrapeEvent.status === 'reading' && lineVisible
 
@@ -201,8 +209,9 @@ export default function CardLiveSlackEmbed({
         background: 'var(--bg-page)',
         borderRadius: 0,
         overflow: 'hidden',
-        display: 'flex',
-        flexDirection: 'column'
+        display: hidden ? 'none' : 'flex',
+        flexDirection: 'column',
+        visibility: hidden ? 'hidden' : 'visible'
       }}
     >
       {isScrapingActive && (
