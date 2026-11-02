@@ -702,40 +702,22 @@ export default function WorkspaceContent({
                 )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <div style={{ display: 'flex', background: 'rgba(0,0,0,0.3)', borderRadius: 6, padding: 2 }}>
-                  <button
-                    type="button"
-                    onClick={() => setSlackViewMode('live')}
-                    style={{
-                      padding: '3px 8px',
-                      fontSize: 11,
-                      fontWeight: 600,
-                      border: 'none',
-                      borderRadius: 4,
-                      background: 'var(--accent)',
-                      color: '#fff',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    Live Embed
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSlackViewMode('messages')}
-                    style={{
-                      padding: '3px 8px',
-                      fontSize: 11,
-                      fontWeight: 600,
-                      border: 'none',
-                      borderRadius: 4,
-                      background: 'transparent',
-                      color: '#fff',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    Messages
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleStartCardAppLogin(project.id, targetProfile?.id, 'slack')}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.06)',
+                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    color: '#cbd5e1',
+                    fontSize: 11,
+                    borderRadius: 6,
+                    padding: '3px 9px',
+                    cursor: 'pointer'
+                  }}
+                  title="Re-open Slack login flow"
+                >
+                  Re-authenticate
+                </button>
               </div>
             </div>
             <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
@@ -743,7 +725,15 @@ export default function WorkspaceContent({
                 projectId={project.id}
                 appId="slack"
                 profileId={targetProfile?.id}
-                teamId={effectiveSlackTeamId || (project.teamId && !project.teamId.startsWith('team-') && project.teamId !== 'team' ? project.teamId : undefined)}
+                teamId={
+                  effectiveSlackTeamId ||
+                  (project.teamId &&
+                  !project.teamId.startsWith('team-') &&
+                  !project.teamId.startsWith('pending-') &&
+                  project.teamId !== 'team'
+                    ? project.teamId
+                    : undefined)
+                }
               />
             </div>
           </div>

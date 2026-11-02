@@ -178,7 +178,7 @@ export function CosmicWorkspaceView({
       return {
         ...nav,
         openGroup: 'slack' as const,
-        selection: 'c:team:main' as const
+        selection: 's:team' as const
       }
     }
     if (basicActiveTab === 'teams') {

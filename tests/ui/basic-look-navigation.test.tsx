@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { BasicSidebarProjectTree } from '../../src/renderer/src/components/dashboard/BasicSidebarProjectTree'
 import { ProfileSidebar } from '../../src/renderer/src/components/ProfileSidebar'
 import CardLiveSlackEmbed from '../../src/renderer/src/components/dashboard/CardLiveSlackEmbed'
+import { CosmicWorkspaceView } from '../../src/renderer/src/components/dashboard/CosmicWorkspaceView'
 import { useDashboardStore } from '../../src/renderer/src/hooks/useDashboard'
 
 describe('BasicSidebarProjectTree & Basic Look Navigation', () => {
@@ -30,7 +31,17 @@ describe('BasicSidebarProjectTree & Basic Look Navigation', () => {
           createdAt: new Date().toISOString()
         },
         sources: [],
-        syncState: 'idle'
+        syncState: 'idle',
+        summary: 'Weekly sync notes.',
+        newMessageCount: 0,
+        totalMessageCount: 0,
+        completion: 50,
+        pace: 'on-track',
+        mood: { state: 'neutral', signal: '' },
+        extractedDates: {},
+        effectiveDates: { startDate: null, endDate: null },
+        perChannel: [],
+        lastUpdatedAt: new Date().toISOString()
       },
       {
         project: {
@@ -46,7 +57,17 @@ describe('BasicSidebarProjectTree & Basic Look Navigation', () => {
           createdAt: new Date().toISOString()
         },
         sources: [],
-        syncState: 'idle'
+        syncState: 'idle',
+        summary: 'Weekly sync notes.',
+        newMessageCount: 0,
+        totalMessageCount: 0,
+        completion: 50,
+        pace: 'on-track',
+        mood: { state: 'neutral', signal: '' },
+        extractedDates: {},
+        effectiveDates: { startDate: null, endDate: null },
+        perChannel: [],
+        lastUpdatedAt: new Date().toISOString()
       }
     ],
     updatedAt: new Date().toISOString()
@@ -65,7 +86,10 @@ describe('BasicSidebarProjectTree & Basic Look Navigation', () => {
         onSettingsChanged: vi.fn().mockReturnValue(() => undefined)
       },
       dashboard: {
-        onScrapeEvent: vi.fn().mockReturnValue(() => undefined)
+        onScrapeEvent: vi.fn().mockReturnValue(() => undefined),
+        checkCardAuth: vi.fn().mockResolvedValue(true),
+        getTeamWorkspace: vi.fn().mockResolvedValue(null),
+        listChannels: vi.fn().mockResolvedValue({ ok: true, channels: [] })
       },
       profiles: {
         activateCardSlackEmbed: vi.fn().mockResolvedValue(undefined),
@@ -244,5 +268,32 @@ describe('BasicSidebarProjectTree & Basic Look Navigation', () => {
     fireEvent.click(pinButtons[0])
 
     expect(setPinnedOrderSpy).toHaveBeenCalledWith(['proj-1'])
+  })
+
+  it('when basicActiveTab is slack, CosmicWorkspaceView activates live Slack embed with whole-workspace s:team selection', async () => {
+    useDashboardStore.setState({
+      snapshot: mockSnapshot as any,
+      cosmicSelectedCardId: 'proj-1',
+      basicActiveTab: 'slack'
+    })
+
+    const { getByText, queryByText } = render(
+      <CosmicWorkspaceView sidebarLook="basic" />
+    )
+
+    // Should render the Slack Workspace header
+    expect(getByText('Slack Workspace')).not.toBeNull()
+    expect(getByText('Re-authenticate')).not.toBeNull()
+
+    // Must NOT render the read-only SlackChatTab message
+    expect(queryByText(/No stored messages yet/i)).toBeNull()
+
+    // Verify activateCardSlackEmbed was called for slack
+    expect(window.api.profiles.activateCardSlackEmbed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appId: 'slack',
+        projectId: 'proj-1'
+      })
+    )
   })
 })
