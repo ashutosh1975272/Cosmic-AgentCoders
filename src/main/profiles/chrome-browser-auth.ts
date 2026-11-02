@@ -302,7 +302,7 @@ function chromeLoginProfileDir(profileId: string): string {
  * into a card-specific Chrome directory so that when Chrome launches for the card,
  * Google already has the profile's Google account pre-logged-in for OAuth.
  */
-function seedChromeCardProfile(profileId: string, cardChromeKey: string): void {
+export function seedChromeCardProfile(profileId: string, cardChromeKey: string): void {
   try {
     const src = chromeLoginProfileDir(profileId)
     const dst = chromeLoginProfileDir(cardChromeKey)

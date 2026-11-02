@@ -93,7 +93,7 @@ export function NewProjectModal({
       ) ?? selectedProf?.apps?.slack?.pinnedWorkspaces?.find(
         (w) => w.teamId && !w.teamId.startsWith('team-') && w.teamId !== 'team' && w.teamId !== 'T-PENDING'
       )
-      const fallbackTeamId = authenticatedWorkspace?.teamId || ''
+      const fallbackTeamId = authenticatedWorkspace?.teamId || `pending-${newProjectId}`
       const fallbackTeamName = authenticatedWorkspace?.teamName || projectName.trim()
 
       const rawWorkspaceId = primarySource?.workspaceId

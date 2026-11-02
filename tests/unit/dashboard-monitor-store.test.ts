@@ -121,4 +121,30 @@ describe('MonitorStore', () => {
 
     expect(await store.readPinnedOrder()).toEqual([c.id])
   })
+
+  it('allows creating project card under client profile before Slack is linked (pending teamId)', async () => {
+    const store = await tmpStore()
+    const card = await store.upsertProject({
+      project: {
+        id: '',
+        name: 'Ashutosh-testing-01',
+        clientName: 'Client-Test-01',
+        profileId: 'profile-ashutosh',
+        teamId: '',
+        teamName: '',
+        appId: 'slack',
+        tokenSource: 'oauth',
+        monitors: []
+      }
+    })
+
+    expect(card.id).toBeTruthy()
+    expect(card.name).toBe('Ashutosh-testing-01')
+    expect(card.teamId).toMatch(/^pending-/)
+    expect(card.teamName).toBe('Ashutosh-testing-01')
+
+    const list = await store.listProjects()
+    expect(list).toHaveLength(1)
+    expect(list[0].teamId).toMatch(/^pending-/)
+  })
 })
