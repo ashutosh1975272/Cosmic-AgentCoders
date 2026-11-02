@@ -174,6 +174,22 @@ export default function WorkspaceContent({
     [project.sources]
   )
 
+  const teamsSource = useMemo(
+    () =>
+      (project.sources ?? []).find(
+        (source) => source.platform === 'teams' && source.enabled !== false
+      ) ?? null,
+    [project.sources]
+  )
+
+  const whatsappSource = useMemo(
+    () =>
+      (project.sources ?? []).find(
+        (source) => source.platform === 'whatsapp' && source.enabled !== false
+      ) ?? null,
+    [project.sources]
+  )
+
   // Resolve genuine Slack team ID strictly for THIS card / profile, without cross-profile leakage
   const effectiveSlackTeamId = useMemo(() => {
     if (project?.teamId && /^T[A-Z0-9]+$/i.test(project.teamId)) {
@@ -355,14 +371,117 @@ export default function WorkspaceContent({
     if (sel && isGlobalWorkspaceId(sel)) {
       // Global workspace selected: mount real live Slack WebContentsView inside this card
       const [, pId, tId] = sel.split(':')
+      const targetP = profiles.find((p) => p.id === pId)
+      const targetWs = targetP?.apps?.slack?.availableWorkspaces?.find((w) => w.teamId === tId)
+      const wsName = targetWs?.teamName || tId
+      const matchingSource = (project.sources ?? []).find(
+        (s) => s.profileId === pId && s.workspaceId === tId && s.enabled !== false
+      )
+
       body = (
-        <CardLiveSlackEmbed
-          key={`global-embed:${pId}:${tId}`}
-          profileId={pId}
-          teamId={tId}
-          appId="slack"
-          hidden={Boolean(channelPickerSourceId)}
-        />
+        <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: 'var(--bg-page)' }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '6px 14px',
+            background: 'var(--surface)',
+            borderBottom: '1px solid var(--border)',
+            fontSize: 12,
+            color: 'var(--text)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <AppIcon appId="slack" size={15} />
+              <span style={{ fontWeight: 650, color: '#f8fafc' }}>Slack Workspace</span>
+              <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>· {wsName}</span>
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                fontSize: 11,
+                color: '#4ade80',
+                background: 'rgba(74, 222, 128, 0.1)',
+                padding: '2px 7px',
+                borderRadius: 12,
+                fontWeight: 600
+              }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4ade80' }} />
+                Connected
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {matchingSource ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setChannelPickerSourceId(matchingSource.id)}
+                    style={{
+                      background: !matchingSource.channelsReviewedAt
+                        ? 'rgba(99, 102, 241, 0.2)'
+                        : 'rgba(255, 255, 255, 0.08)',
+                      border: `1px solid ${
+                        !matchingSource.channelsReviewedAt
+                          ? 'rgba(99, 102, 241, 0.45)'
+                          : 'rgba(255, 255, 255, 0.16)'
+                      }`,
+                      color: !matchingSource.channelsReviewedAt ? '#a5b4fc' : '#cbd5e1',
+                      fontSize: 11,
+                      borderRadius: 6,
+                      padding: '3px 9px',
+                      cursor: 'pointer',
+                      fontWeight: 600
+                    }}
+                    title="Choose channels to scrape or exclude"
+                  >
+                    Choose channels
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setChannelPickerSourceId(matchingSource.id)}
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.08)',
+                      border: '1px solid rgba(255, 255, 255, 0.16)',
+                      color: '#cbd5e1',
+                      fontSize: 11,
+                      borderRadius: 6,
+                      padding: '3px 9px',
+                      cursor: 'pointer',
+                      fontWeight: 600
+                    }}
+                    title="View or modify channel selection"
+                  >
+                    ☑ Channels ({matchingSource.channels.filter((c) => c.enabled !== false).length})
+                  </button>
+                </>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => void handleStartCardAppLogin(project.id, pId, 'slack')}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  color: '#cbd5e1',
+                  fontSize: 11,
+                  borderRadius: 6,
+                  padding: '3px 9px',
+                  cursor: 'pointer'
+                }}
+                title="Re-open Slack login flow"
+              >
+                Re-authenticate
+              </button>
+            </div>
+          </div>
+          <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
+            <CardLiveSlackEmbed
+              key={`global-embed:${pId}:${tId}`}
+              profileId={pId}
+              teamId={tId}
+              appId="slack"
+              hidden={Boolean(channelPickerSourceId)}
+            />
+          </div>
+        </div>
       )
     } else if (sel && sel.startsWith('c:preset:')) {
       const presetId = sel.replace('c:preset:', '')
@@ -471,6 +590,50 @@ export default function WorkspaceContent({
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {teamsSource ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setChannelPickerSourceId(teamsSource.id)}
+                      style={{
+                        background: !teamsSource.channelsReviewedAt
+                          ? 'rgba(99, 102, 241, 0.2)'
+                          : 'rgba(255, 255, 255, 0.08)',
+                        border: `1px solid ${
+                          !teamsSource.channelsReviewedAt
+                            ? 'rgba(99, 102, 241, 0.45)'
+                            : 'rgba(255, 255, 255, 0.16)'
+                        }`,
+                        color: !teamsSource.channelsReviewedAt ? '#a5b4fc' : '#cbd5e1',
+                        fontSize: 11,
+                        borderRadius: 6,
+                        padding: '3px 9px',
+                        cursor: 'pointer',
+                        fontWeight: 600
+                      }}
+                      title="Choose channels to scrape or exclude"
+                    >
+                      Choose channels
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setChannelPickerSourceId(teamsSource.id)}
+                      style={{
+                        background: 'rgba(255, 255, 255, 0.08)',
+                        border: '1px solid rgba(255, 255, 255, 0.16)',
+                        color: '#cbd5e1',
+                        fontSize: 11,
+                        borderRadius: 6,
+                        padding: '3px 9px',
+                        cursor: 'pointer',
+                        fontWeight: 600
+                      }}
+                      title="View or modify channel selection"
+                    >
+                      ☑ Channels ({teamsSource.channels.filter((c) => c.enabled !== false).length})
+                    </button>
+                  </>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => void handleStartAppLogin(targetProfile?.id, 'teams')}
@@ -617,6 +780,50 @@ export default function WorkspaceContent({
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {whatsappSource ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setChannelPickerSourceId(whatsappSource.id)}
+                      style={{
+                        background: !whatsappSource.channelsReviewedAt
+                          ? 'rgba(99, 102, 241, 0.2)'
+                          : 'rgba(255, 255, 255, 0.08)',
+                        border: `1px solid ${
+                          !whatsappSource.channelsReviewedAt
+                            ? 'rgba(99, 102, 241, 0.45)'
+                            : 'rgba(255, 255, 255, 0.16)'
+                        }`,
+                        color: !whatsappSource.channelsReviewedAt ? '#a5b4fc' : '#cbd5e1',
+                        fontSize: 11,
+                        borderRadius: 6,
+                        padding: '3px 9px',
+                        cursor: 'pointer',
+                        fontWeight: 600
+                      }}
+                      title="Choose chats to scrape or exclude"
+                    >
+                      Choose channels
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setChannelPickerSourceId(whatsappSource.id)}
+                      style={{
+                        background: 'rgba(255, 255, 255, 0.08)',
+                        border: '1px solid rgba(255, 255, 255, 0.16)',
+                        color: '#cbd5e1',
+                        fontSize: 11,
+                        borderRadius: 6,
+                        padding: '3px 9px',
+                        cursor: 'pointer',
+                        fontWeight: 600
+                      }}
+                      title="View or modify chat selection"
+                    >
+                      ☑ Channels ({whatsappSource.channels.filter((c) => c.enabled !== false).length})
+                    </button>
+                  </>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => void handleStartAppLogin(targetProfile?.id, 'whatsapp')}
@@ -631,7 +838,7 @@ export default function WorkspaceContent({
                   }}
                   title="Refresh or reconnect WhatsApp session"
                 >
-                  Refresh Session
+                  Re-authenticate
                 </button>
               </div>
             </div>
@@ -760,8 +967,10 @@ export default function WorkspaceContent({
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <AppIcon appId="slack" size={15} />
                 <span style={{ fontWeight: 650, color: '#f8fafc' }}>Slack Workspace</span>
-                <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>· {project.teamName || targetProfile?.displayName}</span>
-                {cardAuthenticated === true && (
+                <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>
+                  · {project.teamName || effectiveSlackTeamId || (project.teamId && !project.teamId.startsWith('pending-') ? project.teamId : undefined) || targetProfile?.displayName}
+                </span>
+                {(cardAuthenticated === true || Boolean(effectiveSlackTeamId) || (project.teamId && !project.teamId.startsWith('pending-') && project.teamId !== 'team') || channels.teamConnected) && (
                   <span style={{
                     display: 'inline-flex',
                     alignItems: 'center',

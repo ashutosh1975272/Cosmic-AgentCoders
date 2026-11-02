@@ -6,6 +6,7 @@ import { ProfileSidebar } from '../../src/renderer/src/components/ProfileSidebar
 import CardLiveSlackEmbed from '../../src/renderer/src/components/dashboard/CardLiveSlackEmbed'
 import { CosmicWorkspaceView } from '../../src/renderer/src/components/dashboard/CosmicWorkspaceView'
 import { useDashboardStore } from '../../src/renderer/src/hooks/useDashboard'
+import { useProfileStore } from '../../src/renderer/src/hooks/useProfiles'
 
 describe('BasicSidebarProjectTree & Basic Look Navigation', () => {
   afterEach(() => {
@@ -367,5 +368,55 @@ describe('BasicSidebarProjectTree & Basic Look Navigation', () => {
     // Clicking Choose channels manually opens the modal
     fireEvent.click(getByText('Choose channels'))
     expect(await findByRole('dialog', { name: /select channels to scrape/i })).not.toBeNull()
+  })
+
+  it('renders thin header navbar for Teams and WhatsApp with Connected badge and Re-authenticate', () => {
+    useProfileStore.setState({
+      profiles: [
+        {
+          id: 'prof-1',
+          displayName: 'Ashutosh-Profile',
+          customName: 'Ashutosh-Profile',
+          accountScope: 'both',
+          apps: {
+            slack: { sessionStatus: 'signed-in', availableWorkspaces: [{ teamId: 'T123', teamName: 'Acme Work' }] },
+            teams: { sessionStatus: 'signed-in' },
+            whatsapp: { sessionStatus: 'signed-in' }
+          },
+          customLinks: []
+        }
+      ] as any
+    })
+
+    // Test Teams tab
+    useDashboardStore.setState({
+      snapshot: mockSnapshot as any,
+      cosmicSelectedCardId: 'proj-1',
+      basicActiveTab: 'teams'
+    })
+
+    const { getAllByText, getByText, unmount } = render(
+      <CosmicWorkspaceView sidebarLook="basic" />
+    )
+
+    expect(getAllByText('Microsoft Teams').length).toBeGreaterThan(0)
+    expect(getByText('Connected')).not.toBeNull()
+    expect(getByText('Re-authenticate')).not.toBeNull()
+    unmount()
+
+    // Test WhatsApp tab
+    useDashboardStore.setState({
+      snapshot: mockSnapshot as any,
+      cosmicSelectedCardId: 'proj-1',
+      basicActiveTab: 'whatsapp'
+    })
+
+    const renderedWhatsApp = render(
+      <CosmicWorkspaceView sidebarLook="basic" />
+    )
+
+    expect(renderedWhatsApp.getAllByText('WhatsApp Web').length).toBeGreaterThan(0)
+    expect(renderedWhatsApp.getByText('Connected')).not.toBeNull()
+    expect(renderedWhatsApp.getByText('Re-authenticate')).not.toBeNull()
   })
 })
