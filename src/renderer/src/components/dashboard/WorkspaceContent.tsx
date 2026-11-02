@@ -169,6 +169,14 @@ export default function WorkspaceContent({
     }
   }, [unreviewedSource, channelPickerSourceId, dismissedPickers])
 
+  useEffect(() => {
+    if (channelPickerSourceId) {
+      void window.api?.profiles?.setEmbedVisible?.(false)
+    } else {
+      void window.api?.profiles?.setEmbedVisible?.(true)
+    }
+  }, [channelPickerSourceId])
+
   const slackBrowserSource = useMemo(
     () =>
       (project.sources ?? []).find(

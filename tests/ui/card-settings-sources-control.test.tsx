@@ -66,6 +66,9 @@ describe('ProjectSettingsTab: Sources Tab Categorized Sections & Scrape Control'
           project: null,
           effective: { chatModel: 'nvidia/nemotron-3.5-super-vl-120b-a12b', embeddingModel: 'nvidia/nv-embed-v1', keySource: 'global', apiKeyMask: '••••' }
         })
+      },
+      profiles: {
+        setEmbedVisible: vi.fn().mockResolvedValue(undefined)
       }
     } as any
 

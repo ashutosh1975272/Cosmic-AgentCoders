@@ -1430,11 +1430,10 @@ export class BrowserViewManager {
     }
 
     this.embedHidden = true
-    for (const key of [this.activeKey, this.secondaryKey]) {
+    for (const key of [this.activeKey, this.secondaryKey, this.cardEmbedKey]) {
       if (!key) continue
-      if (key === this.cardEmbedKey) continue
       const view = this.views.get(key)
-      if (view) {
+      if (view && mainWindow.contentView.children.includes(view)) {
         mainWindow.contentView.removeChildView(view)
       }
     }

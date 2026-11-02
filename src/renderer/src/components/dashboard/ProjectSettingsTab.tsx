@@ -93,6 +93,14 @@ export default function ProjectSettingsTab({
     if (unreviewed) setPickerSourceId(unreviewed.id)
   }, [project.sources, dismissedPickers, pickerSourceId])
 
+  useEffect(() => {
+    if (pickerSourceId) {
+      void window.api?.profiles?.setEmbedVisible?.(false)
+    } else {
+      void window.api?.profiles?.setEmbedVisible?.(true)
+    }
+  }, [pickerSourceId])
+
   const closeChannelPicker = (): void => {
     if (pickerSourceId) {
       setDismissedPickers((current) => new Set(current).add(pickerSourceId))
