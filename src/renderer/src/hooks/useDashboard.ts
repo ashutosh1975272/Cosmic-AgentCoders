@@ -1,9 +1,13 @@
 import { create } from 'zustand'
 import type {
+  DashboardDiscoverSourceChannelsPayload,
+  DashboardDiscoverSourceChannelsResult,
   DashboardManualToken,
   DashboardProject,
   DashboardSnapshot,
   DashboardSyncProgressPayload,
+  DashboardUpdateSourcePayload,
+  DashboardUpdateSourceResult,
   RecentActivity,
   ValidateTokenResultPayload
 } from '../../../shared/dashboard-contract'
@@ -46,6 +50,10 @@ interface DashboardState {
       | (Omit<DashboardProject, 'createdAt'> & { id: string })
   ) => Promise<void>
   deleteProject: (projectId: string) => Promise<void>
+  updateSource: (payload: DashboardUpdateSourcePayload) => Promise<DashboardUpdateSourceResult>
+  discoverSourceChannels: (
+    payload: DashboardDiscoverSourceChannelsPayload
+  ) => Promise<DashboardDiscoverSourceChannelsResult>
   setPinnedOrder: (order: string[]) => Promise<void>
   syncNow: (projectId?: string) => Promise<void>
   syncSource: (payload: { projectId: string; sourceId?: string }) => Promise<{
@@ -127,6 +135,16 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   deleteProject: async (projectId) => {
     const snapshot = await window.api.dashboard.deleteProject({ projectId })
     set({ snapshot })
+  },
+
+  updateSource: async (payload) => {
+    const result = await window.api.dashboard.updateSource(payload)
+    set({ snapshot: result.snapshot })
+    return result
+  },
+
+  discoverSourceChannels: async (payload) => {
+    return window.api.dashboard.discoverSourceChannels(payload)
   },
 
   setPinnedOrder: async (order) => {

@@ -41,6 +41,7 @@ describe('WorkspaceSidebar: Card Workspace Scrape Inline Actions', () => {
                     enabled: true,
                     backfillDays: 7,
                     status: 'connected',
+                    channelsReviewedAt: '2026-11-02T10:00:00Z',
                     createdAt: '2026-11-02T10:00:00Z',
                     updatedAt: '2026-11-02T10:00:00Z'
                   }
@@ -80,6 +81,7 @@ describe('WorkspaceSidebar: Card Workspace Scrape Inline Actions', () => {
                   enabled: true,
                   backfillDays: 7,
                   status: 'connected',
+                  channelsReviewedAt: '2026-11-02T10:00:00Z',
                   createdAt: '2026-11-02T10:00:00Z',
                   updatedAt: '2026-11-02T10:00:00Z'
                 }
@@ -204,6 +206,7 @@ describe('WorkspaceSidebar: Card Workspace Scrape Inline Actions', () => {
             enabled: true,
             backfillDays: 7,
             status: 'connected',
+            channelsReviewedAt: '2026-11-02T10:00:00Z',
             createdAt: '2026-11-02T10:00:00Z',
             updatedAt: '2026-11-02T10:00:00Z'
           }
@@ -258,6 +261,7 @@ describe('WorkspaceSidebar: Card Workspace Scrape Inline Actions', () => {
             enabled: true,
             backfillDays: 7,
             status: 'connected',
+            channelsReviewedAt: '2026-11-02T10:00:00Z',
             createdAt: '2026-11-02T10:00:00Z',
             updatedAt: '2026-11-02T10:00:00Z'
           }
@@ -292,7 +296,7 @@ describe('WorkspaceSidebar: Card Workspace Scrape Inline Actions', () => {
           ])
         })
       )
-      expect(syncSourceMock).toHaveBeenCalled()
+      expect(syncSourceMock).not.toHaveBeenCalled()
     })
   })
 })

@@ -1,6 +1,8 @@
 import type React from 'react'
 import { useEffect, useState } from 'react'
-import type { DashboardGlobalConfig } from '../../../../shared/dashboard-contract'
+import type {
+  DashboardGlobalConfig
+} from '../../../../shared/dashboard-contract'
 import AiSettingsForm from './AiSettingsForm'
 import TeamSlackSettings from './TeamSlackSettings'
 

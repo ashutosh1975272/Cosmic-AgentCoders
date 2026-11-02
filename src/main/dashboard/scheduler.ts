@@ -177,13 +177,13 @@ export class DashboardScheduler {
       for (const project of projects) {
         for (const source of project.sources ?? []) {
           if (source.kind !== 'browser' || source.enabled === false) continue
-          if (source.scheduleEnabled === false) continue
+          if (source.scheduleEnabled !== true) continue
           if (!source.profileId || !source.workspaceId) continue
 
           activeIds.push(source.id)
           if (this.engine.isSourceRunning(source.id)) continue
 
-          const intervalMs = (source.scheduleIntervalMinutes ?? 5) * 60_000
+          const intervalMs = (source.scheduleIntervalMinutes ?? 15) * 60_000
           const last =
             stored.sourceLastRunAt?.[source.id] ??
             source.lastScrapeAt ??
@@ -232,13 +232,13 @@ export class DashboardScheduler {
     for (const project of projects) {
       for (const source of project.sources ?? []) {
         if (source.kind !== 'browser') continue
-        const intervalMinutes = source.scheduleIntervalMinutes ?? 5
+        const intervalMinutes = source.scheduleIntervalMinutes ?? 15
         const lastRunAt =
           stored.sourceLastRunAt?.[source.id] ??
           source.lastScrapeAt ??
           source.lastReadAt ??
           null
-        const scheduleEnabled = source.scheduleEnabled ?? true
+        const scheduleEnabled = source.scheduleEnabled === true
         out.push({
           projectId: project.id,
           projectName: project.name,

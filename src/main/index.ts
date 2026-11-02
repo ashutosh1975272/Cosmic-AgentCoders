@@ -649,7 +649,11 @@ if (!gotSingleInstanceLock) {
       teamWorkspace: teamWorkspaceStore,
       listTeamWorkspaceCandidates,
       workspaceMapping: workspaceMappingStore,
-      viewedStore: dashboardViewedStore
+      viewedStore: dashboardViewedStore,
+      getExistingCardView: (projectId, appId) =>
+        browserViewManager.getExistingCardView(projectId, appId as AppId),
+      getExistingProfileView: (profileId, appId) =>
+        browserViewManager.getExistingView(profileId, appId as AppId)
     })
 
     void runWorkspaceMigration()
@@ -694,14 +698,12 @@ if (!gotSingleInstanceLock) {
                       profileId: proj.profileId,
                       workspaceId: realTeamId,
                       workspaceName: realTeamName || 'Slack Workspace',
-                      channels: (proj.monitors ?? []).map((m: { channelId: string; channelName?: string }) => ({
-                        id: m.channelId,
-                        name: m.channelName || m.channelId
-                      })),
+                      channels: [],
                       role: 'ours',
                       backfillDays: 7,
                       enabled: true,
                       status: 'connected',
+                      selectionMode: 'include',
                       createdAt: now,
                       updatedAt: now
                     }

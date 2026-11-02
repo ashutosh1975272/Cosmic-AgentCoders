@@ -20,6 +20,7 @@ import {
 import { useProfileStore } from '../../hooks/useProfiles'
 import type { ProjectSource } from '../../../../shared/dashboard-contract'
 import { CardAddModal } from './CardAddModal'
+import { SourceChannelPicker } from './SourceChannelPicker'
 
 export type SettingsTabKey = 'general' | 'ai' | 'sources' | 'channels' | 'schedule' | 'sidebar' | 'danger'
 
@@ -44,6 +45,8 @@ export default function ProjectSettingsTab({
   const [logsOpen, setLogsOpen] = useState(false)
   const [cardAddModalOpen, setCardAddModalOpen] = useState(false)
   const [cardAddModalTab, setCardAddModalTab] = useState<'global' | 'my' | 'client'>('my')
+  const [pickerSourceId, setPickerSourceId] = useState<string | null>(null)
+  const [dismissedPickers, setDismissedPickers] = useState<Set<string>>(new Set())
 
   // Schedule state
   const [startDate, setStartDate] = useState(project.startDate ?? '')
@@ -75,6 +78,27 @@ export default function ProjectSettingsTab({
       cancelled = true
     }
   }, [project.id])
+
+  // After a card login the source starts empty and unreviewed. Open the picker
+  // instead of letting a scrape silently read the whole sidebar.
+  useEffect(() => {
+    if (pickerSourceId) return
+    const unreviewed = (project.sources ?? []).find(
+      (source) =>
+        source.kind === 'browser' &&
+        source.enabled !== false &&
+        !source.channelsReviewedAt &&
+        !dismissedPickers.has(source.id)
+    )
+    if (unreviewed) setPickerSourceId(unreviewed.id)
+  }, [project.sources, dismissedPickers, pickerSourceId])
+
+  const closeChannelPicker = (): void => {
+    if (pickerSourceId) {
+      setDismissedPickers((current) => new Set(current).add(pickerSourceId))
+    }
+    setPickerSourceId(null)
+  }
 
   const handleModeChange = (mode: LayoutMode): void => {
     updateLayout({ ...layout, mode })
@@ -229,28 +253,27 @@ export default function ProjectSettingsTab({
   ]
 
   const handleToggleSourceEnabled = async (sourceId: string, currentEnabled: boolean): Promise<void> => {
-    const updatedSources = (project.sources ?? []).map((s) =>
-      s.id === sourceId ? { ...s, enabled: !currentEnabled } : s
-    )
-    await useDashboardStore.getState().upsertProject({
-      ...project,
-      sources: updatedSources
+    await useDashboardStore.getState().updateSource({
+      projectId: project.id,
+      sourceId,
+      patch: { enabled: !currentEnabled }
     })
     setSourceNotice(`Source ${currentEnabled ? 'paused' : 'resumed'}`)
     setTimeout(() => setSourceNotice(null), 3000)
   }
 
   const handleToggleChannelEnabled = async (sourceId: string, channelId: string, currentEnabled: boolean): Promise<void> => {
-    const updatedSources = (project.sources ?? []).map((s) => {
-      if (s.id !== sourceId) return s
-      const updatedChannels = s.channels.map((ch) =>
-        ch.id === channelId ? { ...ch, enabled: !currentEnabled } : ch
-      )
-      return { ...s, channels: updatedChannels }
-    })
-    await useDashboardStore.getState().upsertProject({
-      ...project,
-      sources: updatedSources
+    const source = (project.sources ?? []).find((item) => item.id === sourceId)
+    if (!source) return
+    await useDashboardStore.getState().updateSource({
+      projectId: project.id,
+      sourceId,
+      patch: {
+        channels: source.channels.map((channel) =>
+          channel.id === channelId ? { ...channel, enabled: !currentEnabled } : channel
+        ),
+        channelsReviewedAt: source.channelsReviewedAt ?? new Date().toISOString()
+      }
     })
     setSourceNotice(`Channel ${currentEnabled ? 'deselected' : 'selected'} for monitoring`)
     setTimeout(() => setSourceNotice(null), 3000)
@@ -260,14 +283,10 @@ export default function ProjectSettingsTab({
     sourceId: string,
     patch: Partial<ProjectSource>
   ): Promise<void> => {
-    const updatedSources = (project.sources ?? []).map((source) =>
-      source.id === sourceId
-        ? { ...source, ...patch, updatedAt: new Date().toISOString() }
-        : source
-    )
-    await useDashboardStore.getState().upsertProject({
-      ...project,
-      sources: updatedSources
+    await useDashboardStore.getState().updateSource({
+      projectId: project.id,
+      sourceId,
+      patch
     })
     setSourceNotice('Scrape settings saved')
     setTimeout(() => setSourceNotice(null), 2500)
@@ -286,6 +305,7 @@ export default function ProjectSettingsTab({
       if (existing.enabled === false) {
         await handleToggleSourceEnabled(existing.id, false)
       }
+      if (!existing.channelsReviewedAt) setPickerSourceId(existing.id)
       return existing.id
     }
 
@@ -298,11 +318,13 @@ export default function ProjectSettingsTab({
       profileId: targetProfileId,
       workspaceId: teamId,
       workspaceName: teamName,
-      channels: project.monitors.map((m) => ({ id: m.channelId, name: m.channelName })),
+      // First attach is intentionally empty. The picker decides what is read.
+      channels: [],
       role,
       backfillDays: 7,
       enabled: true,
       status: 'connected',
+      selectionMode: 'include',
       createdAt: now,
       updatedAt: now
     }
@@ -311,8 +333,9 @@ export default function ProjectSettingsTab({
       ...project,
       sources: [...currentSources, newSource]
     })
-    setSourceNotice(`Added and activated ${teamName}`)
-    setTimeout(() => setSourceNotice(null), 3000)
+    setPickerSourceId(newSourceId)
+    setSourceNotice(`Added ${teamName}. Choose the channels to scrape.`)
+    setTimeout(() => setSourceNotice(null), 4000)
     return newSourceId
   }
 
@@ -323,10 +346,32 @@ export default function ProjectSettingsTab({
     role: 'client' | 'ours'
   ): Promise<void> => {
     const sourceId = await handleAddWorkspaceSourceDirect(targetProfileId, teamId, teamName, role)
+    const source = (useDashboardStore.getState().snapshot?.projects ?? [])
+      .find((item) => item.project.id === project.id)
+      ?.project.sources?.find((item) => item.id === sourceId)
+    if (!source?.channelsReviewedAt) {
+      setPickerSourceId(sourceId)
+      setSourceNotice('Choose at least one channel before the first scrape.')
+      return
+    }
     await handleScrapeSource(sourceId)
   }
 
   const handleScrapeSource = async (sourceId: string): Promise<void> => {
+    const source = (project.sources ?? []).find((item) => item.id === sourceId)
+    if (!source?.channelsReviewedAt) {
+      setPickerSourceId(sourceId)
+      setSourceNotice('Review and select channels before scraping this workspace.')
+      return
+    }
+    if (
+      (source.selectionMode ?? 'include') === 'include' &&
+      !source.channels.some((channel) => channel.enabled !== false)
+    ) {
+      setPickerSourceId(sourceId)
+      setSourceNotice('No channels selected. Choose at least one channel first.')
+      return
+    }
     setScrapingSourceId(sourceId)
     setSourceNotice('Scraping workspace messages via browser...')
     try {
@@ -746,6 +791,72 @@ export default function ProjectSettingsTab({
                           </div>
 
                           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                            {src.kind === 'browser' ? (
+                              <>
+                                <button
+                                  type="button"
+                                  style={{
+                                    fontSize: 12,
+                                    padding: '4px 10px',
+                                    borderRadius: 6,
+                                    border: `1px solid ${src.scheduleEnabled ? 'rgba(34, 197, 94, 0.4)' : 'rgba(255, 255, 255, 0.15)'}`,
+                                    background: src.scheduleEnabled ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                                    color: src.scheduleEnabled ? '#4ade80' : '#94a3b8',
+                                    fontWeight: 650,
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4
+                                  }}
+                                  onClick={() =>
+                                    void handleUpdateSourceSettings(src.id, {
+                                      scheduleEnabled: !src.scheduleEnabled,
+                                      scheduleIntervalMinutes: src.scheduleIntervalMinutes ?? 15
+                                    })
+                                  }
+                                  title={src.scheduleEnabled ? 'Click to turn off scheduled background scraping' : 'Click to turn on scheduled background scraping'}
+                                >
+                                  ⏱ Schedule: {src.scheduleEnabled ? 'ON' : 'OFF'}
+                                </button>
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: 6, padding: '2px 6px' }}>
+                                  <span style={{ fontSize: 11, color: '#94a3b8' }}>Every</span>
+                                  <select
+                                    value={src.scheduleIntervalMinutes ?? 15}
+                                    style={{
+                                      background: 'transparent',
+                                      border: 'none',
+                                      color: '#cbd5e1',
+                                      fontSize: 12,
+                                      fontWeight: 600,
+                                      cursor: 'pointer',
+                                      padding: '2px 0'
+                                    }}
+                                    onChange={(e) =>
+                                      void handleUpdateSourceSettings(src.id, {
+                                        scheduleIntervalMinutes: Number(
+                                          e.target.value
+                                        ) as ProjectSource['scheduleIntervalMinutes']
+                                      })
+                                    }
+                                  >
+                                    {[1, 5, 15, 30, 60].map((m) => (
+                                      <option key={m} value={m} style={{ background: '#0f172a', color: '#fff' }}>
+                                        {m}m
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="dash-subtle"
+                                  style={{ fontSize: 12, padding: '4px 10px' }}
+                                  onClick={() => setPickerSourceId(src.id)}
+                                  title="Discover the sidebar and choose exactly which channels this card reads"
+                                >
+                                  ☑ Channels ({src.channels.filter((c) => c.enabled !== false).length})
+                                </button>
+                              </>
+                            ) : null}
                             {/* Capability Gating: ONLY show Scrape on Slack browser workspaces where our scraper is implemented */}
                             {src.kind === 'browser' && (src.platform === 'slack' || (!src.platform && src.workspaceId?.startsWith('T'))) ? (
                               <button
@@ -759,9 +870,9 @@ export default function ProjectSettingsTab({
                                   cursor: isActive && !isScraping ? 'pointer' : 'not-allowed'
                                 }}
                                 onClick={() => void handleScrapeSource(src.id)}
-                                title="Auto-discover and scrape all public & private channels in this workspace"
+                                title="Scrape the selected channels (with 2-minute delta buffer)"
                               >
-                                {isScraping ? '⏳ Scraping…' : '🕷 Scrape'}
+                                {isScraping ? '⏳ Scraping…' : '🕷 Scrape Now'}
                               </button>
                             ) : null}
                             <button
@@ -797,7 +908,7 @@ export default function ProjectSettingsTab({
                           </div>
                         </div>
 
-                        {/* Per-source scrape policy (schedule, DMs, backfill, people) */}
+                        {/* Per-source scrape policy (DMs, backfill, people) */}
                         {src.kind === 'browser' && (
                           <div
                             style={{
@@ -813,38 +924,6 @@ export default function ProjectSettingsTab({
                               fontSize: 12
                             }}
                           >
-                            <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-                              <input
-                                type="checkbox"
-                                checked={src.scheduleEnabled !== false}
-                                onChange={(e) =>
-                                  void handleUpdateSourceSettings(src.id, {
-                                    scheduleEnabled: e.target.checked
-                                  })
-                                }
-                              />
-                              Auto-scrape
-                            </label>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              Every
-                              <select
-                                value={src.scheduleIntervalMinutes ?? 5}
-                                disabled={src.scheduleEnabled === false}
-                                onChange={(e) =>
-                                  void handleUpdateSourceSettings(src.id, {
-                                    scheduleIntervalMinutes: Number(
-                                      e.target.value
-                                    ) as ProjectSource['scheduleIntervalMinutes']
-                                  })
-                                }
-                              >
-                                {[1, 5, 15, 30, 60].map((minutes) => (
-                                  <option key={minutes} value={minutes}>
-                                    {minutes} min
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
                             <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                               DMs
                               <select
@@ -1825,6 +1904,30 @@ export default function ProjectSettingsTab({
         onClose={() => setCardAddModalOpen(false)}
         onSuccess={() => setCardAddModalOpen(false)}
       />
+
+      {pickerSourceId
+        ? (() => {
+            const pickerSource = (project.sources ?? []).find((source) => source.id === pickerSourceId)
+            if (!pickerSource) return null
+            return (
+              <SourceChannelPicker
+                projectId={project.id}
+                source={pickerSource}
+                open
+                onClose={closeChannelPicker}
+                onSaved={() => {
+                  setDismissedPickers((current) => {
+                    const next = new Set(current)
+                    next.delete(pickerSource.id)
+                    return next
+                  })
+                  setSourceNotice('Channel selection saved')
+                  setTimeout(() => setSourceNotice(null), 3000)
+                }}
+              />
+            )
+          })()
+        : null}
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import { BrowserWindow, session } from 'electron'
+import type { WebContentsView } from 'electron'
 import { partitionForCard } from '../profiles/session-partition'
 import { syncGoogleSessionFromProfileToCard } from '../profiles/google-session-sync'
 import { seedChromeCardProfile } from '../profiles/chrome-browser-auth'
@@ -11,6 +12,7 @@ import type {
   DashboardAiSettingsView,
   DashboardAiTestResult,
   DashboardGlobalConfig,
+  DashboardProjectDefaults,
   DashboardManualToken,
   DashboardChatPage,
   DashboardChatQueryPayload,
@@ -18,6 +20,10 @@ import type {
   DashboardProjectChatPayload,
   DashboardProjectActivity,
   DashboardListChannelsPayload,
+  DashboardDiscoverSourceChannelsPayload,
+  DashboardDiscoverSourceChannelsResult,
+  DashboardUpdateSourcePayload,
+  DashboardUpdateSourceResult,
   DashboardMarkViewedPayload,
   DashboardRunSchedulePayload,
   DashboardSendMessagePayload,
@@ -29,6 +35,7 @@ import type {
   DashboardCancelScrapePayload,
   DashboardSourceSchedulePayload,
   DashboardSourceScheduleState,
+  ProjectSource,
   ScrapeRunQuery,
   DashboardTeamWorkspaceCandidate,
   DashboardTeamWorkspaceChannelsPayload,
@@ -60,6 +67,7 @@ import { describeMissingScopes, missingSlackScopes } from '../dashboard/slack-sc
 import type { DashboardViewedStore } from '../dashboard/viewed-store'
 import { RunLogStore } from '../dashboard/run-log-store'
 import type { DashboardDeltaStore } from '../dashboard/delta-store'
+import { SlackReaderView } from '../slack-reader/slack-reader-view'
 
 export interface DashboardIpcDeps {
   monitorStore: MonitorStore
@@ -92,6 +100,9 @@ export interface DashboardIpcDeps {
   workspaceMapping?: WorkspaceMappingStore
   /** Phase A — when a card's Dashboard was last looked at */
   viewedStore?: DashboardViewedStore
+  /** Reuse the card/profile's live Slack view for passive channel discovery. */
+  getExistingCardView?: (projectId: string, appId: string) => WebContentsView | null
+  getExistingProfileView?: (profileId: string, appId: string) => WebContentsView | null
 }
 
 export interface DashboardIpcRegistration {
@@ -186,6 +197,91 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
   )
 
   handleInvoke(
+    IpcChannels.DashboardDiscoverSourceChannels,
+    async (
+      payload: DashboardDiscoverSourceChannelsPayload
+    ): Promise<DashboardDiscoverSourceChannelsResult> => {
+      const projects = await deps.monitorStore.listProjects()
+      const project = payload.projectId
+        ? projects.find((p) => p.id === payload.projectId)
+        : undefined
+      if (payload.projectId && !project) return { channels: [], error: 'Project not found' }
+      const source = project
+        ? (project.sources ?? []).find((s) => s.id === payload.sourceId)
+        : undefined
+      const profileId = source?.profileId || payload.profileId || project?.profileId
+      const workspaceId = source?.workspaceId || payload.workspaceId || project?.teamId
+      if (!workspaceId) return { channels: [], error: 'Workspace not found' }
+      if (source && source.kind !== 'browser') {
+        return { channels: [], error: 'Channel discovery is only available for browser sources' }
+      }
+      if (!profileId) {
+        return { channels: [], error: 'Profile not found — log in to Slack first' }
+      }
+
+      const existingView =
+        (payload.projectId
+          ? deps.getExistingCardView?.(payload.projectId, 'slack')
+          : null) ??
+        deps.getExistingProfileView?.(profileId, 'slack') ??
+        null
+      const reader = new SlackReaderView({
+        profileId,
+        workspaceId,
+        projectId: payload.projectId,
+        existingView
+      })
+      try {
+        const discovered = await reader.listChannels()
+        if (discovered.length === 0) {
+          return {
+            channels: [],
+            error: 'No channels visible. Log in to Slack in this card, then retry discovery.'
+          }
+        }
+        return {
+          channels: discovered.map((channel) => ({
+            id: channel.id,
+            name: channel.name,
+            isPrivate: channel.isPrivate,
+            isDm: channel.isDm,
+            kind: channel.isDm
+              ? 'dm'
+              : channel.isPrivate
+                ? 'private'
+                : 'public',
+            enabled: false
+          }))
+        }
+      } catch (err) {
+        return {
+          channels: [],
+          error: err instanceof Error ? err.message : 'Channel discovery failed'
+        }
+      } finally {
+        reader.destroy()
+      }
+    }
+  )
+
+  handleInvoke(
+    IpcChannels.DashboardUpdateSource,
+    async (payload: DashboardUpdateSourcePayload): Promise<DashboardUpdateSourceResult> => {
+      const patch: Partial<ProjectSource> = { ...payload.patch }
+      delete (patch as { id?: string }).id
+      delete (patch as { createdAt?: string }).createdAt
+      delete (patch as { updatedAt?: string }).updatedAt
+      const source = await deps.monitorStore.updateSource(
+        payload.projectId,
+        payload.sourceId,
+        patch
+      )
+      const snapshot = await broadcastSnapshot()
+      return { source, snapshot }
+    }
+  )
+
+  handleInvoke(
     IpcChannels.DashboardViewSet,
     async (payload: { open: boolean; appId?: string | null }) => {
       /* the renderer tracks view-state itself; reserve for future main-side needs */
@@ -275,26 +371,34 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
       const projects = await deps.monitorStore.listProjects()
       const project = projects.find((p) => p.id === payload.projectId)
       if (!project) throw new Error('Project not found')
-      const sources = (project.sources ?? []).map((source) =>
-        source.id === payload.sourceId
-          ? {
-              ...source,
-              scheduleEnabled: payload.scheduleEnabled ?? source.scheduleEnabled,
-              scheduleIntervalMinutes:
-                payload.scheduleIntervalMinutes ?? source.scheduleIntervalMinutes,
-              backfillHours: payload.backfillHours ?? source.backfillHours,
-              allowDms: payload.allowDms ?? source.allowDms,
-              selectedPeople: payload.selectedPeople ?? source.selectedPeople,
-              updatedAt: new Date().toISOString()
-            }
-          : source
+      const patch: Partial<ProjectSource> = {}
+      if (payload.scheduleEnabled !== undefined) patch.scheduleEnabled = payload.scheduleEnabled
+      if (payload.scheduleIntervalMinutes !== undefined) {
+        patch.scheduleIntervalMinutes = payload.scheduleIntervalMinutes
+      }
+      if (payload.backfillHours !== undefined) patch.backfillHours = payload.backfillHours
+      if (payload.allowDms !== undefined) patch.allowDms = payload.allowDms
+      if (payload.selectedPeople !== undefined) patch.selectedPeople = payload.selectedPeople
+      const updated = await deps.monitorStore.updateSource(
+        payload.projectId,
+        payload.sourceId,
+        patch
       )
-      await deps.monitorStore.upsertProject({ project: { ...project, sources } })
       await broadcastSnapshot()
-      const updated = sources.find((source) => source.id === payload.sourceId)!
-      const interval = updated.scheduleIntervalMinutes ?? 5
+      const interval = updated.scheduleIntervalMinutes ?? 15
       const lastRunAt = updated.lastScrapeAt ?? updated.lastReadAt ?? null
-      const scheduleEnabled = updated.scheduleEnabled ?? true
+      const scheduleEnabled = updated.scheduleEnabled === true
+      if (
+        payload.scheduleEnabled === true &&
+        scheduleEnabled &&
+        updated.enabled !== false &&
+        updated.channelsReviewedAt
+      ) {
+        // Turning a schedule on means "start now", not "wait one interval".
+        void deps.engine
+          .syncProjectSource(payload.projectId, updated.id, { trigger: 'scheduled' })
+          .catch(() => undefined)
+      }
       return {
         projectId: project.id,
         projectName: project.name,
@@ -717,11 +821,12 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
                   profileId: targetProj.profileId,
                   workspaceId: payload.workspaceId,
                   workspaceName: 'Slack Workspace',
-                  channels: targetProj.monitors.map((m) => ({ id: m.channelId, name: m.channelName })),
+                  channels: [],
                   role: 'client' as const,
                   backfillDays: 7 as const,
                   enabled: true,
                   status: 'connected' as const,
+                  selectionMode: 'include' as const,
                   createdAt: now,
                   updatedAt: now
                 }
@@ -797,6 +902,15 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
   if (deps.configService) {
     handleInvoke(IpcChannels.DashboardConfigGet, async (): Promise<DashboardGlobalConfig> =>
       deps.configService!.publicGlobalConfig()
+    )
+    handleInvoke(
+      IpcChannels.DashboardProjectDefaultsSet,
+      async (patch: Partial<DashboardProjectDefaults>): Promise<DashboardGlobalConfig> => {
+        await deps.monitorStore.saveDashboardDefaults(patch)
+        const config = await deps.configService!.publicGlobalConfig()
+        broadcast(IpcChannels.DashboardConfigChanged, config)
+        return config
+      }
     )
   }
 

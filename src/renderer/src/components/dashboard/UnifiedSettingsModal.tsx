@@ -510,18 +510,99 @@ export function UnifiedSettingsModal({
                       />
                     </label>
 
+                    {/* Split view and progress line */}
+                  </div>
+
+                  {/* Card: Project Card Scraping Settings (Important Setting) */}
+                  <div
+                    style={{
+                      background: 'rgba(15, 23, 42, 0.4)',
+                      padding: '18px 20px',
+                      borderRadius: '10px',
+                      border: '1px solid rgba(99, 102, 241, 0.25)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <h4 style={{ margin: 0, fontSize: '14px', color: '#e2e8f0', fontWeight: 600 }}>
+                          🛡️ Project Card Scraping Settings
+                        </h4>
+                        <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginTop: '2px' }}>
+                          Privacy controls, DM reading permissions, and schedule cadence for project cards
+                        </span>
+                      </div>
+                      <span
+                        style={{
+                          fontSize: '10.5px',
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          background: 'rgba(239, 68, 68, 0.15)',
+                          color: '#fca5a5',
+                          border: '1px solid rgba(239, 68, 68, 0.3)'
+                        }}
+                      >
+                        Project Card Important Setting
+                      </span>
+                    </div>
+
                     <label className="settings-row">
                       <span>
-                        Include personal DMs in scraping
-                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
-                          Global default (off). Individual cards can override this policy.
+                        Allow Personal Direct Messages (DMs) Scraping
+                        <span style={{ display: 'block', fontSize: '11px', color: '#94a3b8' }}>
+                          Default is <strong>OFF</strong>. When off, 1-on-1 direct messages and private conversations are never scraped. Each project card can also override this setting.
                         </span>
                       </span>
                       <input
                         type="checkbox"
-                        checked={settings.scrapePersonalDms ?? false}
-                        onChange={(e) => onChangeSettings({ scrapePersonalDms: e.target.checked })}
+                        checked={(globalConfig?.defaults?.allowDms ?? (settings.scrapePersonalDms ? 'on' : 'off')) === 'on'}
+                        onChange={(e) => {
+                          const isChecked = e.target.checked
+                          onChangeSettings({ scrapePersonalDms: isChecked })
+                          void window.api.dashboard.saveProjectDefaults({ allowDms: isChecked ? 'on' : 'off' })
+                            .then((cfg) => setGlobalConfig(cfg))
+                            .catch(console.error)
+                        }}
                       />
+                    </label>
+
+                    <label className="settings-row">
+                      <span>
+                        Default Scheduled Scraping Interval
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Frequency of automatic background delta scrapes for cards
+                        </span>
+                      </span>
+                      <select
+                        value={globalConfig?.defaults?.intervalMinutes ?? 15}
+                        onChange={(e) => {
+                          const val = Number(e.target.value) as 1 | 5 | 15 | 30 | 60
+                          void window.api.dashboard.saveProjectDefaults({ intervalMinutes: val })
+                            .then((cfg) => setGlobalConfig(cfg))
+                            .catch(console.error)
+                        }}
+                      >
+                        <option value={1}>Every 1 minute (Fast testing)</option>
+                        <option value={5}>Every 5 minutes</option>
+                        <option value={15}>Every 15 minutes (Standard)</option>
+                        <option value={30}>Every 30 minutes</option>
+                        <option value={60}>Every 1 hour</option>
+                      </select>
+                    </label>
+
+                    <label className="settings-row">
+                      <span>
+                        Sleep &amp; Wake Catch-Up Safety Ceiling
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Maximum history depth backfilled after sleep (with 2-min safety overlap)
+                        </span>
+                      </span>
+                      <span style={{ fontSize: '12px', fontWeight: 600, color: '#38bdf8' }}>
+                        {globalConfig?.defaults?.catchUpCapDays ?? 7} Days
+                      </span>
                     </label>
                   </div>
 

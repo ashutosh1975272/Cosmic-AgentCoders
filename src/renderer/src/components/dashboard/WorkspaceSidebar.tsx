@@ -220,11 +220,12 @@ export default function WorkspaceSidebar({
           profileId: targetProfileId,
           workspaceId: teamId,
           workspaceName: teamName,
-          channels: (currentProject.monitors ?? []).map((m) => ({ id: m.channelId, name: m.channelName })),
+          channels: [],
           role,
           backfillDays: 7 as const,
           enabled: true,
           status: 'connected' as const,
+          selectionMode: 'include' as const,
           createdAt: now,
           updatedAt: now
         }
@@ -234,6 +235,9 @@ export default function WorkspaceSidebar({
         })
       }
 
+      // A newly attached source has no reviewed channel selection. Do not
+      // scrape it from here; the card's Settings → Sources picker owns that.
+      if (!foundSource || !foundSource.channelsReviewedAt) return
       await syncSource({ projectId, sourceId: targetSourceId })
     } catch (err) {
       console.error('Failed to scrape workspace:', err)
@@ -340,7 +344,7 @@ export default function WorkspaceSidebar({
   const activeSections = useMemo(() => {
     const scheduled = (sources ?? []).some(
       (source) =>
-        source.kind === 'browser' && source.enabled !== false && source.scheduleEnabled !== false
+        source.kind === 'browser' && source.enabled !== false && source.scheduleEnabled === true
     )
     const keep = (sections: typeof NAV_SECTIONS): typeof NAV_SECTIONS =>
       sections.map((section) => ({

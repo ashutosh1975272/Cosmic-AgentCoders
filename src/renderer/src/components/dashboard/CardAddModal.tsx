@@ -131,11 +131,12 @@ export function CardAddModal({
         profileId,
         workspaceId: teamId,
         workspaceName: teamName,
-        channels: project.monitors.map((m) => ({ id: m.channelId, name: m.channelName })),
+        channels: [],
         role,
         backfillDays: 7,
         enabled: true,
         status: 'connected',
+        selectionMode: 'include',
         createdAt: now,
         updatedAt: now
       }

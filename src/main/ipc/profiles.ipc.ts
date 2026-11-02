@@ -499,14 +499,12 @@ export function registerProfileIpc(deps: ProfileIpcDeps): void {
           profileId: project.profileId,
           workspaceId: workspace.teamId,
           workspaceName: workspace.teamName,
-          channels: (project.monitors ?? []).map((m: { channelId: string; channelName?: string }) => ({
-            id: m.channelId,
-            name: m.channelName || m.channelId
-          })),
+          channels: [],
           role: 'ours',
           backfillDays: 7,
           enabled: true,
           status: 'connected',
+          selectionMode: 'include',
           createdAt: now,
           updatedAt: now
         }

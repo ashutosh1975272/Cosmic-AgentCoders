@@ -16,6 +16,7 @@ import AgentChatPanel from './AgentChatPanel'
 import { requestMessageJump } from './jump-to-message'
 import SchedulesPage from './SchedulesPage'
 import { AppIcon } from '../AppIcon'
+import { SourceChannelPicker } from './SourceChannelPicker'
 import { useProfileStore } from '../../hooks/useProfiles'
 import { useDashboardStore } from '../../hooks/useDashboard'
 import { BASE_APP_PRESETS } from '../../../../shared/base-app-presets'
@@ -121,6 +122,7 @@ export default function WorkspaceContent({
   const [authError, setAuthError] = useState<string | null>(null)
   const [slackViewMode, setSlackViewMode] = useState<'messages' | 'live'>('live')
   const [cardAuthenticated, setCardAuthenticated] = useState<boolean | null>(null)
+  const [channelPickerSourceId, setChannelPickerSourceId] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -141,10 +143,27 @@ export default function WorkspaceContent({
     if (nav.selection !== 'm:schedules') return
     const scheduled = (project.sources ?? []).some(
       (source) =>
-        source.kind === 'browser' && source.enabled !== false && source.scheduleEnabled !== false
+        source.kind === 'browser' && source.enabled !== false && source.scheduleEnabled === true
     )
     if (!scheduled) onSelect('m:project')
   }, [nav.selection, project.sources, onSelect])
+
+  const unreviewedSource = useMemo(
+    () =>
+      (project.sources ?? []).find(
+        (source) =>
+          source.kind === 'browser' && source.enabled !== false && !source.channelsReviewedAt
+      ) ?? null,
+    [project.sources]
+  )
+
+  const slackBrowserSource = useMemo(
+    () =>
+      (project.sources ?? []).find(
+        (source) => source.kind === 'browser' && source.enabled !== false
+      ) ?? null,
+    [project.sources]
+  )
 
   // Resolve genuine Slack team ID strictly for THIS card / profile, without cross-profile leakage
   const effectiveSlackTeamId = useMemo(() => {
@@ -711,6 +730,25 @@ export default function WorkspaceContent({
                 )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {slackBrowserSource ? (
+                  <button
+                    type="button"
+                    onClick={() => setChannelPickerSourceId(slackBrowserSource.id)}
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.08)',
+                      border: '1px solid rgba(255, 255, 255, 0.16)',
+                      color: '#cbd5e1',
+                      fontSize: 11,
+                      borderRadius: 6,
+                      padding: '3px 9px',
+                      cursor: 'pointer',
+                      fontWeight: 600
+                    }}
+                    title="Choose channels to scrape or exclude"
+                  >
+                    ☑ Channels ({slackBrowserSource.channels.filter((c) => c.enabled !== false).length})
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => void handleStartCardAppLogin(project.id, targetProfile?.id, 'slack')}
@@ -729,6 +767,34 @@ export default function WorkspaceContent({
                 </button>
               </div>
             </div>
+            {unreviewedSource ? (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  padding: '9px 14px',
+                  background: 'rgba(251, 191, 36, 0.1)',
+                  borderBottom: '1px solid rgba(251, 191, 36, 0.25)',
+                  fontSize: 12,
+                  color: '#fcd34d'
+                }}
+              >
+                <span>
+                  Slack is connected. Choose the 2–3 channels this card should scrape — nothing is
+                  read until you pick.
+                </span>
+                <button
+                  type="button"
+                  className="dash-subtle"
+                  style={{ fontSize: 12, whiteSpace: 'nowrap' }}
+                  onClick={() => setChannelPickerSourceId(unreviewedSource.id)}
+                >
+                  Choose channels
+                </button>
+              </div>
+            ) : null}
             <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
               <CardLiveSlackEmbed
                 projectId={project.id}
@@ -847,32 +913,59 @@ export default function WorkspaceContent({
     body = <CentreContent centre={centre} />
   }
 
+  const channelPickerElement = channelPickerSourceId
+    ? (() => {
+        const pickerSource = (project.sources ?? []).find(
+          (source) => source.id === channelPickerSourceId
+        )
+        if (!pickerSource) return null
+        return (
+          <SourceChannelPicker
+            projectId={project.id}
+            source={pickerSource}
+            open={true}
+            onClose={() => setChannelPickerSourceId(null)}
+            onSaved={() => {
+              void useDashboardStore.getState().loadSnapshot()
+              setChannelPickerSourceId(null)
+            }}
+          />
+        )
+      })()
+    : null
+
   if (bare) {
     return (
-      <section
-        className="ws-content is-bare"
-        aria-label={title}
-        style={{ flex: '1 1 0%', height: '100%', minHeight: 0, width: '100%' }}
-      >
-        {body}
-      </section>
+      <>
+        <section
+          className="ws-content is-bare"
+          aria-label={title}
+          style={{ flex: '1 1 0%', height: '100%', minHeight: 0, width: '100%' }}
+        >
+          {body}
+        </section>
+        {channelPickerElement}
+      </>
     )
   }
 
   return (
-    <section
-      className="ws-content"
-      aria-label={title}
-      style={{ flex: '1 1 0%', height: '100%', minHeight: 0, width: '100%' }}
-    >
-      <div className="ws-content-scroll">
-        <div className="ws-content-inner">
-          <p className="ws-content-eyebrow">{identity.name}</p>
-          <h4 className="ws-content-title">{title}</h4>
-          <p className="ws-content-desc">{desc}</p>
-          <div className="ws-content-body">{body}</div>
+    <>
+      <section
+        className="ws-content"
+        aria-label={title}
+        style={{ flex: '1 1 0%', height: '100%', minHeight: 0, width: '100%' }}
+      >
+        <div className="ws-content-scroll">
+          <div className="ws-content-inner">
+            <p className="ws-content-eyebrow">{identity.name}</p>
+            <h4 className="ws-content-title">{title}</h4>
+            <p className="ws-content-desc">{desc}</p>
+            <div className="ws-content-body">{body}</div>
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
+      {channelPickerElement}
+    </>
   )
 }

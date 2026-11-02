@@ -112,6 +112,10 @@ export default function DashboardWizard({
     if (!targetId || !snapshot) return null
     return snapshot.projects.find((p) => p.project.id === targetId) ?? null
   }, [targetId, snapshot])
+  const existingBrowserSource = useMemo(
+    () => target?.project.sources?.find((source) => source.kind === 'browser') ?? null,
+    [target]
+  )
 
   const close = (): void => {
     if (inline && onDone) onDone()
@@ -197,7 +201,13 @@ export default function DashboardWizard({
   const [loadingChannels, setLoadingChannels] = useState(false)
   const [channelError, setChannelError] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(
-    new Set(target?.project.monitors.map((m) => m.channelId) ?? [])
+    new Set(
+      existingBrowserSource
+        ? existingBrowserSource.channels
+            .filter((channel) => channel.enabled !== false)
+            .map((channel) => channel.id)
+        : (target?.project.monitors ?? []).map((monitor) => monitor.channelId)
+    )
   )
 
   // confirm
@@ -245,6 +255,32 @@ export default function DashboardWizard({
     }
   }
 
+  async function loadBrowserChannels(): Promise<void> {
+    const [profId, teamId] = selectedWorkspaceKey.split(':')
+    if (!profId || !teamId) {
+      setChannels([])
+      setChannelError('Choose a workspace first.')
+      return
+    }
+    setLoadingChannels(true)
+    setChannelError(null)
+    try {
+      const result = await window.api.dashboard.discoverSourceChannels({
+        projectId: target?.project.id,
+        sourceId: existingBrowserSource?.id,
+        profileId: profId,
+        workspaceId: teamId
+      })
+      if (result.error) setChannelError(result.error)
+      setChannels(result.channels.map((c) => ({ id: c.id, name: c.name })))
+    } catch (err) {
+      setChannels([])
+      setChannelError(err instanceof Error ? err.message : 'channel discovery failed')
+    } finally {
+      setLoadingChannels(false)
+    }
+  }
+
   // Auto-load the channel list when the channels step opens (async only —
   // no synchronous state writes inside the effect body).
   useEffect(() => {
@@ -253,15 +289,8 @@ export default function DashboardWizard({
     void (async () => {
       try {
         if (sourceType === 'browser') {
-          if (!selectedWorkspaceKey) return
-          const [profId, teamId] = selectedWorkspaceKey.split(':')
-          if (!profId || !teamId) return
-          setLoadingChannels(true)
-          setChannelError(null)
-          const found = await window.api.slack.listChannels(profId, teamId)
-          if (!alive) return
-          setChannels(found.map((c) => ({ id: c.id, name: c.name })))
-          setLoadingChannels(false)
+          await loadBrowserChannels()
+          return
         } else {
           if (!channelQuery) return
           setLoadingChannels(true)
@@ -316,7 +345,7 @@ export default function DashboardWizard({
   }
 
   function pickChannels(): void {
-    if (selected.size === 0) return
+    if (selected.size === 0 && sourceType !== 'browser') return
     if (!projectName.trim()) {
       if (sourceType === 'browser') {
         const found = workspaceOptions.find(
@@ -331,7 +360,10 @@ export default function DashboardWizard({
   }
 
   async function createCard(): Promise<void> {
-    if (!projectName.trim() || selected.size === 0) return
+    if (!projectName.trim()) return
+    // Token cards must choose at least one channel here. Browser cards may be
+    // created empty so the post-login picker can ask for channels explicitly.
+    if (sourceType !== 'browser' && selected.size === 0) return
     // v2.3 — hard rule: a card must be bound to exactly one workspace
     let teamId = result?.teamId ?? target?.project.teamId
     let teamName = result?.teamName ?? target?.project.teamName
@@ -368,7 +400,7 @@ export default function DashboardWizard({
         sourceType === 'browser'
           ? [
               {
-                id: `src-browser-${Date.now().toString(36)}`,
+                id: existingBrowserSource?.id ?? `src-browser-${Date.now().toString(36)}`,
                 kind: 'browser',
                 platform: 'slack',
                 profileId,
@@ -379,7 +411,9 @@ export default function DashboardWizard({
                 backfillDays: (backfillDays === 1 || backfillDays === 30 ? backfillDays : 7) as 1 | 7 | 30,
                 enabled: true,
                 status: 'connected',
-                createdAt: now,
+                selectionMode: 'include',
+                channelsReviewedAt: monitors.length > 0 ? now : undefined,
+                createdAt: existingBrowserSource?.createdAt ?? now,
                 updatedAt: now
               }
             ]
@@ -400,15 +434,18 @@ export default function DashboardWizard({
         manualTokenKey: sourceType === 'browser' ? undefined : (savedKey || target?.project.manualTokenKey),
         sourcePreference: sourceType === 'browser' ? 'browser_only' : 'token_first',
         sources: browserSources,
-        monitors: monitors.length
-          ? monitors
-          : (target?.project.monitors ?? []).map((m) => ({
-              channelId: m.channelId,
-              channelName: m.channelName
-            }))
+        monitors:
+          sourceType === 'browser'
+            ? monitors
+            : monitors.length
+              ? monitors
+              : (target?.project.monitors ?? []).map((m) => ({
+                  channelId: m.channelId,
+                  channelName: m.channelName
+                }))
       })
       setStep(5)
-      void syncNow(id)
+      if (monitors.length > 0 || sourceType !== 'browser') void syncNow(id)
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'project save failed')
     } finally {
@@ -621,8 +658,12 @@ export default function DashboardWizard({
           <h3>Choose channels</h3>
           <p className="wizard-sub">
             {loadingChannels
-              ? 'Loading channels via token…'
-              : `${channels.length} readable with ${savedKey} — tick what this card watches.`}
+              ? sourceType === 'browser'
+                ? 'Reading channels from the Slack browser session…'
+                : 'Loading channels via token…'
+              : sourceType === 'browser'
+                ? `${channels.length} visible in this Slack session — tick what this card watches, or finish empty and pick after login.`
+                : `${channels.length} readable with ${savedKey} — tick what this card watches.`}
           </p>
           {result?.teamName ? (
             <p className="settings-hint">
@@ -632,7 +673,11 @@ export default function DashboardWizard({
           {channelError ? (
             <>
               <p className="wizard-error">{channelError}</p>
-              <button type="button" className="dash-subtle" onClick={() => void loadChannelList()}>
+              <button
+                type="button"
+                className="dash-subtle"
+                onClick={() => void (sourceType === 'browser' ? loadBrowserChannels() : loadChannelList())}
+              >
                 ⟳ Retry channel fetch
               </button>
             </>
@@ -669,7 +714,7 @@ export default function DashboardWizard({
             <button
               type="button"
               className="dash-primary"
-              disabled={selected.size === 0}
+              disabled={selected.size === 0 && sourceType !== 'browser'}
               onClick={pickChannels}
             >
               Continue →

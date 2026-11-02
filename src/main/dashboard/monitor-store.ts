@@ -1,6 +1,10 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { DashboardProject } from '../../shared/dashboard-contract'
+import type {
+  DashboardProject,
+  DashboardProjectDefaults,
+  ProjectSource
+} from '../../shared/dashboard-contract'
 
 /** Workspace facts discovered when a manual token was validated. */
 export interface ManualTokenMeta {
@@ -20,6 +24,8 @@ interface MonitorFile {
   channelOwners?: Record<string, string>
   /** Client-projects page: user-owned Pinned order (newest pin last). */
   pinnedOrder?: string[]
+  /** App-wide defaults for newly added project cards. */
+  dashboardDefaults?: DashboardProjectDefaults
   syncIntervalSeconds?: number
   updatedAt?: string
 }
@@ -32,6 +38,31 @@ interface EncryptedVault {
 
 /** A raw Slack token an older build left on disk before saves were blocked. */
 const PLAINTEXT_TOKEN_RE = /^xox[a-zA-Z]-[A-Za-z0-9-]+$/
+
+export const DEFAULT_PROJECT_DEFAULTS: DashboardProjectDefaults = {
+  allowDms: 'off',
+  scheduleEnabled: false,
+  intervalMinutes: 15,
+  backfillHours: 6,
+  catchUpCapDays: 7
+}
+
+/** Fill the source fields that a new card inherits from global settings. */
+function normalizeSource(
+  source: ProjectSource,
+  defaults: DashboardProjectDefaults
+): ProjectSource {
+  return {
+    ...source,
+    channels: Array.isArray(source.channels) ? source.channels : [],
+    selectionMode: source.selectionMode ?? 'include',
+    scheduleEnabled: source.scheduleEnabled ?? defaults.scheduleEnabled,
+    scheduleIntervalMinutes: source.scheduleIntervalMinutes ?? defaults.intervalMinutes,
+    backfillHours: source.backfillHours ?? defaults.backfillHours,
+    allowDms: source.allowDms ?? defaults.allowDms,
+    catchUpCapDays: source.catchUpCapDays ?? defaults.catchUpCapDays
+  }
+}
 
 let vault: EncryptedVault | null = null
 
@@ -53,19 +84,111 @@ export class MonitorStore {
   private encryptionAvailable: boolean
 
   private vaultOverride: EncryptedVault | null
+  /** Serializes source patches so two settings toggles cannot clobber each other. */
+  private mutationQueue: Promise<unknown> = Promise.resolve()
   constructor(options: { rootDir: string; encryptionAvailable: boolean; vault?: EncryptedVault }) {
     this.filePath = join(options.rootDir, 'monitors.json')
     this.encryptionAvailable = options.encryptionAvailable
     this.vaultOverride = options.vault ?? null
   }
 
+  private enqueueMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this.mutationQueue.then(operation, operation)
+    this.mutationQueue = next.then(
+      () => undefined,
+      () => undefined
+    )
+    return next
+  }
+
+  /**
+   * Patch one source without replacing the whole project. Read-modify-write is
+   * serialized so channel selection, schedule, and DM changes cannot lose each
+   * other when the UI fires them close together.
+   */
+  async updateSource(
+    projectId: string,
+    sourceId: string,
+    patch: Partial<ProjectSource>
+  ): Promise<ProjectSource> {
+    return this.enqueueMutation(async () => {
+      const data = await this.read()
+      const projectIndex = data.projects.findIndex((project) => project.id === projectId)
+      if (projectIndex < 0) throw new Error('Project not found')
+      const project = data.projects[projectIndex]!
+      const sources = project.sources ?? []
+      const sourceIndex = sources.findIndex((source) => source.id === sourceId)
+      if (sourceIndex < 0) throw new Error('Source not found')
+      const defaults = { ...DEFAULT_PROJECT_DEFAULTS, ...data.dashboardDefaults }
+      const updated: ProjectSource = normalizeSource(
+        {
+          ...sources[sourceIndex]!,
+          ...patch,
+          id: sources[sourceIndex]!.id,
+          updatedAt: new Date().toISOString()
+        },
+        defaults
+      )
+      const nextSources = [...sources]
+      nextSources[sourceIndex] = updated
+      const nextProject = { ...project, sources: nextSources }
+      if (
+        nextProject.sourcePreference === 'browser_only' &&
+        updated.kind === 'browser' &&
+        patch.channels
+      ) {
+        const readable =
+          updated.selectionMode === 'exclude'
+            ? updated.channels.filter((channel) => channel.enabled === false)
+            : updated.channels.filter((channel) => channel.enabled !== false)
+        nextProject.monitors = readable.map((channel) => ({
+          channelId: channel.id,
+          channelName: channel.name
+        }))
+      }
+      data.projects[projectIndex] = nextProject
+      await this.write(data)
+      return updated
+    })
+  }
+
+  async getDashboardDefaults(): Promise<DashboardProjectDefaults> {
+    const data = await this.read()
+    return { ...DEFAULT_PROJECT_DEFAULTS, ...data.dashboardDefaults }
+  }
+
+  async saveDashboardDefaults(
+    patch: Partial<DashboardProjectDefaults>
+  ): Promise<DashboardProjectDefaults> {
+    return this.enqueueMutation(async () => {
+      const data = await this.read()
+      const next = { ...DEFAULT_PROJECT_DEFAULTS, ...data.dashboardDefaults, ...patch }
+      // Keep the persisted shape small and validated.
+      const defaults: DashboardProjectDefaults = {
+        allowDms: next.allowDms === 'on' ? 'on' : 'off',
+        scheduleEnabled: next.scheduleEnabled === true,
+        intervalMinutes: ([1, 5, 15, 30, 60] as number[]).includes(next.intervalMinutes)
+          ? next.intervalMinutes
+          : 15,
+        backfillHours: Math.min(24, Math.max(1, Number(next.backfillHours) || 6)),
+        catchUpCapDays: Math.min(30, Math.max(1, Number(next.catchUpCapDays) || 7))
+      }
+      data.dashboardDefaults = defaults
+      await this.write(data)
+      return defaults
+    })
+  }
+
   async listProjects(): Promise<DashboardProject[]> {
     const data = await this.read()
+    const defaults = { ...DEFAULT_PROJECT_DEFAULTS, ...data.dashboardDefaults }
     return data.projects
       .filter((p) => p.id !== 'draft-project' && !p.id.startsWith('draft-'))
       .map((p) => ({
         ...p,
-        sources: Array.isArray(p.sources) ? p.sources : [],
+        sources: Array.isArray(p.sources)
+          ? p.sources.map((source) => normalizeSource(source, defaults))
+          : [],
         sourcePreference: p.sourcePreference ?? 'token_first'
       }))
   }
@@ -131,11 +254,15 @@ export class MonitorStore {
       }
     }
 
+    const defaults = { ...DEFAULT_PROJECT_DEFAULTS, ...data.dashboardDefaults }
+    const normalizedSources = Array.isArray(incoming.sources)
+      ? incoming.sources.map((source) => normalizeSource(source, defaults))
+      : (existing?.sources ?? []).map((source) => normalizeSource(source, defaults))
     const stamped = {
       ...incoming,
       teamName: effectiveTeamName,
       teamId: effectiveTeamId,
-      sources: Array.isArray(incoming.sources) ? incoming.sources : (existing?.sources ?? []),
+      sources: normalizedSources,
       sourcePreference: incoming.sourcePreference ?? existing?.sourcePreference ?? 'token_first'
     } as typeof incoming
     if ('id' in stamped && stamped.id) {

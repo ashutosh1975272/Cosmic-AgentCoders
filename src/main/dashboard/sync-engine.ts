@@ -704,6 +704,21 @@ export class DashboardSyncEngine {
     if (!source.profileId || !source.workspaceId) {
       return { ...empty, status: 'error', error: 'Source has no profile/workspace' }
     }
+    if (!source.channelsReviewedAt) {
+      return {
+        ...empty,
+        status: 'error',
+        error: 'Review and select channels before scraping this workspace'
+      }
+    }
+    const reviewedSelection = (source.channels ?? []).filter((channel) => channel.enabled !== false)
+    if ((source.selectionMode ?? 'include') === 'include' && reviewedSelection.length === 0) {
+      return {
+        ...empty,
+        status: 'error',
+        error: 'No channels selected. Choose at least one channel before scraping'
+      }
+    }
     if (this.runningSources.has(source.id)) {
       return { ...empty, status: 'stopped', error: 'Scrape already running for this source' }
     }
@@ -719,9 +734,18 @@ export class DashboardSyncEngine {
     this.runningSources.add(source.id)
 
     const backfillHours = clampNumber(source.backfillHours ?? 6, 1, 24)
+    const catchUpCapDays = clampNumber(source.catchUpCapDays ?? 7, 1, 30)
     const windowEndSec = Date.now() / 1000
     const floorTs = windowEndSec - backfillHours * 3600
+    const catchUpFloorTs = windowEndSec - catchUpCapDays * 86400
     const options = extra.options
+    const selectionMode = options?.selectionMode ?? source.selectionMode ?? 'include'
+    const selectedChannelIds = new Set(
+      options?.channelIds ??
+        (source.channels ?? [])
+          .filter((channel) => channel.enabled !== false)
+          .map((channel) => channel.id)
+    )
     const allowDms = resolveDmPolicy(
       source,
       options,
@@ -792,13 +816,13 @@ export class DashboardSyncEngine {
     try {
       let targetChannels: ProjectSourceChannel[] = source.channels ?? []
 
-      // Auto-discover the live sidebar, preserving user toggles + DM metadata.
+      // Auto-discover the live sidebar so logs can name every channel, but never
+      // turn an unselected channel into a read. The selected set is explicit.
       try {
         const discovered = await reader.listChannels()
         if (discovered.length > 0) {
-          const existing = new Map(targetChannels.map((ch) => [ch.id, ch]))
-          targetChannels = discovered.map((ch) => {
-            const previous = existing.get(ch.id)
+          const discoveredIds = new Set(discovered.map((channel) => channel.id))
+          const mapped = discovered.map((ch) => {
             const kind = channelKind({
               id: ch.id,
               name: ch.name,
@@ -811,17 +835,24 @@ export class DashboardSyncEngine {
               isPrivate: ch.isPrivate,
               isDm: ch.isDm,
               kind,
-              enabled: previous ? previous.enabled !== false : true
+              enabled: selectedChannelIds.has(ch.id)
             }
           })
-          await this.mergeSource(project.id, source.id, (current) => ({
-            ...current,
-            channels: targetChannels,
-            updatedAt: new Date().toISOString()
-          }))
+          const extras = (source.channels ?? [])
+            .filter((ch) => selectedChannelIds.has(ch.id) && !discoveredIds.has(ch.id))
+            .map((ch) => ({ ...ch, enabled: true }))
+          targetChannels = [...mapped, ...extras]
+          // A per-run override must not rewrite the saved default.
+          if (!options?.channelIds?.length && !options?.selectionMode) {
+            await this.mergeSource(project.id, source.id, (current) => ({
+              ...current,
+              channels: targetChannels,
+              updatedAt: new Date().toISOString()
+            }))
+          }
         }
       } catch {
-        targetChannels = (source.channels ?? []).filter((ch) => ch.enabled !== false)
+        targetChannels = source.channels ?? []
       }
 
       for (const ch of targetChannels) {
@@ -833,8 +864,9 @@ export class DashboardSyncEngine {
 
         const kind = channelKind(ch)
         const name = ch.name || ch.id
+        const isSelected = selectedChannelIds.has(ch.id)
 
-        if (ch.enabled === false) {
+        if (selectionMode === 'include' ? !isSelected : isSelected) {
           channels.push({
             channelId: ch.id,
             channelName: name,
@@ -842,7 +874,7 @@ export class DashboardSyncEngine {
             messagesRead: 0,
             newMessages: 0,
             status: 'skipped',
-            skippedReason: 'channel-disabled'
+            skippedReason: selectionMode === 'include' ? 'not-selected' : 'excluded'
           })
           continue
         }
@@ -858,18 +890,6 @@ export class DashboardSyncEngine {
           })
           continue
         }
-        if (options?.channelIds?.length && !options.channelIds.includes(ch.id)) {
-          channels.push({
-            channelId: ch.id,
-            channelName: name,
-            kind,
-            messagesRead: 0,
-            newMessages: 0,
-            status: 'skipped',
-            skippedReason: 'not-selected'
-          })
-          continue
-        }
 
         this.scrapeEventListener?.({
           type: 'navigate',
@@ -881,8 +901,14 @@ export class DashboardSyncEngine {
           text: `Reading ${kind === 'dm' ? 'DM' : '#'}${name}…`
         })
 
-        const anchor = (await this.channelCursor(source, ch.id)) ?? sourceLastReadSec(source) ?? floorTs
-        const sinceTs = Math.max(floorTs, anchor - 120)
+        const cursor = await this.channelCursor(source, ch.id)
+        // Manual and scheduled runs share one rule: per-channel cursor − 2 min.
+        // A cursorless channel (newly selected) uses the configured backfill.
+        // Sleep/wake catch-up is not capped by backfillHours; only the 7-day
+        // hard cap applies. source.lastReadAt is deliberately not an anchor:
+        // it would skip history for a channel that was just selected.
+        const anchor = cursor ?? floorTs
+        const sinceTs = Math.max(cursor ? catchUpFloorTs : floorTs, anchor - 120)
         windowStart = Math.min(windowStart, sinceTs)
 
         try {
@@ -1424,8 +1450,3 @@ function resolveDmPolicy(
   return globalEnabled
 }
 
-function sourceLastReadSec(source: ProjectSource): number | null {
-  if (!source.lastReadAt) return null
-  const ms = Date.parse(source.lastReadAt)
-  return Number.isFinite(ms) ? ms / 1000 : null
-}

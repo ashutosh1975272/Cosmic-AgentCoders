@@ -66,15 +66,17 @@ export class ConfigService {
 
   /** Masked app-level config plus how many projects inherit it. */
   async publicGlobalConfig(): Promise<DashboardGlobalConfig> {
-    const [ourSlack, ai, projects, aiUsage] = await Promise.all([
+    const [ourSlack, ai, projects, aiUsage, defaults] = await Promise.all([
       this.teamWorkspace.readPublic(),
       this.aiSettings.publicView(),
       this.monitorStore.listProjects(),
-      this.aiSettings.usageCounts()
+      this.aiSettings.usageCounts(),
+      this.monitorStore.getDashboardDefaults()
     ])
 
     return {
       ourSlack,
+      defaults,
       nvidia: {
         configured: ai.global.hasKey,
         apiKeyMask: ai.global.apiKeyMask,

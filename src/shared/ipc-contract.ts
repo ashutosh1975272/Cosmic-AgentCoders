@@ -6,7 +6,12 @@ import type {
   DashboardAiSettingsView,
   DashboardAiTestResult,
   DashboardGlobalConfig,
+  DashboardProjectDefaults,
   DashboardListChannelsPayload,
+  DashboardDiscoverSourceChannelsPayload,
+  DashboardDiscoverSourceChannelsResult,
+  DashboardUpdateSourcePayload,
+  DashboardUpdateSourceResult,
   DashboardAppClientConfig,
   DashboardChatMessage,
   DashboardChatPage,
@@ -161,6 +166,8 @@ export const IpcChannels = {
   DashboardGetHistory: 'dashboard:get-history',
   DashboardGetRecent: 'dashboard:get-recent',
   DashboardListChannels: 'dashboard:list-channels',
+  DashboardDiscoverSourceChannels: 'dashboard:discover-source-channels',
+  DashboardUpdateSource: 'dashboard:update-source',
   DashboardViewSet: 'dashboard:view-set',
   DashboardPinnedOrderSet: 'dashboard:pinned-order-set',
   DashboardUpsertProject: 'dashboard:upsert-project',
@@ -197,6 +204,7 @@ export const IpcChannels = {
   DashboardTestAi: 'dashboard:test-ai',
   DashboardConfigGet: 'dashboard:config-get',
   DashboardConfigChanged: 'dashboard:config-changed',
+  DashboardProjectDefaultsSet: 'dashboard:project-defaults-set',
 
   DashboardTeamWorkspaceGet: 'dashboard:team-workspace-get',
   DashboardTeamWorkspaceCandidates: 'dashboard:team-workspace-candidates',
@@ -436,6 +444,10 @@ export interface IpcApi {
     getHistory: (payload: { projectId: string }) => Promise<InsightHistoryEntryContract[]>
     getRecent: () => Promise<RecentActivity[]>
     listChannels: (payload: DashboardListChannelsPayload) => Promise<SlackChannelSummary[]>
+    discoverSourceChannels: (
+      payload: DashboardDiscoverSourceChannelsPayload
+    ) => Promise<DashboardDiscoverSourceChannelsResult>
+    updateSource: (payload: DashboardUpdateSourcePayload) => Promise<DashboardUpdateSourceResult>
     upsertProject: (payload: ProjectUpsertPayload) => Promise<DashboardSnapshot>
     deleteProject: (payload: ProjectDeletePayload) => Promise<DashboardSnapshot>
     syncNow: (payload?: SyncNowPayload) => Promise<void>
@@ -469,6 +481,9 @@ export interface IpcApi {
     listAiModels: (payload?: DashboardAiModelsQueryPayload) => Promise<DashboardAiModelsResult>
     testAi: (payload?: DashboardAiSettingsQueryPayload) => Promise<DashboardAiTestResult>
     getGlobalConfig: () => Promise<DashboardGlobalConfig>
+    saveProjectDefaults: (
+      payload: Partial<DashboardProjectDefaults>
+    ) => Promise<DashboardGlobalConfig>
     onConfigChanged: (callback: (config: DashboardGlobalConfig) => void) => () => void
     getTeamWorkspace: () => Promise<DashboardTeamWorkspace>
     listTeamWorkspaceCandidates: () => Promise<DashboardTeamWorkspaceCandidate[]>
@@ -575,6 +590,11 @@ export type {
   DashboardAiSettingsSavePayload,
   DashboardAiSettingsView,
   DashboardListChannelsPayload,
+  DashboardDiscoverSourceChannelsPayload,
+  DashboardDiscoverSourceChannelsResult,
+  DashboardUpdateSourcePayload,
+  DashboardUpdateSourceResult,
+  DashboardProjectDefaults,
   DashboardMarkViewedPayload,
   ActivateProfilePayload,
   AppId,

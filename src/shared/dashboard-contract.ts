@@ -68,6 +68,9 @@ export type ProjectSourceChannelKind = 'public' | 'private' | 'dm' | 'group-dm'
 /** Effective at scrape time: card override wins, otherwise the global setting. */
 export type ProjectSourceDmPolicy = 'inherit' | 'on' | 'off'
 
+/** Include = read only ticked channels. Exclude = read everything except ticked. */
+export type ProjectSourceSelectionMode = 'include' | 'exclude'
+
 export interface ProjectSourceChannel {
   id: string
   name: string
@@ -99,6 +102,12 @@ export interface ProjectSource {
   role: 'client' | 'ours'
   enabled: boolean
   backfillDays: 1 | 7 | 30
+  /** Include selected channels only, or exclude the ticked ones. */
+  selectionMode?: ProjectSourceSelectionMode
+  /** Set once the user has reviewed the channel picker; legacy sources are unset. */
+  channelsReviewedAt?: string
+  /** Hard limit for sleep/wake catch-up. Defaults to the global 7 days. */
+  catchUpCapDays?: number
   status?: ProjectSourceStatus
   lastReadAt?: string
   lastReadNewCount?: number
@@ -205,6 +214,8 @@ export interface DashboardScrapeOptions {
   includePublic?: boolean
   includePrivate?: boolean
   includeDms?: boolean
+  /** Per-run override of the persisted source scope. */
+  selectionMode?: ProjectSourceSelectionMode
 }
 
 export interface DashboardScrapePayload {
@@ -565,6 +576,34 @@ export interface DashboardListChannelsPayload {
   manualTokenKey?: string
   /** 'ours' lists the globally connected team workspace instead of a card's. */
   source?: DashboardSource
+}
+
+/** Discover channels with the card's existing browser session (no token). */
+export interface DashboardDiscoverSourceChannelsPayload {
+  /** Optional while the wizard is still creating the card. */
+  projectId?: string
+  /** Optional for a new source; omit to discover before the source exists. */
+  sourceId?: string
+  /** Optional fallbacks when the source row is being created. */
+  profileId?: string
+  workspaceId?: string
+}
+
+export interface DashboardDiscoverSourceChannelsResult {
+  channels: ProjectSourceChannel[]
+  error?: string
+}
+
+/** Atomic source patch — never replaces the whole project. */
+export interface DashboardUpdateSourcePayload {
+  projectId: string
+  sourceId: string
+  patch: Partial<Omit<ProjectSource, 'id' | 'createdAt' | 'updatedAt'>>
+}
+
+export interface DashboardUpdateSourceResult {
+  source: ProjectSource
+  snapshot: DashboardSnapshot
 }
 
 export interface SyncNowPayload {
@@ -1035,10 +1074,22 @@ export interface DashboardConfigUsage {
   usingGlobalOurSlack: number
 }
 
+/** Defaults applied to a new project card until it explicitly overrides them. */
+export interface DashboardProjectDefaults {
+  /** DMs stay off unless the user turns them on for a card or globally. */
+  allowDms: 'on' | 'off'
+  scheduleEnabled: boolean
+  intervalMinutes: DashboardScheduleInterval
+  backfillHours: number
+  /** Sleep/wake catch-up never reaches further back than this. */
+  catchUpCapDays: number
+}
+
 export interface DashboardGlobalConfig {
   ourSlack: DashboardTeamWorkspace
   nvidia: DashboardGlobalNvidiaConfig
   usage: DashboardConfigUsage
+  defaults: DashboardProjectDefaults
 }
 
 export interface DashboardAiTestResult {

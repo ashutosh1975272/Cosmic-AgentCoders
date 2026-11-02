@@ -234,6 +234,14 @@ const api: IpcApi = {
     getRecent: () =>
       ipcRenderer.invoke(IpcChannels.DashboardGetRecent) as Promise<RecentActivity[]>,
     listChannels: (payload) => ipcRenderer.invoke(IpcChannels.DashboardListChannels, payload),
+    discoverSourceChannels: (payload) =>
+      ipcRenderer.invoke(IpcChannels.DashboardDiscoverSourceChannels, payload) as Promise<
+        import('../shared/dashboard-contract').DashboardDiscoverSourceChannelsResult
+      >,
+    updateSource: (payload) =>
+      ipcRenderer.invoke(IpcChannels.DashboardUpdateSource, payload) as Promise<
+        import('../shared/dashboard-contract').DashboardUpdateSourceResult
+      >,
     upsertProject: (payload) => ipcRenderer.invoke(IpcChannels.DashboardUpsertProject, payload),
     deleteProject: (payload) => ipcRenderer.invoke(IpcChannels.DashboardDeleteProject, payload),
     syncNow: (payload) => ipcRenderer.invoke(IpcChannels.DashboardSyncNow, payload),
@@ -359,6 +367,10 @@ const api: IpcApi = {
       ipcRenderer.invoke(IpcChannels.DashboardTestAi, payload) as Promise<DashboardAiTestResult>,
     getGlobalConfig: () =>
       ipcRenderer.invoke(IpcChannels.DashboardConfigGet) as Promise<DashboardGlobalConfig>,
+    saveProjectDefaults: (payload) =>
+      ipcRenderer.invoke(IpcChannels.DashboardProjectDefaultsSet, payload) as Promise<
+        import('../shared/dashboard-contract').DashboardGlobalConfig
+      >,
     onConfigChanged: (callback: (config: DashboardGlobalConfig) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, config: DashboardGlobalConfig): void =>
         callback(config)

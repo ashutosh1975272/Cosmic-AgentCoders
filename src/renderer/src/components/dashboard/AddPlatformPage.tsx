@@ -287,11 +287,12 @@ export function AddPlatformPage({
         profileId,
         workspaceId: teamId,
         workspaceName: teamName,
-        channels: currentCard.monitors.map((m) => ({ id: m.channelId, name: m.channelName })),
+        channels: [],
         role,
         backfillDays: 7,
         enabled: true,
         status: 'connected',
+        selectionMode: 'include',
         createdAt: now,
         updatedAt: now
       }

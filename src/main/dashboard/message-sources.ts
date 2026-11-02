@@ -81,7 +81,11 @@ function fromMonitor(channel: DashboardMonitor): ResolvedChannel {
 }
 
 function hasChannels(source: ProjectSource): boolean {
-  return (source.channels ?? []).some((channel) => channel.enabled !== false)
+  const channels =
+    source.selectionMode === 'exclude'
+      ? (source.channels ?? []).filter((channel) => channel.enabled === false)
+      : (source.channels ?? []).filter((channel) => channel.enabled !== false)
+  return channels.length > 0
 }
 
 /**
@@ -122,6 +126,10 @@ export function resolveProjectMessageSources(
   for (const source of sources) {
     if (!hasChannels(source)) continue
     const role: 'client' | 'ours' = source.role === 'ours' ? 'ours' : 'client'
+    const readableChannels =
+      source.selectionMode === 'exclude'
+        ? (source.channels ?? []).filter((channel) => channel.enabled === false)
+        : (source.channels ?? []).filter((channel) => channel.enabled !== false)
     add({
       source: role,
       role,
@@ -129,9 +137,7 @@ export function resolveProjectMessageSources(
       projectSourceId: source.id,
       profileId: source.profileId || project.profileId,
       teamId: source.workspaceId || options.mappedTeamId || project.teamId,
-      channels: (source.channels ?? [])
-        .filter((channel) => channel.enabled !== false)
-        .map(fromSourceChannel)
+      channels: readableChannels.map(fromSourceChannel)
     })
   }
 

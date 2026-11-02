@@ -755,9 +755,11 @@ describe('[L9+L10] DashboardSyncEngine.syncProjectSource — E2E scrape pipeline
           enabled: true,
           profileId: 'profile-1',
           workspaceId: 'T_WORKSPACE',
+          channelsReviewedAt: '2026-11-02T10:00:00.000Z',
+          selectionMode: 'include',
           channels: [
-            { id: 'C_GENERAL', name: 'general' },
-            { id: 'C_ENG', name: 'engineering' }
+            { id: 'C_GENERAL', name: 'general', enabled: true },
+            { id: 'C_ENG', name: 'engineering', enabled: true }
           ]
         }
       ],

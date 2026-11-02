@@ -143,6 +143,26 @@ describe('resolveProjectMessageSources', () => {
     expect(resolve(p)).toEqual([])
   })
 
+  it('excludes ticked channels when the source is in exclude mode', () => {
+    const p = project({
+      sourcePreference: 'browser_only',
+      sources: [
+        browserSource({
+          selectionMode: 'exclude',
+          channels: [
+            { id: 'C1', name: 'noisy', enabled: true, kind: 'public' },
+            { id: 'C2', name: 'team', enabled: false, kind: 'public' },
+            { id: 'C3', name: 'alerts', enabled: false, kind: 'public' }
+          ]
+        })
+      ]
+    })
+
+    const result = resolve(p)
+
+    expect(result[0]!.channels.map((channel) => channel.channelId)).toEqual(['C2', 'C3'])
+  })
+
   it('uses the mapped workspace id for legacy monitors', () => {
     const p = project({ monitors: [{ channelId: 'C9', channelName: 'legacy' }] })
 

@@ -13,6 +13,7 @@ describe('ProjectSettingsTab: Sources Tab Categorized Sections & Scrape Control'
     status: 'success'
   })
   const upsertProjectMock = vi.fn().mockResolvedValue({})
+  const updateSourceMock = vi.fn().mockResolvedValue({ snapshot: { projects: [] } })
 
   const mockProject: DashboardProject = {
     id: 'proj-rajesh-01',
@@ -40,6 +41,7 @@ describe('ProjectSettingsTab: Sources Tab Categorized Sections & Scrape Control'
         enabled: true,
         backfillDays: 7,
         status: 'connected',
+        channelsReviewedAt: '2026-11-02T10:00:00Z',
         createdAt: '2026-11-02T10:00:00Z',
         updatedAt: '2026-11-02T10:00:00Z'
       }
@@ -56,13 +58,17 @@ describe('ProjectSettingsTab: Sources Tab Categorized Sections & Scrape Control'
         listAiModels: vi.fn().mockResolvedValue({ models: [] }),
         syncSource: syncSourceMock,
         upsertProject: upsertProjectMock,
+        updateSource: updateSourceMock,
+        discoverSourceChannels: vi.fn().mockResolvedValue({ channels: [] }),
         getRunLogs: vi.fn().mockResolvedValue([])
       }
     } as any
 
     useDashboardStore.setState({
       syncSource: syncSourceMock,
-      upsertProject: upsertProjectMock
+      upsertProject: upsertProjectMock,
+      updateSource: updateSourceMock,
+      discoverSourceChannels: vi.fn().mockResolvedValue({ channels: [] })
     })
 
     useProfileStore.setState({
@@ -141,6 +147,7 @@ describe('ProjectSettingsTab: Sources Tab Categorized Sections & Scrape Control'
           backfillDays: 7,
           enabled: true,
           status: 'connected',
+          channelsReviewedAt: new Date().toISOString(),
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         },
@@ -155,6 +162,7 @@ describe('ProjectSettingsTab: Sources Tab Categorized Sections & Scrape Control'
           backfillDays: 7,
           enabled: true,
           status: 'connected',
+          channelsReviewedAt: new Date().toISOString(),
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         }
@@ -192,17 +200,11 @@ describe('ProjectSettingsTab: Sources Tab Categorized Sections & Scrape Control'
     fireEvent.click(activeButtons[0])
 
     await waitFor(() => {
-      expect(upsertProjectMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: 'proj-rajesh-01',
-          sources: expect.arrayContaining([
-            expect.objectContaining({
-              id: 'src-card-client-1',
-              enabled: false
-            })
-          ])
-        })
-      )
+      expect(updateSourceMock).toHaveBeenCalledWith({
+        projectId: 'proj-rajesh-01',
+        sourceId: 'src-card-client-1',
+        patch: { enabled: false }
+      })
     })
   })
 
@@ -226,7 +228,7 @@ describe('ProjectSettingsTab: Sources Tab Categorized Sections & Scrape Control'
     })
   })
 
-  it('attaches and scrapes an unattached global workspace directly', async () => {
+  it('attaches an unreviewed global workspace without scraping it', async () => {
     render(<ProjectSettingsTab project={mockProject} />)
 
     // Switch to Sources tab
@@ -245,12 +247,13 @@ describe('ProjectSettingsTab: Sources Tab Categorized Sections & Scrape Control'
             expect.objectContaining({
               workspaceId: 'T_ASHUTOSH_2',
               workspaceName: 'Ashutosh Workspace 2',
-              profileId: 'prof-ashutosh'
+              profileId: 'prof-ashutosh',
+              channels: []
             })
           ])
         })
       )
-      expect(syncSourceMock).toHaveBeenCalled()
+      expect(syncSourceMock).not.toHaveBeenCalled()
     })
   })
 })
