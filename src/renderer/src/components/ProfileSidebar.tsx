@@ -95,6 +95,7 @@ interface ProfileSidebarProps {
     profilesHub?: boolean
   }
   onLookChange?: (look: 'minimal' | 'ancient' | 'new-cosmic' | 'basic') => void
+  onToast?: (message: string) => void
 }
 
 function platformStatusDot(sessionStatus: AppSessionStatus): {
@@ -375,7 +376,8 @@ export const ProfileSidebar = memo(function ProfileSidebar({
     observer: false,
     profilesHub: false
   },
-  onLookChange
+  onLookChange,
+  onToast
 }: ProfileSidebarProps): React.JSX.Element {
   const activeLook = propSidebarLook ?? 'basic'
   const cosmicLevel1 = useDashboardStore((s) => s.cosmicLevel1)
@@ -698,6 +700,7 @@ export const ProfileSidebar = memo(function ProfileSidebar({
           <BasicSidebarProjectTree
             baseAppLayout={baseAppLayout}
             onNewProject={onNewProject}
+            onToast={onToast}
           />
         </>
       ) : (

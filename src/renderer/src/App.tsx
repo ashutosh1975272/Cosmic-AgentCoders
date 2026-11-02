@@ -954,6 +954,7 @@ function App(): React.JSX.Element {
                   setSettings(next)
                 })
               }}
+              onToast={setToast}
             />
             <div
               className="sidebar-resizer"

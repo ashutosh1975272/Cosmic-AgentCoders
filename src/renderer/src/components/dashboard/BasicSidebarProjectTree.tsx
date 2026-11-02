@@ -4,10 +4,13 @@ import { useProfileStore } from '../../hooks/useProfiles'
 import { AppIcon } from '../AppIcon'
 import { getBaseLayoutItems, type BaseAppLayoutKey } from '../../../../shared/base-app-presets'
 import type { AppId } from '../../../../shared/types'
+import type { DashboardProject } from '../../../../shared/dashboard-contract'
+import { CardRemoveOrDeleteModal } from './CardRemoveOrDeleteModal'
 
 interface BasicSidebarProjectTreeProps {
   baseAppLayout?: BaseAppLayoutKey
   onNewProject?: () => void
+  onToast?: (message: string) => void
 }
 
 function PinGlyph({ filled }: { filled: boolean }): React.JSX.Element {
@@ -34,17 +37,21 @@ function PinGlyph({ filled }: { filled: boolean }): React.JSX.Element {
 
 export function BasicSidebarProjectTree({
   baseAppLayout = 'standard',
-  onNewProject
+  onNewProject,
+  onToast
 }: BasicSidebarProjectTreeProps): React.JSX.Element {
   const snapshot = useDashboardStore((s) => s.snapshot)
   const loadSnapshot = useDashboardStore((s) => s.loadSnapshot)
   const setPinnedOrder = useDashboardStore((s) => s.setPinnedOrder)
+  const upsertProject = useDashboardStore((s) => s.upsertProject)
+  const deleteProject = useDashboardStore((s) => s.deleteProject)
   const cosmicSelectedCardId = useDashboardStore((s) => s.cosmicSelectedCardId)
   const basicActiveTab = useDashboardStore((s) => s.basicActiveTab)
   const setBasicNavigation = useDashboardStore((s) => s.setBasicNavigation)
   const profiles = useProfileStore((s) => s.profiles)
 
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({})
+  const [cardActionTarget, setCardActionTarget] = useState<DashboardProject | null>(null)
 
   // Ensure snapshot is loaded
   useEffect(() => {
@@ -61,7 +68,8 @@ export function BasicSidebarProjectTree({
     const uncompleted = snapshot.projects.filter(
       (p) =>
         p.project.workflowStatus !== 'completed' &&
-        p.project.workflowStatus !== 'removed'
+        p.project.workflowStatus !== 'removed' &&
+        !p.project.hiddenInSidebar
     )
 
     return [...uncompleted].sort((a, b) => {
@@ -257,16 +265,51 @@ export function BasicSidebarProjectTree({
                   )}
                 </button>
 
-                <button
-                  type="button"
-                  className={`basic-project-pin${isPinned ? ' is-pinned' : ''}`}
-                  title={isPinned ? 'Unpin project' : 'Pin project to top'}
-                  aria-label={isPinned ? `Unpin ${projectName}` : `Pin ${projectName} to top`}
-                  aria-pressed={isPinned}
-                  onClick={(e) => handleTogglePin(projectId, e)}
-                >
-                  <PinGlyph filled={isPinned} />
-                </button>
+                <div className="basic-project-actions">
+                  <button
+                    type="button"
+                    className={`basic-project-pin${isPinned ? ' is-pinned' : ''}`}
+                    title={isPinned ? 'Unpin project' : 'Pin project to top'}
+                    aria-label={isPinned ? `Unpin ${projectName}` : `Pin ${projectName} to top`}
+                    aria-pressed={isPinned}
+                    onClick={(e) => handleTogglePin(projectId, e)}
+                  >
+                    <PinGlyph filled={isPinned} />
+                  </button>
+                  <button
+                    type="button"
+                    className={`nav-mute${project.muted ? ' is-muted' : ''}`}
+                    onClick={async (e) => {
+                      e.stopPropagation()
+                      try {
+                        await upsertProject({ ...project, muted: !project.muted })
+                      } catch (err) {
+                        console.error('Failed to toggle card mute', err)
+                      }
+                    }}
+                    title={
+                      project.muted
+                        ? `Unmute — allow desktop notifications for ${projectName}`
+                        : `Mute — silence desktop notifications for ${projectName}`
+                    }
+                    aria-pressed={project.muted}
+                    aria-label={project.muted ? `Unmute notifications for ${projectName}` : `Mute notifications for ${projectName}`}
+                  >
+                    {project.muted ? 'Muted' : 'Mute'}
+                  </button>
+                  <button
+                    type="button"
+                    className="nav-delete"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setCardActionTarget(project)
+                    }}
+                    title="Remove from sidebar or delete"
+                    aria-label={`Remove ${projectName} from sidebar`}
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
 
               {/* Collapsible Dropdown Items (Dashboard, Slack, Teams, WhatsApp, etc.) */}
@@ -333,6 +376,29 @@ export function BasicSidebarProjectTree({
           )
         })
       )}
+
+      <CardRemoveOrDeleteModal
+        open={Boolean(cardActionTarget)}
+        project={cardActionTarget}
+        onClose={() => setCardActionTarget(null)}
+        onHide={async (targetProject) => {
+          try {
+            await upsertProject({ ...targetProject, hiddenInSidebar: true })
+            const cName = targetProject.name || targetProject.teamName || 'Card'
+            onToast?.(`${cName} hidden from sidebar. Restore anytime from Profiles.`)
+          } catch (err) {
+            console.error('Failed to hide card from sidebar', err)
+          }
+        }}
+        onDelete={async (targetProjectId) => {
+          try {
+            await deleteProject(targetProjectId)
+            onToast?.('Project card permanently deleted.')
+          } catch (err) {
+            console.error('Failed to delete project card', err)
+          }
+        }}
+      />
     </div>
   )
 }

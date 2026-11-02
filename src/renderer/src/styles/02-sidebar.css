@@ -935,6 +935,34 @@
   background: var(--accent-soft);
 }
 
+.basic-project-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+
+.basic-project-actions .nav-mute,
+.basic-project-actions .nav-delete {
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.basic-project-row:hover .basic-project-actions .nav-mute,
+.basic-project-row:hover .basic-project-actions .nav-delete,
+.basic-project-actions .nav-mute.is-muted,
+.basic-project-actions .nav-mute:focus-visible,
+.basic-project-actions .nav-delete:focus-visible {
+  opacity: 1;
+}
+
+.basic-project-actions .nav-delete {
+  width: 22px;
+  height: 22px;
+  font-size: 1rem;
+}
+
 .basic-project-header-btn {
   display: flex;
   align-items: center;

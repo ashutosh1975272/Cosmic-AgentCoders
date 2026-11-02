@@ -157,6 +157,23 @@ export function AccountsManagementModal({
     [upsertProject]
   )
 
+  const handleToggleCardSidebarVisibility = useCallback(
+    async (project: DashboardProject) => {
+      try {
+        const isHidden = project.hiddenInSidebar || project.workflowStatus === 'removed'
+        const nextHidden = !isHidden
+        await upsertProject({
+          ...project,
+          hiddenInSidebar: nextHidden,
+          workflowStatus: !nextHidden && project.workflowStatus === 'removed' ? 'active' : project.workflowStatus
+        })
+      } catch (err) {
+        console.error('Failed to toggle card sidebar visibility:', err)
+      }
+    },
+    [upsertProject]
+  )
+
   const handleToggleSidebarVisibility = useCallback(async (profile: Profile) => {
     try {
       const nextHidden = !profile.hiddenInSidebar
@@ -801,16 +818,42 @@ export function AccountsManagementModal({
                           >
                             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px' }}>
                               <div>
-                                <h5 style={{ margin: 0, fontSize: '14.5px', fontWeight: 600, color: '#f8fafc' }}>
-                                  {project.name}
-                                </h5>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <h5 style={{ margin: 0, fontSize: '14.5px', fontWeight: 600, color: '#f8fafc' }}>
+                                    {project.name}
+                                  </h5>
+                                  {(project.hiddenInSidebar || status === 'removed') && (
+                                    <span
+                                      style={{
+                                        fontSize: '10px',
+                                        fontWeight: 650,
+                                        color: '#f59e0b',
+                                        background: 'rgba(245, 158, 11, 0.15)',
+                                        border: '1px solid rgba(245, 158, 11, 0.35)',
+                                        padding: '1px 6px',
+                                        borderRadius: '4px'
+                                      }}
+                                    >
+                                      🚫 Hidden from sidebar
+                                    </span>
+                                  )}
+                                </div>
                                 <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '2px' }}>
                                   Client: {project.clientName} • {project.teamName || 'Workspace'}
                                 </div>
                               </div>
 
-                              {/* Interactive Workflow Status Selector & Delete */}
+                              {/* Interactive Workflow Status Selector, Sidebar Toggle & Delete */}
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <button
+                                  type="button"
+                                  className={`btn ${project.hiddenInSidebar || status === 'removed' ? 'primary' : 'ghost'} btn-sm`}
+                                  style={{ fontSize: '11px', padding: '4px 8px' }}
+                                  onClick={() => void handleToggleCardSidebarVisibility(project)}
+                                  title={project.hiddenInSidebar || status === 'removed' ? 'Show in left sidebar' : 'Hide from left sidebar'}
+                                >
+                                  {project.hiddenInSidebar || status === 'removed' ? '👁 Show in sidebar' : '🚫 Hide in sidebar'}
+                                </button>
                                 <select
                                   value={status}
                                   onChange={(e) =>
