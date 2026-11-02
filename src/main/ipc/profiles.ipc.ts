@@ -731,6 +731,34 @@ export function registerProfileIpc(deps: ProfileIpcDeps): void {
   )
 
   handleInvoke(
+    IpcChannels.ProfileActivateCardWebEmbed,
+    async (payload: {
+      projectId?: string
+      profileId: string
+      linkId: string
+      url: string
+      bounds: ViewportBounds
+    }) => {
+      const mainWindow = deps.getMainWindow()
+      if (!mainWindow) {
+        return
+      }
+      deps.browserViewManager.activateCardWebEmbed(
+        payload.projectId ?? '',
+        payload.profileId,
+        payload.linkId,
+        payload.url,
+        mainWindow,
+        payload.bounds
+      )
+    }
+  )
+
+  handleInvoke(IpcChannels.ProfileReloadCardEmbed, async () => {
+    deps.browserViewManager.reloadCardEmbed()
+  })
+
+  handleInvoke(
     IpcChannels.ProfileStartCardAppLogin,
     async (payload: { projectId: string; profileId: string; appId: AppId; bounds?: ViewportBounds }) => {
       notifyAuthProgress(deps.getMainWindow, 'Waiting for Slack sign-in for card…')

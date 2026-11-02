@@ -94,6 +94,8 @@ export const IpcChannels = {
   ProfileUpdateBounds: 'profile:update-bounds',
   ProfileSetEmbedVisible: 'profile:set-embed-visible',
   ProfileActivateCardSlackEmbed: 'profile:activate-card-slack-embed',
+  ProfileActivateCardWebEmbed: 'profile:activate-card-web-embed',
+  ProfileReloadCardEmbed: 'profile:reload-card-embed',
   ProfileStartCardAppLogin: 'profile:start-card-app-login',
   ProfileUpdateCardSlackEmbedBounds: 'profile:update-card-slack-embed-bounds',
   ProfileClearCardSlackEmbed: 'profile:clear-card-slack-embed',
@@ -369,6 +371,14 @@ export interface IpcApi {
     updateBounds: (bounds: ViewportBounds) => Promise<void>
     setEmbedVisible: (visible: boolean) => Promise<void>
     activateCardSlackEmbed: (payload: { projectId?: string; profileId: string; teamId?: string; appId?: AppId; bounds: ViewportBounds }) => Promise<void>
+    activateCardWebEmbed: (payload: {
+      projectId?: string
+      profileId: string
+      linkId: string
+      url: string
+      bounds: ViewportBounds
+    }) => Promise<void>
+    reloadCardEmbed: () => Promise<void>
     startCardAppLogin: (payload: { projectId: string; profileId: string; appId: AppId; bounds?: ViewportBounds }) => Promise<Profile>
     updateCardSlackEmbedBounds: (bounds: ViewportBounds) => Promise<void>
     clearCardSlackEmbed: () => Promise<void>

@@ -90,6 +90,14 @@ const api: IpcApi = {
       ipcRenderer.invoke(IpcChannels.ProfileSetEmbedVisible, { visible }),
     activateCardSlackEmbed: (payload: { projectId?: string; profileId: string; teamId?: string; appId?: AppId; bounds: ViewportBounds }) =>
       ipcRenderer.invoke(IpcChannels.ProfileActivateCardSlackEmbed, payload),
+    activateCardWebEmbed: (payload: {
+      projectId?: string
+      profileId: string
+      linkId: string
+      url: string
+      bounds: ViewportBounds
+    }) => ipcRenderer.invoke(IpcChannels.ProfileActivateCardWebEmbed, payload),
+    reloadCardEmbed: () => ipcRenderer.invoke(IpcChannels.ProfileReloadCardEmbed),
     startCardAppLogin: (payload: { projectId: string; profileId: string; appId: AppId; bounds?: ViewportBounds }) =>
       ipcRenderer.invoke(IpcChannels.ProfileStartCardAppLogin, payload),
     updateCardSlackEmbedBounds: (bounds: ViewportBounds) =>

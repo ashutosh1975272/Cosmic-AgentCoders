@@ -643,32 +643,35 @@ export default function WorkspaceSidebar({
                                     </div>
                                   )
                                 })}
-                                {group.customLinks.map((link) => (
-                                  <button
-                                    key={link.id}
-                                    type="button"
-                                    className="ws-nav-subitem"
-                                    title={`Open ${link.name}: ${link.url}`}
-                                    onClick={() => {
-                                      window.open(link.url, '_blank')
-                                    }}
-                                    style={{
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'space-between',
-                                      padding: '4px 12px 4px 28px',
-                                      width: '100%',
-                                      textAlign: 'left'
-                                    }}
-                                  >
-                                    <span className="ws-nav-label" style={{ fontSize: 12 }}>
-                                      🔗 {link.name}
-                                    </span>
-                                    <span className="ws-nav-tag" style={{ fontSize: 10, opacity: 0.7 }}>
-                                      Link
-                                    </span>
-                                  </button>
-                                ))}
+                                {group.customLinks.map((link) => {
+                                  const isActive = nav.selection === `c:link:${link.id}` || nav.selection === `c:custom:${link.id}`
+                                  return (
+                                    <button
+                                      key={link.id}
+                                      type="button"
+                                      className={`ws-nav-subitem${isActive ? ' is-active' : ''}`}
+                                      title={`Open ${link.name}: ${link.url}`}
+                                      onClick={() => {
+                                        onSelect(`c:link:${link.id}` as SelectionId)
+                                      }}
+                                      style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'space-between',
+                                        padding: '4px 12px 4px 28px',
+                                        width: '100%',
+                                        textAlign: 'left'
+                                      }}
+                                    >
+                                      <span className="ws-nav-label" style={{ fontSize: 12 }}>
+                                        🔗 {link.name}
+                                      </span>
+                                      <span className="ws-nav-tag" style={{ fontSize: 10, opacity: 0.7 }}>
+                                        Link
+                                      </span>
+                                    </button>
+                                  )
+                                })}
                               </div>
                             ))
                           )}

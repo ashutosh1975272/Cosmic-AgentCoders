@@ -12,6 +12,7 @@ import NavIcon from './nav-icons'
 import { DetailBody, GuideDetailBody } from './guide-content'
 import SlackChatTab from './SlackChatTab'
 import CardLiveSlackEmbed from './CardLiveSlackEmbed'
+import CardLiveWebEmbed from './CardLiveWebEmbed'
 import ProjectSettingsTab from './ProjectSettingsTab'
 import AgentChatPanel from './AgentChatPanel'
 import { requestMessageJump } from './jump-to-message'
@@ -483,12 +484,33 @@ export default function WorkspaceContent({
           </div>
         </div>
       )
-    } else if (sel && sel.startsWith('c:preset:')) {
-      const presetId = sel.replace('c:preset:', '')
-      const presetItem = BASE_APP_PRESETS.full.find((p) => p.id === presetId)
-      const url = presetItem?.url || 'https://google.com'
-      const name = presetItem?.name || presetId
-      const icon = presetItem?.icon || '🌐'
+    } else if (sel && (sel.startsWith('c:preset:') || sel.startsWith('c:link:') || sel.startsWith('c:custom:'))) {
+      let url = 'https://google.com'
+      let name = 'Web Tool'
+      let icon = '🌐'
+      let linkKey: string = sel
+
+      if (sel.startsWith('c:preset:')) {
+        const presetId = sel.replace('c:preset:', '')
+        linkKey = presetId
+        const presetItem = BASE_APP_PRESETS.full.find((p) => p.id === presetId)
+        url = presetItem?.url || 'https://google.com'
+        name = presetItem?.name || presetId
+        icon = presetItem?.icon || '🌐'
+      } else {
+        const linkId = sel.replace(/^c:(link|custom):/, '')
+        linkKey = linkId
+        const found = (targetProfile?.customLinks ?? []).find((l) => l.id === linkId)
+        if (found) {
+          url = found.url
+          name = found.name
+          icon = '🔗'
+        }
+      }
+
+      const handleReload = () => {
+        void window.api?.profiles?.reloadCardEmbed?.()
+      }
 
       body = (
         <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: 'var(--bg-page)' }}>
@@ -496,7 +518,7 @@ export default function WorkspaceContent({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '8px 14px',
+            padding: '6px 14px',
             background: 'var(--surface)',
             borderBottom: '1px solid var(--border)',
             fontSize: 12,
@@ -511,17 +533,33 @@ export default function WorkspaceContent({
                 alignItems: 'center',
                 gap: 4,
                 fontSize: 11,
-                color: '#60a5fa',
-                background: 'rgba(96, 165, 250, 0.1)',
+                color: '#4ade80',
+                background: 'rgba(74, 222, 128, 0.1)',
                 padding: '2px 7px',
                 borderRadius: 12,
                 fontWeight: 600
               }}>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#60a5fa' }} />
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4ade80' }} />
                 Web Tool
               </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button
+                type="button"
+                onClick={handleReload}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  color: '#cbd5e1',
+                  fontSize: 11,
+                  borderRadius: 6,
+                  padding: '3px 9px',
+                  cursor: 'pointer'
+                }}
+                title="Reload page"
+              >
+                Reload
+              </button>
               <button
                 type="button"
                 onClick={() => window.open(url, '_blank')}
@@ -541,16 +579,12 @@ export default function WorkspaceContent({
             </div>
           </div>
           <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
-            <iframe
-              src={url}
-              title={name}
-              style={{
-                width: '100%',
-                height: '100%',
-                border: 'none',
-                background: '#fff'
-              }}
-              allow="microphone; camera; clipboard-read; clipboard-write"
+            <CardLiveWebEmbed
+              projectId={project.id}
+              profileId={targetProfile?.id}
+              linkId={linkKey}
+              url={url}
+              hidden={Boolean(channelPickerSourceId)}
             />
           </div>
         </div>

@@ -1261,6 +1261,69 @@ export class BrowserViewManager {
     log.info('card live embed activated', { profileId, appId, teamId, bounds, projectId })
   }
 
+  activateCardWebEmbed(
+    projectId: string,
+    profileId: string,
+    linkId: string,
+    url: string,
+    mainWindow: BrowserWindow,
+    bounds: Rectangle
+  ): void {
+    const key = `card:link:${projectId || profileId}:${linkId}`
+    let view = this.views.get(key)
+    if (!view || view.webContents.isDestroyed()) {
+      view = new WebContentsView({
+        webPreferences: {
+          partition: `persist:profile-${profileId || 'default'}-link-${linkId}`,
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true
+        }
+      })
+      view.setBackgroundColor('#0C0D11')
+      view.webContents.setWindowOpenHandler(({ url: openUrl }) => {
+        void view?.webContents.loadURL(openUrl)
+        return { action: 'deny' }
+      })
+      void view.webContents.loadURL(url)
+      this.views.set(key, view)
+    } else {
+      const currentUrl = view.webContents.getURL()
+      if (!currentUrl || currentUrl === 'about:blank') {
+        void view.webContents.loadURL(url)
+      }
+    }
+
+    if (this.cardEmbedKey && this.cardEmbedKey !== key) {
+      const prevView = this.views.get(this.cardEmbedKey)
+      if (prevView && mainWindow.contentView.children.includes(prevView)) {
+        mainWindow.contentView.removeChildView(prevView)
+      }
+    }
+
+    this.cardEmbedKey = key
+    this.cardEmbedBounds = bounds
+
+    if (!this.embedHidden) {
+      if (!mainWindow.contentView.children.includes(view)) {
+        mainWindow.contentView.addChildView(view)
+      }
+      view.setBounds(bounds)
+    }
+
+    this.noteActivity()
+    log.info('card web embed activated', { projectId, profileId, linkId, url, bounds })
+  }
+
+  reloadCardEmbed(): void {
+    if (this.cardEmbedKey) {
+      const view = this.views.get(this.cardEmbedKey)
+      if (view && !view.webContents.isDestroyed()) {
+        view.webContents.reload()
+      }
+    }
+  }
+
   async isCardSessionAuthenticated(projectId: string, appId: AppId = 'slack'): Promise<boolean> {
     const partition = partitionForCard(projectId, appId)
     const sess = session.fromPartition(partition)

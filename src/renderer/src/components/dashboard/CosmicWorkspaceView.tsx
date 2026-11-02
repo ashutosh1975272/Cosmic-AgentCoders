@@ -195,7 +195,11 @@ export function CosmicWorkspaceView({
         selection: 'c:whatsapp' as const
       }
     }
-    if (basicActiveTab.startsWith('c:preset:')) {
+    if (
+      basicActiveTab.startsWith('c:preset:') ||
+      basicActiveTab.startsWith('c:link:') ||
+      basicActiveTab.startsWith('c:custom:')
+    ) {
       return {
         ...nav,
         openGroup: 'slack' as const,

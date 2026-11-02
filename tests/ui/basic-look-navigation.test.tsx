@@ -418,5 +418,55 @@ describe('BasicSidebarProjectTree & Basic Look Navigation', () => {
     expect(renderedWhatsApp.getAllByText('WhatsApp Web').length).toBeGreaterThan(0)
     expect(renderedWhatsApp.getByText('Connected')).not.toBeNull()
     expect(renderedWhatsApp.getByText('Re-authenticate')).not.toBeNull()
+    renderedWhatsApp.unmount()
+  })
+
+  it('renders thin header navbar and embed for ChatGPT preset and custom link tabs', () => {
+    useProfileStore.setState({
+      profiles: [
+        {
+          id: 'prof-1',
+          displayName: 'Ashutosh-Profile',
+          customName: 'Ashutosh-Profile',
+          accountScope: 'both',
+          apps: {
+            slack: { sessionStatus: 'signed-in', availableWorkspaces: [{ teamId: 'T123', teamName: 'Acme Work' }] },
+            teams: { sessionStatus: 'signed-in' },
+            whatsapp: { sessionStatus: 'signed-in' }
+          },
+          customLinks: [
+            { id: 'my-custom-tool', name: 'My Custom Portal', url: 'https://portal.internal' }
+          ]
+        }
+      ] as any
+    })
+
+    // Test ChatGPT preset tab
+    useDashboardStore.setState({
+      snapshot: mockSnapshot as any,
+      cosmicSelectedCardId: 'proj-1',
+      basicActiveTab: 'c:preset:chatgpt'
+    })
+
+    const chatGptRender = render(<CosmicWorkspaceView sidebarLook="basic" />)
+    expect(chatGptRender.getAllByText('ChatGPT').length).toBeGreaterThan(0)
+    expect(chatGptRender.getByText('Web Tool')).not.toBeNull()
+    expect(chatGptRender.getByText('Reload')).not.toBeNull()
+    expect(chatGptRender.getByText('Open in Browser ↗')).not.toBeNull()
+    chatGptRender.unmount()
+
+    // Test Custom Link tab
+    useDashboardStore.setState({
+      snapshot: mockSnapshot as any,
+      cosmicSelectedCardId: 'proj-1',
+      basicActiveTab: 'c:link:my-custom-tool'
+    })
+
+    const customLinkRender = render(<CosmicWorkspaceView sidebarLook="basic" />)
+    expect(customLinkRender.getAllByText('My Custom Portal').length).toBeGreaterThan(0)
+    expect(customLinkRender.getByText('Web Tool')).not.toBeNull()
+    expect(customLinkRender.getByText('Reload')).not.toBeNull()
+    expect(customLinkRender.getByText('Open in Browser ↗')).not.toBeNull()
+    customLinkRender.unmount()
   })
 })

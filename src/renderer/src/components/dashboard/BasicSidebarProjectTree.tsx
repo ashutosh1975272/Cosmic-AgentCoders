@@ -370,6 +370,32 @@ export function BasicSidebarProjectTree({
                       </button>
                     )
                   })}
+
+                  {/* 3. Custom Links added to card/profile */}
+                  {(() => {
+                    const targetProfile = profiles.find((p) => p.id === project.profileId) ?? profiles[0]
+                    const cardCustomLinks = targetProfile?.customLinks ?? []
+                    return cardCustomLinks.map((link) => {
+                      const tabKey = `c:link:${link.id}`
+                      const isActive = isSelectedProject && basicActiveTab === tabKey
+
+                      return (
+                        <button
+                          key={link.id}
+                          type="button"
+                          className={`basic-project-tab-btn${isActive ? ' is-active' : ''}`}
+                          onClick={() => handleSelectTab(projectId, tabKey)}
+                        >
+                          <span style={{ fontSize: '13px', lineHeight: 1 }} aria-hidden>
+                            🔗
+                          </span>
+                          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {link.name}
+                          </span>
+                        </button>
+                      )
+                    })
+                  })()}
                 </div>
               )}
             </div>
