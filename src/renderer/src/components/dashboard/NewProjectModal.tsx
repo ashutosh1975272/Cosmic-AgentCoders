@@ -25,7 +25,7 @@ export function NewProjectModal({
   onClose,
   onSuccess,
   embedded = false,
-  showLinkedAccounts = true
+  showLinkedAccounts = false
 }: NewProjectModalProps): React.JSX.Element | null {
   const profiles = useProfileStore((s) => s.profiles)
   const upsertProject = useDashboardStore((s) => s.upsertProject)

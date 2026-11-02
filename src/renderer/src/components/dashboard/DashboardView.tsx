@@ -27,6 +27,7 @@ import {
   type ProjectEntry,
   type ProjectFilter
 } from './dashboard-page-selectors'
+import type { AppSettings } from '../../../../shared/ipc-contract'
 
 function fmtAge(iso: string | null): string {
   if (!iso) return 'never'
@@ -93,6 +94,31 @@ export default function DashboardView(): React.ReactElement | null {
   } | null>(null)
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false)
   const [newProjectModalOpen, setNewProjectModalOpen] = useState(false)
+  const [showLinkedAccounts, setShowLinkedAccounts] = useState(false)
+
+  useEffect(() => {
+    void window.api?.app?.getSettings?.().then((s) => {
+      if (typeof s?.showNewProjectLinkedAccounts === 'boolean') {
+        setShowLinkedAccounts(s.showNewProjectLinkedAccounts)
+      }
+    })
+    const unsub = window.api?.app?.onSettingsChanged?.((s) => {
+      if (typeof s?.showNewProjectLinkedAccounts === 'boolean') {
+        setShowLinkedAccounts(s.showNewProjectLinkedAccounts)
+      }
+    })
+    const handleCustom = (e: Event): void => {
+      const s = (e as CustomEvent<AppSettings>).detail
+      if (typeof s?.showNewProjectLinkedAccounts === 'boolean') {
+        setShowLinkedAccounts(s.showNewProjectLinkedAccounts)
+      }
+    }
+    window.addEventListener('orbit:settings-changed', handleCustom)
+    return () => {
+      unsub?.()
+      window.removeEventListener('orbit:settings-changed', handleCustom)
+    }
+  }, [])
   const [globalConfig, setGlobalConfig] = useState<DashboardGlobalConfig | null>(null)
   const [filter, setFilter] = useState<ProjectFilter>(() => {
     try {
@@ -798,6 +824,7 @@ export default function DashboardView(): React.ReactElement | null {
         <NewProjectModal
           open={newProjectModalOpen}
           onClose={() => setNewProjectModalOpen(false)}
+          showLinkedAccounts={showLinkedAccounts}
         />
         <NewProfileModal
           open={newProfileModalOpen}

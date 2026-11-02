@@ -1209,7 +1209,7 @@ function App(): React.JSX.Element {
             useDashboardStore.getState().setCosmicNavigation(pProfileId, projectId)
             useProfileStore.getState().clearActiveApp()
           }}
-          showLinkedAccounts={settings.showNewProjectLinkedAccounts ?? true}
+          showLinkedAccounts={settings.showNewProjectLinkedAccounts ?? false}
         />
       ) : null}
 

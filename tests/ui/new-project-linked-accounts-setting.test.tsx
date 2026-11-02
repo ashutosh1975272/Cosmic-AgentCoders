@@ -51,36 +51,35 @@ describe('NewProjectModal Linked Accounts Visibility Setting', () => {
     expect(section).toBeNull()
   })
 
-  it('defaults showLinkedAccounts to true when prop is omitted', () => {
+  it('defaults showLinkedAccounts to false when prop is omitted', () => {
     const { container } = render(
       <NewProjectModal open={true} onClose={vi.fn()} />
     )
 
     const section = container.querySelector('.new-project-linked-accounts-section')
-    expect(section).not.toBeNull()
-    expect(section?.textContent).toContain('Linked Accounts & Workspaces')
+    expect(section).toBeNull()
   })
 })
 
 describe('AppSettings schema persistence for showNewProjectLinkedAccounts', () => {
-  it('defaults showNewProjectLinkedAccounts to true in DEFAULT_APP_SETTINGS', () => {
-    expect(DEFAULT_APP_SETTINGS.showNewProjectLinkedAccounts).toBe(true)
+  it('defaults showNewProjectLinkedAccounts to false in DEFAULT_APP_SETTINGS', () => {
+    expect(DEFAULT_APP_SETTINGS.showNewProjectLinkedAccounts).toBe(false)
   })
 
-  it('validates and preserves showNewProjectLinkedAccounts: false', () => {
+  it('validates and preserves showNewProjectLinkedAccounts: true', () => {
     const parsed = normalizeAppSettings({
-      showNewProjectLinkedAccounts: false
+      showNewProjectLinkedAccounts: true
     })
-    expect(parsed.showNewProjectLinkedAccounts).toBe(false)
+    expect(parsed.showNewProjectLinkedAccounts).toBe(true)
   })
 
-  it('falls back to default true when undefined or invalid type', () => {
+  it('falls back to default false when undefined or invalid type', () => {
     const parsed = normalizeAppSettings({})
-    expect(parsed.showNewProjectLinkedAccounts).toBe(true)
+    expect(parsed.showNewProjectLinkedAccounts).toBe(false)
 
     const parsedInvalid = normalizeAppSettings({
       showNewProjectLinkedAccounts: 'invalid' as any
     })
-    expect(parsedInvalid.showNewProjectLinkedAccounts).toBe(true)
+    expect(parsedInvalid.showNewProjectLinkedAccounts).toBe(false)
   })
 })

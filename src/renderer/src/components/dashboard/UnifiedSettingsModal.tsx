@@ -1015,7 +1015,7 @@ export function UnifiedSettingsModal({
                       </span>
                       <input
                         type="checkbox"
-                        checked={settings.showNewProjectLinkedAccounts ?? true}
+                        checked={settings.showNewProjectLinkedAccounts ?? false}
                         onChange={(e) =>
                           onChangeSettings({ showNewProjectLinkedAccounts: e.target.checked })
                         }

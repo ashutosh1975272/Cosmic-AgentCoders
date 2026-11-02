@@ -261,12 +261,12 @@ export interface AppSettings {
   showSidebarDashboardNavButton?: boolean
   /** Backward compatibility: display Profile and Dashboard navigation buttons in sidebar. Default: true. */
   showCosmicProfileNavButtons?: boolean
-  /** When true, display "Linked Accounts & Workspaces" section in the Create Project Card modal. Default: true. */
+  /** When true, display "Linked Accounts & Workspaces" section in the Create Project Card modal. Default: false. */
   showNewProjectLinkedAccounts?: boolean
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
-  showNewProjectLinkedAccounts: true,
+  showNewProjectLinkedAccounts: false,
   baseAppLayout: 'standard',
   showSidebarItemActions: true,
   showSidebarProfileHideButton: false,

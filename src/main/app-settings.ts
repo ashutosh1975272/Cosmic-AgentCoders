@@ -132,7 +132,7 @@ export function normalizeAppSettings(parsed: Partial<AppSettings>): AppSettings 
     showNewProjectLinkedAccounts:
       typeof parsed.showNewProjectLinkedAccounts === 'boolean'
         ? parsed.showNewProjectLinkedAccounts
-        : DEFAULT_APP_SETTINGS.showNewProjectLinkedAccounts ?? true,
+        : DEFAULT_APP_SETTINGS.showNewProjectLinkedAccounts ?? false,
     sidebarButtons:
       parsed.sidebarButtons && typeof parsed.sidebarButtons === 'object'
         ? {
