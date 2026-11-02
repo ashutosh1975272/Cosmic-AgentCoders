@@ -9,6 +9,7 @@ import { getBaseLayoutItems, type BaseAppLayoutKey } from '../../../../shared/ba
 import { detailMeta } from './guide-model'
 import { useSidebarLayout } from './use-sidebar-layout'
 import { useProfileStore } from '../../hooks/useProfiles'
+import { useDashboardStore } from '../../hooks/useDashboard'
 import {
   INFO_GROUPS,
   NAV_CONNECTORS,
@@ -183,6 +184,63 @@ export default function WorkspaceSidebar({
   const [appLook, setAppLook] = useState<'minimal' | 'ancient' | 'new-cosmic' | 'basic'>('ancient')
   const [baseAppLayout, setBaseAppLayout] = useState<BaseAppLayoutKey>(propBaseAppLayout ?? 'standard')
   const [cardSlackAuth, setCardSlackAuth] = useState<boolean>(false)
+  const [scrapingWorkspaceId, setScrapingWorkspaceId] = useState<string | null>(null)
+  const snapshot = useDashboardStore((s) => s.snapshot)
+  const syncSource = useDashboardStore((s) => s.syncSource)
+  const upsertProject = useDashboardStore((s) => s.upsertProject)
+
+  const handleScrapeWorkspace = async (
+    targetProfileId: string,
+    teamId: string,
+    teamName: string,
+    role: 'client' | 'ours'
+  ) => {
+    if (!projectId || scrapingWorkspaceId) return
+    setScrapingWorkspaceId(teamId)
+    try {
+      const currentProject = snapshot?.projects?.find((p) => p.project.id === projectId)?.project
+      let targetSourceId: string | undefined
+
+      // Check if this workspace already exists in project sources
+      const existingSources = (currentProject?.sources ?? sources ?? []) as DashboardProject['sources']
+      const foundSource = existingSources?.find(
+        (s) => s.workspaceId === teamId && (s.profileId === targetProfileId || !s.profileId)
+      )
+
+      if (foundSource) {
+        targetSourceId = foundSource.id
+      } else if (currentProject) {
+        // Auto-attach workspace to project sources
+        targetSourceId = `src-browser-${Date.now().toString(36)}`
+        const now = new Date().toISOString()
+        const newSource = {
+          id: targetSourceId,
+          kind: 'browser' as const,
+          platform: 'slack',
+          profileId: targetProfileId,
+          workspaceId: teamId,
+          workspaceName: teamName,
+          channels: (currentProject.monitors ?? []).map((m) => ({ id: m.channelId, name: m.channelName })),
+          role,
+          backfillDays: 7 as const,
+          enabled: true,
+          status: 'connected' as const,
+          createdAt: now,
+          updatedAt: now
+        }
+        await upsertProject({
+          ...currentProject,
+          sources: [...(existingSources ?? []), newSource]
+        })
+      }
+
+      await syncSource({ projectId, sourceId: targetSourceId })
+    } catch (err) {
+      console.error('Failed to scrape workspace:', err)
+    } finally {
+      setScrapingWorkspaceId(null)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -487,31 +545,86 @@ export default function WorkspaceSidebar({
                                 {group.slackWorkspaces.map((gw) => {
                                   const selId = `w:${group.profileId}:${gw.teamId}` as SelectionId
                                   const isSelected = nav.selection === selId
+                                  const isThisScraping = scrapingWorkspaceId === gw.teamId
                                   return (
-                                    <button
+                                    <div
                                       key={`${group.profileId}:${gw.teamId}`}
-                                      type="button"
                                       className={`ws-nav-subitem${isSelected ? ' is-active' : ''}`}
-                                      title={`View ${gw.teamName} (${group.profileName}) inside this card`}
-                                      onClick={() => {
-                                        onSelect(selId)
-                                      }}
                                       style={{
                                         display: 'flex',
                                         alignItems: 'center',
                                         justifyContent: 'space-between',
-                                        padding: '4px 12px 4px 28px',
+                                        padding: '4px 8px 4px 28px',
                                         width: '100%',
-                                        textAlign: 'left'
+                                        gap: 6
                                       }}
                                     >
-                                      <span className="ws-nav-label" style={{ fontSize: 12 }}>
-                                        🏢 {gw.teamName}
-                                      </span>
-                                      <span className="ws-nav-tag" style={{ fontSize: 10, opacity: 0.7 }}>
-                                        Slack
-                                      </span>
-                                    </button>
+                                      <button
+                                        type="button"
+                                        title={`View ${gw.teamName} (${group.profileName}) inside this card`}
+                                        onClick={() => onSelect(selId)}
+                                        style={{
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: 6,
+                                          background: 'none',
+                                          border: 'none',
+                                          padding: 0,
+                                          cursor: 'pointer',
+                                          minWidth: 0,
+                                          flex: 1,
+                                          textAlign: 'left',
+                                          color: 'inherit'
+                                        }}
+                                      >
+                                        <span
+                                          className="ws-nav-label"
+                                          style={{
+                                            fontSize: 12,
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis',
+                                            whiteSpace: 'nowrap'
+                                          }}
+                                        >
+                                          🏢 {gw.teamName}
+                                        </span>
+                                      </button>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                                        <button
+                                          type="button"
+                                          className="scrape-btn"
+                                          title={`Scrape messages from ${gw.teamName}`}
+                                          disabled={Boolean(scrapingWorkspaceId)}
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            void handleScrapeWorkspace(
+                                              group.profileId,
+                                              gw.teamId,
+                                              gw.teamName,
+                                              'client'
+                                            )
+                                          }}
+                                          style={{
+                                            background: isThisScraping ? 'rgba(168, 85, 247, 0.3)' : 'rgba(255, 255, 255, 0.08)',
+                                            border: '1px solid rgba(255, 255, 255, 0.15)',
+                                            borderRadius: 4,
+                                            color: '#e2e8f0',
+                                            cursor: scrapingWorkspaceId ? 'not-allowed' : 'pointer',
+                                            fontSize: 10,
+                                            padding: '2px 6px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: 3,
+                                            lineHeight: 1
+                                          }}
+                                        >
+                                          {isThisScraping ? '⏳ Scraping…' : '🕷 Scrape'}
+                                        </button>
+                                        <span className="ws-nav-tag" style={{ fontSize: 10, opacity: 0.7 }}>
+                                          Slack
+                                        </span>
+                                      </div>
+                                    </div>
                                   )
                                 })}
                                 {group.customLinks.map((link) => (
@@ -656,33 +769,85 @@ export default function WorkspaceSidebar({
                                     </button>
                                   )
                                 })}
-                                {extraSources.map((src: any) => (
-                                  <button
-                                    key={src.id}
-                                    type="button"
-                                    className="ws-nav-subitem"
-                                    title={src.url ? `${src.workspaceName} (${src.url})` : `${src.workspaceName} (${src.platform})`}
-                                    onClick={() => onSelect(`c:ours:${src.id}` as SelectionId)}
-                                    style={{
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'space-between',
-                                      padding: '4px 12px 4px 28px',
-                                      width: '100%',
-                                      textAlign: 'left'
-                                    }}
-                                  >
-                                    <span className="ws-nav-label" style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, overflow: 'hidden' }}>
-                                      <span style={{ fontSize: 13, flexShrink: 0 }}>{src.url ? '🌐' : '🔌'}</span>
-                                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                        {src.workspaceName}
-                                      </span>
-                                    </span>
-                                    <span className="ws-nav-tag" style={{ fontSize: 10, opacity: 0.7, textTransform: 'capitalize', flexShrink: 0 }}>
-                                      {src.url ? 'link ↗' : src.platform}
-                                    </span>
-                                  </button>
-                                ))}
+                                {extraSources.map((src: any) => {
+                                  const isSlackSource = src.platform === 'slack' || (!src.url && !src.platform)
+                                  const isThisScraping = scrapingWorkspaceId === src.workspaceId
+                                  return (
+                                    <div
+                                      key={src.id}
+                                      className="ws-nav-subitem"
+                                      style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'space-between',
+                                        padding: '4px 8px 4px 28px',
+                                        width: '100%',
+                                        gap: 6
+                                      }}
+                                    >
+                                      <button
+                                        type="button"
+                                        title={src.url ? `${src.workspaceName} (${src.url})` : `${src.workspaceName} (${src.platform})`}
+                                        onClick={() => onSelect(`c:ours:${src.id}` as SelectionId)}
+                                        style={{
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: 6,
+                                          background: 'none',
+                                          border: 'none',
+                                          padding: 0,
+                                          cursor: 'pointer',
+                                          minWidth: 0,
+                                          flex: 1,
+                                          textAlign: 'left',
+                                          color: 'inherit'
+                                        }}
+                                      >
+                                        <span style={{ fontSize: 13, flexShrink: 0 }}>{src.url ? '🌐' : '🔌'}</span>
+                                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }}>
+                                          {src.workspaceName}
+                                        </span>
+                                      </button>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                                        {isSlackSource && src.workspaceId && (
+                                          <button
+                                            type="button"
+                                            className="scrape-btn"
+                                            title={`Scrape messages from ${src.workspaceName}`}
+                                            disabled={Boolean(scrapingWorkspaceId)}
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              void handleScrapeWorkspace(
+                                                src.profileId || '',
+                                                src.workspaceId,
+                                                src.workspaceName,
+                                                'ours'
+                                              )
+                                            }}
+                                            style={{
+                                              background: isThisScraping ? 'rgba(168, 85, 247, 0.3)' : 'rgba(255, 255, 255, 0.08)',
+                                              border: '1px solid rgba(255, 255, 255, 0.15)',
+                                              borderRadius: 4,
+                                              color: '#e2e8f0',
+                                              cursor: scrapingWorkspaceId ? 'not-allowed' : 'pointer',
+                                              fontSize: 10,
+                                              padding: '2px 6px',
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              gap: 3,
+                                              lineHeight: 1
+                                            }}
+                                          >
+                                            {isThisScraping ? '⏳ Scraping…' : '🕷 Scrape'}
+                                          </button>
+                                        )}
+                                        <span className="ws-nav-tag" style={{ fontSize: 10, opacity: 0.7, textTransform: 'capitalize', flexShrink: 0 }}>
+                                          {src.url ? 'link ↗' : src.platform}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  )
+                                })}
                               </>
                             ) : (
                               <>
@@ -712,33 +877,85 @@ export default function WorkspaceSidebar({
                                     }
                                   />
                                 ))}
-                                {extraSources.map((src: any) => (
-                                  <button
-                                    key={src.id}
-                                    type="button"
-                                    className="ws-nav-subitem"
-                                    title={src.url ? `${src.workspaceName} (${src.url})` : `${src.workspaceName} (${src.platform})`}
-                                    onClick={() => onSelect(`c:client:${src.id}` as SelectionId)}
-                                    style={{
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'space-between',
-                                      padding: '4px 12px 4px 28px',
-                                      width: '100%',
-                                      textAlign: 'left'
-                                    }}
-                                  >
-                                    <span className="ws-nav-label" style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, overflow: 'hidden' }}>
-                                      <span style={{ fontSize: 13, flexShrink: 0 }}>{src.url ? '🌐' : '🔌'}</span>
-                                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                        {src.workspaceName}
-                                      </span>
-                                    </span>
-                                    <span className="ws-nav-tag" style={{ fontSize: 10, opacity: 0.7, textTransform: 'capitalize', flexShrink: 0 }}>
-                                      {src.url ? 'link ↗' : src.platform}
-                                    </span>
-                                  </button>
-                                ))}
+                                {extraSources.map((src: any) => {
+                                  const isSlackSource = src.platform === 'slack' || (!src.url && !src.platform)
+                                  const isThisScraping = scrapingWorkspaceId === src.workspaceId
+                                  return (
+                                    <div
+                                      key={src.id}
+                                      className="ws-nav-subitem"
+                                      style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'space-between',
+                                        padding: '4px 8px 4px 28px',
+                                        width: '100%',
+                                        gap: 6
+                                      }}
+                                    >
+                                      <button
+                                        type="button"
+                                        title={src.url ? `${src.workspaceName} (${src.url})` : `${src.workspaceName} (${src.platform})`}
+                                        onClick={() => onSelect(`c:client:${src.id}` as SelectionId)}
+                                        style={{
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: 6,
+                                          background: 'none',
+                                          border: 'none',
+                                          padding: 0,
+                                          cursor: 'pointer',
+                                          minWidth: 0,
+                                          flex: 1,
+                                          textAlign: 'left',
+                                          color: 'inherit'
+                                        }}
+                                      >
+                                        <span style={{ fontSize: 13, flexShrink: 0 }}>{src.url ? '🌐' : '🔌'}</span>
+                                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }}>
+                                          {src.workspaceName}
+                                        </span>
+                                      </button>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                                        {isSlackSource && src.workspaceId && (
+                                          <button
+                                            type="button"
+                                            className="scrape-btn"
+                                            title={`Scrape messages from ${src.workspaceName}`}
+                                            disabled={Boolean(scrapingWorkspaceId)}
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              void handleScrapeWorkspace(
+                                                src.profileId || '',
+                                                src.workspaceId,
+                                                src.workspaceName,
+                                                'client'
+                                              )
+                                            }}
+                                            style={{
+                                              background: isThisScraping ? 'rgba(168, 85, 247, 0.3)' : 'rgba(255, 255, 255, 0.08)',
+                                              border: '1px solid rgba(255, 255, 255, 0.15)',
+                                              borderRadius: 4,
+                                              color: '#e2e8f0',
+                                              cursor: scrapingWorkspaceId ? 'not-allowed' : 'pointer',
+                                              fontSize: 10,
+                                              padding: '2px 6px',
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              gap: 3,
+                                              lineHeight: 1
+                                            }}
+                                          >
+                                            {isThisScraping ? '⏳ Scraping…' : '🕷 Scrape'}
+                                          </button>
+                                        )}
+                                        <span className="ws-nav-tag" style={{ fontSize: 10, opacity: 0.7, textTransform: 'capitalize', flexShrink: 0 }}>
+                                          {src.url ? 'link ↗' : src.platform}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  )
+                                })}
                               </>
                             )}
                           </>

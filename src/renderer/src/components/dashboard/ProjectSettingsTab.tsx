@@ -15,9 +15,7 @@ import {
 } from './sidebar-layout'
 import { useSidebarLayout } from './use-sidebar-layout'
 import {
-  SourceStatusBadge,
-  WorkspacePicker,
-  type ProfileWorkspaceOption
+  SourceStatusBadge
 } from './sources'
 import { useProfileStore } from '../../hooks/useProfiles'
 import type { ProjectSource } from '../../../../shared/dashboard-contract'
@@ -41,16 +39,6 @@ export default function ProjectSettingsTab({
 
   // Sources management state
   const profiles = useProfileStore((s) => s.profiles)
-  const workspaceOptions: ProfileWorkspaceOption[] = profiles.flatMap((p) =>
-    p.apps.slack.availableWorkspaces.map((w) => ({
-      profileId: p.id,
-      profileEmail: p.customName || p.displayName,
-      workspaceId: w.teamId,
-      workspaceName: w.teamName
-    }))
-  )
-  const [newSourceKey, setNewSourceKey] = useState('')
-  const [addingSource, setAddingSource] = useState(false)
   const [sourceNotice, setSourceNotice] = useState<string | null>(null)
   const [scrapingSourceId, setScrapingSourceId] = useState<string | null>(null)
   const [logsOpen, setLogsOpen] = useState(false)
@@ -268,20 +256,33 @@ export default function ProjectSettingsTab({
     setTimeout(() => setSourceNotice(null), 3000)
   }
 
-  const handleAddBrowserSource = async (): Promise<void> => {
-    if (!newSourceKey) return
-    const [profId, teamId] = newSourceKey.split(':')
-    const opt = workspaceOptions.find((o) => `${o.profileId}:${o.workspaceId}` === newSourceKey)
+  const handleAddWorkspaceSourceDirect = async (
+    targetProfileId: string,
+    teamId: string,
+    teamName: string,
+    role: 'client' | 'ours'
+  ): Promise<string> => {
+    const existing = (project.sources ?? []).find(
+      (s) => s.workspaceId === teamId && (s.profileId === targetProfileId || !s.profileId)
+    )
+    if (existing) {
+      if (existing.enabled === false) {
+        await handleToggleSourceEnabled(existing.id, false)
+      }
+      return existing.id
+    }
+
+    const newSourceId = `src-browser-${Date.now().toString(36)}`
     const now = new Date().toISOString()
     const newSource: ProjectSource = {
-      id: `src-browser-${Date.now().toString(36)}`,
+      id: newSourceId,
       kind: 'browser',
       platform: 'slack',
-      profileId: profId,
+      profileId: targetProfileId,
       workspaceId: teamId,
-      workspaceName: opt?.workspaceName || 'Slack Workspace',
+      workspaceName: teamName,
       channels: project.monitors.map((m) => ({ id: m.channelId, name: m.channelName })),
-      role: 'client',
+      role,
       backfillDays: 7,
       enabled: true,
       status: 'connected',
@@ -293,10 +294,19 @@ export default function ProjectSettingsTab({
       ...project,
       sources: [...currentSources, newSource]
     })
-    setAddingSource(false)
-    setNewSourceKey('')
-    setSourceNotice('Browser source added')
+    setSourceNotice(`Added and activated ${teamName}`)
     setTimeout(() => setSourceNotice(null), 3000)
+    return newSourceId
+  }
+
+  const handleScrapeWorkspaceDirect = async (
+    targetProfileId: string,
+    teamId: string,
+    teamName: string,
+    role: 'client' | 'ours'
+  ): Promise<void> => {
+    const sourceId = await handleAddWorkspaceSourceDirect(targetProfileId, teamId, teamName, role)
+    await handleScrapeSource(sourceId)
   }
 
   const handleScrapeSource = async (sourceId: string): Promise<void> => {
@@ -492,16 +502,6 @@ export default function ProjectSettingsTab({
                       >
                         📋 View Run Logs
                       </button>
-                      {!addingSource && (
-                        <button
-                          type="button"
-                          className="dash-primary"
-                          onClick={() => setAddingSource(true)}
-                          style={{ fontSize: 13, padding: '6px 12px' }}
-                        >
-                          + Add Browser Source
-                        </button>
-                      )}
                     </div>
                   </div>
                 </header>
@@ -512,155 +512,317 @@ export default function ProjectSettingsTab({
                   </div>
                 )}
 
-                {addingSource && (
-                  <div style={{ padding: 16, border: '1px solid var(--border)', borderRadius: 8, background: 'var(--surface-subtle)', display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    <h5 style={{ margin: 0, fontSize: 14 }}>Add Logged-in Slack Workspace Source</h5>
-                    <WorkspacePicker
-                      options={workspaceOptions}
-                      selectedKey={newSourceKey}
-                      onChange={(k) => setNewSourceKey(k)}
-                    />
-                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
-                      <button type="button" className="dash-subtle" onClick={() => setAddingSource(false)}>
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        className="dash-primary"
-                        disabled={!newSourceKey}
-                        onClick={() => void handleAddBrowserSource()}
-                      >
-                        Add Source
-                      </button>
+                {/* 1. GLOBAL ACCOUNTS & WORKSPACES */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 15 }}>🌐</span>
+                      <h5 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>
+                        Global Accounts &amp; Workspaces
+                      </h5>
+                    </div>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      Available across all profiles (Slack, Custom Links)
+                    </span>
+                  </div>
+
+                  {profiles.length === 0 || profiles.every((p) => (p.apps?.slack?.availableWorkspaces?.length ?? 0) === 0 && (p.customLinks?.length ?? 0) === 0) ? (
+                    <div style={{ padding: 14, border: '1px dashed var(--border)', borderRadius: 8, color: 'var(--text-muted)', fontSize: 13, textAlign: 'center' }}>
+                      No connected Slack workspaces or links found in global profiles.
+                    </div>
+                  ) : (
+                    profiles.map((p) => {
+                      const pName = p.customName || p.displayName
+                      const slackWorkspaces = p.apps?.slack?.availableWorkspaces ?? []
+                      const customLinks = p.customLinks ?? []
+                      if (slackWorkspaces.length === 0 && customLinks.length === 0) return null
+
+                      return (
+                        <div
+                          key={`global-${p.id}`}
+                          style={{
+                            background: 'rgba(0, 0, 0, 0.2)',
+                            border: '1px solid rgba(255, 255, 255, 0.08)',
+                            borderRadius: 8,
+                            padding: 12,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 10
+                          }}
+                        >
+                          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-faint, #94a3b8)' }}>
+                            👤 {pName}
+                          </div>
+
+                          {slackWorkspaces.map((gw) => {
+                            const existingSource = (project.sources ?? []).find(
+                              (s) => s.workspaceId === gw.teamId && (s.profileId === p.id || !s.profileId)
+                            )
+                            const isAttached = Boolean(existingSource)
+                            const isActive = isAttached && existingSource?.enabled !== false
+                            const isScraping = scrapingSourceId === existingSource?.id
+
+                            return (
+                              <div
+                                key={`gw-${p.id}-${gw.teamId}`}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  padding: '10px 14px',
+                                  background: 'var(--surface)',
+                                  border: `1px solid ${isActive ? 'rgba(99, 102, 241, 0.3)' : 'var(--border)'}`,
+                                  borderRadius: 6
+                                }}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                  <span style={{ fontSize: 14 }}>🏢</span>
+                                  <div>
+                                    <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>
+                                      {gw.teamName}
+                                    </div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                      Slack Workspace · ID: {gw.teamId}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  {isAttached ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="dash-subtle"
+                                        disabled={!isActive || isScraping}
+                                        style={{
+                                          fontSize: 12,
+                                          padding: '4px 10px',
+                                          color: isActive ? '#4ade80' : 'var(--text-muted)',
+                                          cursor: isActive && !isScraping ? 'pointer' : 'not-allowed'
+                                        }}
+                                        onClick={() => existingSource && void handleScrapeSource(existingSource.id)}
+                                        title={`Scrape messages from ${gw.teamName}`}
+                                      >
+                                        {isScraping ? '⏳ Scraping…' : '🕷 Scrape'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        style={{
+                                          fontSize: 12,
+                                          padding: '4px 10px',
+                                          borderRadius: 4,
+                                          border: `1px solid ${isActive ? '#22c55e' : '#64748b'}`,
+                                          background: isActive ? 'rgba(34, 197, 94, 0.15)' : 'rgba(100, 116, 139, 0.15)',
+                                          color: isActive ? '#4ade80' : '#94a3b8',
+                                          fontWeight: 600,
+                                          cursor: 'pointer'
+                                        }}
+                                        onClick={() => existingSource && void handleToggleSourceEnabled(existingSource.id, existingSource.enabled !== false)}
+                                      >
+                                        {isActive ? '● Active' : '○ Inactive'}
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="dash-subtle"
+                                      style={{
+                                        fontSize: 12,
+                                        padding: '4px 10px',
+                                        color: '#60a5fa',
+                                        border: '1px solid rgba(96, 165, 250, 0.3)',
+                                        borderRadius: 4
+                                      }}
+                                      onClick={() => void handleScrapeWorkspaceDirect(p.id, gw.teamId, gw.teamName, 'client')}
+                                    >
+                                      + Attach &amp; Scrape
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+
+                          {customLinks.map((link) => (
+                            <div
+                              key={`link-${p.id}-${link.id}`}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '8px 14px',
+                                background: 'var(--surface)',
+                                border: '1px solid var(--border)',
+                                borderRadius: 6
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                <span style={{ fontSize: 14 }}>🔗</span>
+                                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>
+                                  {link.name}
+                                </div>
+                              </div>
+                              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Custom Link</span>
+                            </div>
+                          ))}
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+
+                {/* 2. MY ACCOUNTS & 3. CLIENT ACCOUNTS (Attached Card Sources) */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border)', paddingBottom: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 15 }}>💼</span>
+                      <h5 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>
+                        Attached Card Sources (My Accounts &amp; Client Accounts)
+                      </h5>
                     </div>
                   </div>
-                )}
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {(!project.sources || project.sources.length === 0) && (
-                    <div style={{ padding: 16, border: '1px dashed var(--border)', borderRadius: 8, color: 'var(--text-muted)', fontSize: 13, textAlign: 'center' }}>
+                    <div style={{ padding: 14, border: '1px dashed var(--border)', borderRadius: 8, color: 'var(--text-muted)', fontSize: 13, textAlign: 'center' }}>
                       Using default project token connection ({project.tokenSource}).
                     </div>
                   )}
 
-                  {(project.sources ?? []).map((src) => (
-                    <div key={src.id} style={{ display: 'flex', flexDirection: 'column' }}>
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '12px 16px',
-                        border: '1px solid var(--border)',
-                        borderRadius: 8,
-                        background: 'var(--surface)'
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <SourceStatusBadge status={src.status ?? 'connected'} lastReadAt={src.lastReadAt} />
-                        <div>
-                          <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text)' }}>
-                            {src.workspaceName === 'T0FJQUFLJ' ? 'excellencetech' : src.workspaceName === 'T0C6YS80MPZ' ? 'AgentWork' : (src.workspaceName || src.workspaceId)}
-                          </div>
-                          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                            {src.kind === 'browser' ? 'Browser session' : 'Token'} · {src.channels.length} channels monitored
-                          </div>
-                        </div>
-                      </div>
+                  {(project.sources ?? []).map((src) => {
+                    const isActive = src.enabled !== false
+                    const isScraping = scrapingSourceId === src.id
 
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                        {src.kind === 'browser' ? (
-                          <>
+                    return (
+                      <div key={src.id} style={{ display: 'flex', flexDirection: 'column' }}>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '12px 16px',
+                            border: '1px solid var(--border)',
+                            borderRadius: 8,
+                            background: 'var(--surface)'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            <SourceStatusBadge status={src.status ?? 'connected'} lastReadAt={src.lastReadAt} />
+                            <div>
+                              <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span>{src.role === 'ours' ? '👤 [My Account]' : '💼 [Client Account]'}</span>
+                                <span>{src.workspaceName === 'T0FJQUFLJ' ? 'excellencetech' : src.workspaceName === 'T0C6YS80MPZ' ? 'AgentWork' : (src.workspaceName || src.workspaceId)}</span>
+                              </div>
+                              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                                {src.kind === 'browser' ? 'Browser session' : 'Token'} · {src.channels.length} channels monitored
+                              </div>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                            {src.kind === 'browser' && (
+                              <button
+                                type="button"
+                                className="dash-subtle"
+                                disabled={isScraping || !isActive}
+                                style={{
+                                  fontSize: 12,
+                                  padding: '4px 10px',
+                                  color: isActive ? '#4ade80' : 'var(--text-muted)',
+                                  cursor: isActive && !isScraping ? 'pointer' : 'not-allowed'
+                                }}
+                                onClick={() => void handleScrapeSource(src.id)}
+                                title="Auto-discover and scrape all public & private channels in this workspace"
+                              >
+                                {isScraping ? '⏳ Scraping…' : '🕷 Scrape'}
+                              </button>
+                            )}
                             <button
                               type="button"
-                              className="dash-subtle"
-                              disabled={scrapingSourceId === src.id || src.enabled === false}
-                              style={{ fontSize: 12, padding: '4px 8px', color: '#22c55e' }}
-                              onClick={() => void handleScrapeSource(src.id)}
-                              title="Auto-discover and scrape all public & private channels in this workspace"
-                            >
-                              {scrapingSourceId === src.id ? 'Scraping…' : '🕷 Scrape'}
-                            </button>
-                          </>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="dash-subtle"
-                          style={{ fontSize: 12, padding: '4px 8px' }}
-                          onClick={() => void handleToggleSourceEnabled(src.id, src.enabled !== false)}
-                        >
-                          {src.enabled !== false ? 'Pause' : 'Resume'}
-                        </button>
-                        <button
-                          type="button"
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            color: 'var(--danger)',
-                            fontSize: 12,
-                            cursor: 'pointer',
-                            padding: '4px 8px'
-                          }}
-                          onClick={() => void handleRemoveSource(src.id)}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Discovered Channels Checklist for Browser Source */}
-                    {src.kind === 'browser' && src.channels && src.channels.length > 0 && (
-                      <div
-                        style={{
-                          marginTop: -4,
-                          marginBottom: 8,
-                          padding: '12px 16px',
-                          background: 'rgba(255, 255, 255, 0.02)',
-                          borderRadius: '0 0 8px 8px',
-                          border: '1px solid var(--border)',
-                          borderTop: 'none'
-                        }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
-                            Monitored Channels ({src.channels.filter((c) => c.enabled !== false).length}/{src.channels.length} active)
-                          </span>
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                            Auto-discovered public &amp; private locked channels
-                          </span>
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 6 }}>
-                          {src.channels.map((ch) => (
-                            <label
-                              key={ch.id}
                               style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 6,
                                 fontSize: 12,
-                                padding: '4px 8px',
-                                background: ch.enabled !== false ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                                border: `1px solid ${ch.enabled !== false ? 'rgba(99, 102, 241, 0.3)' : 'var(--border)'}`,
+                                padding: '4px 10px',
                                 borderRadius: 4,
-                                cursor: 'pointer',
-                                color: ch.enabled !== false ? 'var(--text)' : 'var(--text-muted)'
+                                border: `1px solid ${isActive ? '#22c55e' : '#64748b'}`,
+                                background: isActive ? 'rgba(34, 197, 94, 0.15)' : 'rgba(100, 116, 139, 0.15)',
+                                color: isActive ? '#4ade80' : '#94a3b8',
+                                fontWeight: 600,
+                                cursor: 'pointer'
                               }}
+                              onClick={() => void handleToggleSourceEnabled(src.id, isActive)}
                             >
-                              <input
-                                type="checkbox"
-                                checked={ch.enabled !== false}
-                                onChange={() => void handleToggleChannelEnabled(src.id, ch.id, ch.enabled !== false)}
-                              />
-                              <span>
-                                {ch.isPrivate ? '🔒' : '#'} {ch.name || ch.id}
-                              </span>
-                            </label>
-                          ))}
+                              {isActive ? '● Active' : '○ Inactive'}
+                            </button>
+                            <button
+                              type="button"
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: 'var(--danger)',
+                                fontSize: 12,
+                                cursor: 'pointer',
+                                padding: '4px 8px'
+                              }}
+                              onClick={() => void handleRemoveSource(src.id)}
+                            >
+                              Remove
+                            </button>
+                          </div>
                         </div>
+
+                        {/* Discovered Channels Checklist for Browser Source */}
+                        {src.kind === 'browser' && src.channels && src.channels.length > 0 && (
+                          <div
+                            style={{
+                              marginTop: -4,
+                              marginBottom: 8,
+                              padding: '12px 16px',
+                              background: 'rgba(255, 255, 255, 0.02)',
+                              borderRadius: '0 0 8px 8px',
+                              border: '1px solid var(--border)',
+                              borderTop: 'none'
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+                                Monitored Channels ({src.channels.filter((c) => c.enabled !== false).length}/{src.channels.length} active)
+                              </span>
+                              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                Auto-discovered public &amp; private locked channels
+                              </span>
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 6 }}>
+                              {src.channels.map((ch) => (
+                                <label
+                                  key={ch.id}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                    fontSize: 12,
+                                    padding: '4px 8px',
+                                    background: ch.enabled !== false ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                                    border: `1px solid ${ch.enabled !== false ? 'rgba(99, 102, 241, 0.3)' : 'var(--border)'}`,
+                                    borderRadius: 4,
+                                    cursor: 'pointer',
+                                    color: ch.enabled !== false ? 'var(--text)' : 'var(--text-muted)'
+                                  }}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={ch.enabled !== false}
+                                    onChange={() => void handleToggleChannelEnabled(src.id, ch.id, ch.enabled !== false)}
+                                  />
+                                  <span>
+                                    {ch.isPrivate ? '🔒' : '#'} {ch.name || ch.id}
+                                  </span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </section>
             </div>

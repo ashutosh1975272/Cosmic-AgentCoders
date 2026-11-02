@@ -433,11 +433,22 @@ export class DashboardSyncEngine {
           let channelsRead = 0
           let newMessagesCount = 0
           const snippets: { channelId: string; channelName?: string; sender: string; ts: string; snippet: string }[] = []
+          const effectiveWorkspaceName =
+            bSrc.workspaceName === 'T0FJQUFLJ'
+              ? 'excellencetech'
+              : bSrc.workspaceName === 'T0C6YS80MPZ'
+                ? 'AgentWork'
+                : bSrc.workspaceName || bSrc.workspaceId
+
           try {
+            const existingView = this.getExistingBrowserView?.(bSrc.profileId, 'slack')
             const reader = new SlackReaderView({
               profileId: bSrc.profileId,
-              workspaceId: bSrc.workspaceId
+              workspaceId: bSrc.workspaceId,
+              existingView: existingView ?? null,
+              onEvent: (ev) => this.scrapeEventListener?.({ ...ev, workspaceName: effectiveWorkspaceName })
             })
+            this.activeWatchReader = reader
             const activeChannels = (bSrc.channels ?? []).filter((c) => c.enabled !== false)
             for (const ch of activeChannels) {
               const messages = await reader.readChannelMessages(ch.id)
