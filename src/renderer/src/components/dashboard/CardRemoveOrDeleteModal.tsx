@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import type { DashboardProject } from '../../../../shared/dashboard-contract'
 
 export interface CardRemoveOrDeleteModalProps {
@@ -36,7 +37,7 @@ export function CardRemoveOrDeleteModal({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [open, busy, onClose])
 
-  if (!open || !project) return null
+  if (!open || !project || typeof document === 'undefined') return null
 
   const projectName = project.name || project.teamName || 'Project Card'
 
@@ -60,7 +61,7 @@ export function CardRemoveOrDeleteModal({
     }
   }
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -317,6 +318,8 @@ export function CardRemoveOrDeleteModal({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
+
