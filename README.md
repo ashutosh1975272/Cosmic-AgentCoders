@@ -147,6 +147,16 @@ npm run ci
 7. Use the sidebar to switch profiles, apps, workspaces / organizations
 8. **Settings**: theme, notifications, idle lock, export/import, **Sign out admin**
 
+### 5.1 Fresh start default look and initial experience
+
+When launching the application for the first time or starting with a fresh installation:
+- **Default view**: Starts directly in **Basic** view (`sidebarLook: 'basic'`).
+- **Look switcher hidden**: The 4 look buttons (`[Basic] [Minimal] [Cosmic] [Ancient]`) are hidden by default (`showLookSwitcher: false`) to ensure a clean, modern layout. Users can re-enable the switcher anytime via **Settings ➔ Sidebar & Navigation**.
+- **Google email onboarding**: The Google email input field (`name@gmail.com`) and **Continue with Google** button are displayed by default (`showGoogleEmailInputInSidebar: true`) directly beneath the header for instant profile onboarding.
+- **Projects & cards**: The `PROJECTS (0) + New` section is clearly displayed to create and manage project cards.
+- **Minimal sidebar footer**: Only the permanent **`⚙️ Settings`** button is displayed at the bottom of the sidebar (all optional buttons remain hidden by default).
+- **Recent workspaces**: The `RECENT` strip remains hidden until a workspace is actively opened.
+
 Only the admin gate unlocks the app. Google / Slack sessions inside profiles are separate.
 
 **Single instance:** opening Orbit again focuses the existing window (one tray, one data folder).
