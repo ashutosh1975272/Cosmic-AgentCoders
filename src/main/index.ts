@@ -19,6 +19,7 @@ import { registerOauthIpc } from './ipc/oauth.ipc'
 import { registerProfileIpc } from './ipc/profiles.ipc'
 import { registerSlackDataIpc } from './ipc/slack-data.ipc'
 import { registerDashboardIpc } from './ipc/dashboard.ipc'
+import { registerLogsIpc } from './ipc/logs.ipc'
 import { DashboardDeltaStore } from './dashboard/delta-store'
 import { MonitorStore } from './dashboard/monitor-store'
 import { WorkspaceMappingStore } from './dashboard/workspace-mapping-store'
@@ -59,10 +60,14 @@ if (loadedEnvPath) {
   // Logging module is safe here; avoids printing secret values.
   log.info('loaded env file', { path: loadedEnvPath })
 } else {
-  log.warn('no .env found — admin login will be unconfigured until you add one')
+  log.info('running in zero-.env mode — using in-app settings & default admin credentials')
 }
 
 /** One process / one tray — second launches focus the existing window. */
+app.setName(APP_DISPLAY_NAME)
+if (typeof (app as unknown as { setDesktopName?: (name: string) => void }).setDesktopName === 'function') {
+  ;(app as unknown as { setDesktopName: (name: string) => void }).setDesktopName('cosmic.desktop')
+}
 app.disableHardwareAcceleration()
 app.commandLine.appendSwitch('disable-gpu')
 app.commandLine.appendSwitch('no-sandbox')
@@ -74,9 +79,11 @@ if (!gotSingleInstanceLock) {
   if (process.defaultApp) {
     if (process.argv.length >= 2) {
       app.setAsDefaultProtocolClient('slack-dashboard', process.execPath, [join(process.argv[1])])
+      app.setAsDefaultProtocolClient('cosmic', process.execPath, [join(process.argv[1])])
     }
   } else {
     app.setAsDefaultProtocolClient('slack-dashboard')
+    app.setAsDefaultProtocolClient('cosmic')
   }
 
   app.userAgentFallback = CHROME_USER_AGENT
@@ -145,6 +152,7 @@ if (!gotSingleInstanceLock) {
   })
 
   function createWindow(): void {
+    const appWindowIcon = nativeImage.createFromPath(icon)
     mainWindow = new BrowserWindow({
       width: 1280,
       height: 800,
@@ -152,7 +160,7 @@ if (!gotSingleInstanceLock) {
       autoHideMenuBar: true,
       title: APP_DISPLAY_NAME,
       backgroundColor: '#14121c',
-      icon,
+      icon: appWindowIcon.isEmpty() ? icon : appWindowIcon,
       webPreferences: {
         preload: join(__dirname, '../preload/index.js'),
         sandbox: true,
@@ -160,6 +168,10 @@ if (!gotSingleInstanceLock) {
         nodeIntegration: false
       }
     })
+
+    if (!appWindowIcon.isEmpty()) {
+      mainWindow.setIcon(appWindowIcon)
+    }
 
     applyChromeUserAgent(mainWindow.webContents)
     // Undo accidental ⌘+/trackpad zoom from prior sessions.
@@ -561,6 +573,23 @@ if (!gotSingleInstanceLock) {
       browserViewManager,
       tokenStore,
       getMainWindow: () => mainWindow,
+      monitorStore: dashboardMonitorStore,
+      aiSettings,
+      broadcastSnapshot: async () => {
+        const win = mainWindow
+        if (win && !win.isDestroyed()) {
+          const projects = await dashboardEngine.buildSnapshot()
+          const manualTokens = (await dashboardMonitorStore.listManualTokens()).map((t) => ({
+            key: t.key,
+            validated: t.persisted
+          }))
+          win.webContents.send(IpcChannels.DashboardSnapshotChanged, {
+            projects,
+            manualTokens,
+            globalConfig: await configService.publicGlobalConfig()
+          })
+        }
+      },
       onProfilesRemoved: async (ids) => {
         await settingsStore.removeRecentsForProfiles(ids)
         const win = mainWindow
@@ -637,11 +666,13 @@ if (!gotSingleInstanceLock) {
       }
     })()
     dashboardScheduler.start()
+    registerLogsIpc()
     registerAppIpc({
       settingsStore,
       lock,
       adminAuth,
       profileStore,
+      getMainWindow: () => mainWindow,
       onUserActivity: () => {
         lastEmbedActivity = Date.now()
       },

@@ -300,7 +300,7 @@ export function CardAddModal({
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
-          backgroundColor: '#090d16',
+          backgroundColor: 'var(--surface-2)',
           borderRadius: '12px',
           border: '1px solid rgba(255, 255, 255, 0.1)',
           boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.85)'
@@ -511,7 +511,7 @@ export function CardAddModal({
               display: 'flex',
               flexDirection: 'column',
               gap: '20px',
-              background: '#090d16'
+              background: 'var(--bg-page)'
             }}
           >
             {/* TAB 1: GLOBAL WORKSPACES & LINKS */}

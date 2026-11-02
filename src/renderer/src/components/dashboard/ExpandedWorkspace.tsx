@@ -15,6 +15,7 @@ import WorkspaceContent from './WorkspaceContent'
 import { CardAddModal } from './CardAddModal'
 import { buildConnectorChannelLists, type NavEntry, type WorkspaceEntryTab } from './workspace-nav'
 import type { DetailKey } from './guide-model'
+import type { BaseAppLayoutKey } from '../../../../shared/base-app-presets'
 
 interface ExpandedWorkspaceProps {
   view: CardView
@@ -39,6 +40,7 @@ interface ExpandedWorkspaceProps {
   initialGuideSection?: number
   /** Force a starting detail (compact chip deep-link). */
   initialDetailKey?: DetailKey
+  baseAppLayout?: BaseAppLayoutKey
 }
 
 const STATUS_FLAGS: Record<string, CardHeadFlag> = {
@@ -67,7 +69,8 @@ export default function ExpandedWorkspace({
   onTogglePin,
   initialTab,
   initialGuideSection,
-  initialDetailKey
+  initialDetailKey,
+  baseAppLayout
 }: ExpandedWorkspaceProps): React.ReactElement {
   const { identity } = view
 
@@ -207,6 +210,7 @@ export default function ExpandedWorkspace({
           sources={project.sources}
           view={view}
           nav={nav}
+          baseAppLayout={baseAppLayout}
           channels={channelLists}
           onOpenGroup={openGroup}
           onSelect={select}

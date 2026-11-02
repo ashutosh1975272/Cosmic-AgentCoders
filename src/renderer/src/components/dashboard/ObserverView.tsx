@@ -24,7 +24,7 @@ export function ObserverView({ onBack }: ObserverViewProps): React.JSX.Element {
         flexDirection: 'column',
         width: '100%',
         height: '100%',
-        backgroundColor: '#090d16',
+        backgroundColor: 'var(--bg-page)',
         color: '#f8fafc',
         overflowY: 'auto'
       }}
@@ -36,8 +36,8 @@ export function ObserverView({ onBack }: ObserverViewProps): React.JSX.Element {
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '16px 24px',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-          background: 'rgba(15, 23, 42, 0.6)'
+          borderBottom: '1px solid var(--border)',
+          background: 'var(--surface)'
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>

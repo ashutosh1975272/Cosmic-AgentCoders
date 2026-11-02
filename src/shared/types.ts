@@ -162,6 +162,7 @@ export interface CreateProfileInput {
 
 export interface ProfileIdPayload {
   profileId: string
+  deleteCards?: boolean
 }
 
 export interface AppScopedPayload {

@@ -1,0 +1,75 @@
+name: Build Multi-Platform Desktop App
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - main
+      - cosmic
+      - beta
+      - yami
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }} (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+            build_cmd: npm run build:linux:ubuntu
+          - os: windows-latest
+            platform: windows
+            arch: x64
+            build_cmd: npm run build:win
+          - os: macos-latest
+            platform: macos
+            arch: arm64
+            build_cmd: npm run build:mac:arm
+          - os: macos-latest
+            platform: macos
+            arch: x64
+            build_cmd: npm run build:mac:intel
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate brand icons
+        run: python3 scripts/generate-brand-icons.py
+
+      - name: Compile and package application
+        run: ${{ matrix.build_cmd }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cosmic-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+          if-no-files-found: warn
+

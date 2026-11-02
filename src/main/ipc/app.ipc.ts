@@ -1,3 +1,4 @@
+import { BrowserWindow } from 'electron'
 import { handleInvoke } from './handle'
 import { APP_DISPLAY_NAME } from '../../shared/brand'
 import { IpcChannels, type AppSettings } from '../../shared/ipc-contract'
@@ -12,22 +13,40 @@ export function registerAppIpc(deps: {
   lock: AppLockController
   adminAuth: AdminAuthController
   profileStore: ProfileStore
+  getMainWindow?: () => BrowserWindow | null
   onUserActivity?: () => void
   onAdminSessionChange?: (authenticated: boolean) => void
 }): void {
+  const broadcastSettings = (settings: AppSettings): void => {
+    try {
+      const windows = BrowserWindow.getAllWindows()
+      for (const win of windows) {
+        if (!win.isDestroyed()) {
+          win.webContents.send(IpcChannels.AppSettingsChanged, settings)
+        }
+      }
+    } catch (err) {
+      log.warn('[app-ipc] failed to broadcast settings change', { err: String(err) })
+    }
+  }
+
   handleInvoke(IpcChannels.AppSettingsGet, async () => {
     const profiles = await deps.profileStore.list()
     return deps.settingsStore.pruneRecents(profiles.map((p) => p.id))
   })
 
   handleInvoke(IpcChannels.AppSettingsSet, async (patch: Partial<AppSettings>) => {
-    return deps.settingsStore.set(patch)
+    const next = await deps.settingsStore.set(patch)
+    broadcastSettings(next)
+    return next
   })
 
   handleInvoke(
     IpcChannels.AppPushRecent,
     async (entry: { profileId: string; appId: string; teamId: string; label: string }) => {
-      return deps.settingsStore.pushRecent(entry)
+      const next = await deps.settingsStore.pushRecent(entry)
+      broadcastSettings(next)
+      return next
     }
   )
 

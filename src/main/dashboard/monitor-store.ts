@@ -87,17 +87,25 @@ export class MonitorStore {
     const meta = incoming.manualTokenKey
       ? data.manualTokenMeta?.[incoming.manualTokenKey]
       : undefined
-    const teamName = incoming.teamName ?? meta?.teamName
+    const teamName = incoming.teamName ?? existing?.teamName ?? meta?.teamName
     const teamId =
       incoming.teamId && incoming.teamId !== 'manual'
         ? incoming.teamId
-        : (meta?.teamId ?? incoming.teamId)
+        : (meta?.teamId ?? existing?.teamId ?? incoming.teamId)
 
     // Check if project has valid sources configured (e.g. browser source)
     const hasSources = Array.isArray(incoming.sources) && incoming.sources.length > 0
     const primarySource = hasSources ? incoming.sources![0] : undefined
-    const effectiveTeamId = teamId || primarySource?.workspaceId
-    const effectiveTeamName = teamName || primarySource?.workspaceName
+    const effectiveTeamId =
+      teamId ||
+      primarySource?.workspaceId ||
+      existing?.teamId ||
+      (incoming.profileId ? `pending-${existingId || 'card-' + Date.now().toString(36)}` : undefined)
+    const effectiveTeamName =
+      teamName ||
+      primarySource?.workspaceName ||
+      existing?.teamName ||
+      (incoming.profileId ? incoming.name || 'Workspace' : undefined)
 
     // v2.3 — hard rule: a card without a real workspace is never stored.
     // Without it every workspace would share one message bucket.
@@ -163,6 +171,38 @@ export class MonitorStore {
     data.projects = data.projects.filter((p) => p.id !== projectId)
     data.pinnedOrder = (data.pinnedOrder ?? []).filter((id) => id !== projectId)
     await this.write(data)
+  }
+
+  async unassignProjectsForProfile(profileId: string): Promise<void> {
+    const data = await this.read()
+    let changed = false
+    for (const project of data.projects) {
+      if (project.profileId === profileId) {
+        project.profileId = ''
+        changed = true
+      }
+    }
+    if (changed) {
+      await this.write(data)
+    }
+  }
+
+  async deleteProjectsForProfile(profileId: string): Promise<string[]> {
+    const data = await this.read()
+    const deletedIds: string[] = []
+    data.projects = data.projects.filter((p) => {
+      if (p.profileId === profileId) {
+        deletedIds.push(p.id)
+        return false
+      }
+      return true
+    })
+    if (deletedIds.length > 0) {
+      const deletedSet = new Set(deletedIds)
+      data.pinnedOrder = (data.pinnedOrder ?? []).filter((id) => !deletedSet.has(id))
+      await this.write(data)
+    }
+    return deletedIds
   }
 
   /** Pinned order survives restarts; unknown/deleted ids are ignored on read. */

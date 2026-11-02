@@ -21,7 +21,7 @@ import { slackClientUrlForTeam } from '../../shared/slack-url'
 import { log } from '../logging'
 import type { BrowserViewManager } from '../profiles/browser-view-manager'
 import type { ProfileStore } from '../profiles/profile-store'
-import { partitionForProfile } from '../profiles/session-partition'
+import { partitionForProfile, partitionForCard } from '../profiles/session-partition'
 import {
   cancelChromeBrowserAuth,
   closeChromeStayEmbed,
@@ -30,9 +30,15 @@ import {
   runSlackChromeBrowserLogin,
   syncChromeBrowserBounds
 } from '../profiles/chrome-browser-auth'
+import {
+  syncGoogleSessionToProfileCards,
+  syncGoogleSessionFromProfileToCard
+} from '../profiles/google-session-sync'
 import { runTeamsLoginForProfile } from '../profiles/teams-first-login-flow'
 import { waitForWhatsAppSignedIn } from '../profiles/whatsapp-login-flow'
 import type { TokenStore } from '../slack/token-store'
+import type { MonitorStore } from '../dashboard/monitor-store'
+import type { AiSettingsService } from '../dashboard/ai-settings'
 import { handleInvoke } from './handle'
 
 export interface ProfileIpcDeps {
@@ -42,6 +48,9 @@ export interface ProfileIpcDeps {
   getMainWindow: () => BrowserWindow | null
   /** Called after profiles are removed so settings (e.g. recents) can be pruned. */
   onProfilesRemoved?: (profileIds: string[]) => Promise<void>
+  monitorStore?: MonitorStore
+  aiSettings?: AiSettingsService
+  broadcastSnapshot?: () => Promise<void>
 }
 
 const inFlightLogin = new Set<string>()
@@ -164,6 +173,19 @@ async function runGoogleBrowserAuth(
       notifyAuthProgress(deps.getMainWindow, 'Google signed in.')
       const updated = await deps.profileStore.forceGoogleAuthStatus(profileId, 'signed-in')
       notifyProfileUpdated(deps.getMainWindow, updated)
+
+      // Propagate newly imported Google cookies to all cards belonging to this profile
+      // so that OAuth "Continue with Google" flows inside each card already show the
+      // authenticated account without requiring a fresh email/password entry.
+      if (deps.monitorStore) {
+        void deps.monitorStore.listProjects().then((projects) => {
+          const cardIds = projects
+            .filter((p) => p.profileId === profileId)
+            .map((p) => p.id)
+          return syncGoogleSessionToProfileCards(profileId, cardIds, 'slack')
+        }).catch(() => undefined)
+      }
+
       return updated
     }
 
@@ -259,10 +281,12 @@ async function runSlackBrowserAuth(
     if (!mainWindow) throw new Error('Main window is not available')
     const viewBounds = defaultBounds(mainWindow, bounds)
 
-    // Match product flow: Slack auth in Chrome → then embed in Electron right pane.
+    // Match product flow: Slack auth in Chrome → then embed in Electron right pane (unless card embed is active).
     closeChromeStayEmbed()
-    deps.browserViewManager.setEmbedVisible(mainWindow, true)
-    deps.browserViewManager.activate(profileId, 'slack', mainWindow, viewBounds)
+    if (!deps.browserViewManager.isCardEmbedActive()) {
+      deps.browserViewManager.setEmbedVisible(mainWindow, true)
+      deps.browserViewManager.activate(profileId, 'slack', mainWindow, viewBounds)
+    }
     void deps.browserViewManager.sampleAndEmitSlackTheme(profileId)
 
     const updated = await deps.profileStore.forceSessionStatus(profileId, 'slack', 'signed-in')
@@ -547,7 +571,21 @@ export function registerProfileIpc(deps: ProfileIpcDeps): void {
   })
 
   handleInvoke(IpcChannels.ProfileDelete, async (payload: ProfileIdPayload) => {
+    if (payload.deleteCards && deps.monitorStore) {
+      const deletedIds = await deps.monitorStore.deleteProjectsForProfile(payload.profileId)
+      for (const pId of deletedIds) {
+        await deps.aiSettings?.clearProject(pId)
+        try {
+          await session.fromPartition(partitionForCard(pId, 'slack')).clearStorageData()
+        } catch {}
+      }
+    } else if (deps.monitorStore) {
+      await deps.monitorStore.unassignProjectsForProfile(payload.profileId)
+    }
     await destroyProfileFully(deps, payload.profileId)
+    if (deps.broadcastSnapshot) {
+      await deps.broadcastSnapshot()
+    }
   })
 
   handleInvoke(IpcChannels.ProfileActivate, async (payload: ActivateProfilePayload) => {
@@ -610,7 +648,7 @@ export function registerProfileIpc(deps: ProfileIpcDeps): void {
 
   handleInvoke(
     IpcChannels.ProfileActivateCardSlackEmbed,
-    async (payload: { profileId: string; teamId?: string; appId?: AppId; bounds: ViewportBounds }) => {
+    async (payload: { projectId?: string; profileId: string; teamId?: string; appId?: AppId; bounds: ViewportBounds }) => {
       const mainWindow = deps.getMainWindow()
       if (!mainWindow) {
         return
@@ -620,8 +658,31 @@ export function registerProfileIpc(deps: ProfileIpcDeps): void {
         payload.teamId ?? '',
         mainWindow,
         payload.bounds,
-        payload.appId ?? 'slack'
+        payload.appId ?? 'slack',
+        payload.projectId
       )
+    }
+  )
+
+  handleInvoke(
+    IpcChannels.ProfileStartCardAppLogin,
+    async (payload: { projectId: string; profileId: string; appId: AppId; bounds?: ViewportBounds }) => {
+      notifyAuthProgress(deps.getMainWindow, 'Waiting for Slack sign-in for card…')
+      const profile = await deps.profileStore.get(payload.profileId)
+      const emailHint = profile?.displayName || undefined
+
+      // Pre-seed Google session cookies into card partition
+      await syncGoogleSessionFromProfileToCard(payload.profileId, payload.projectId, payload.appId).catch(() => undefined)
+
+      await runSlackChromeBrowserLogin(payload.profileId, {
+        parentWindow: deps.getMainWindow(),
+        contentBounds: payload.bounds,
+        targetPartition: partitionForCard(payload.projectId, payload.appId),
+        chromeKey: `card-${payload.projectId}`,
+        loginHint: emailHint
+      })
+      const updated = await deps.profileStore.get(payload.profileId)
+      return updated || ({} as Profile)
     }
   )
 

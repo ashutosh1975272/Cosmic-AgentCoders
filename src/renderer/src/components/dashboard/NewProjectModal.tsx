@@ -10,6 +10,7 @@ interface NewProjectModalProps {
   onClose: () => void
   onSuccess?: (projectId: string) => void
   embedded?: boolean
+  showLinkedAccounts?: boolean
 }
 
 /**
@@ -23,7 +24,8 @@ export function NewProjectModal({
   open,
   onClose,
   onSuccess,
-  embedded = false
+  embedded = false,
+  showLinkedAccounts = true
 }: NewProjectModalProps): React.JSX.Element | null {
   const profiles = useProfileStore((s) => s.profiles)
   const upsertProject = useDashboardStore((s) => s.upsertProject)
@@ -83,10 +85,22 @@ export function NewProjectModal({
         id: `src-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
       }))
 
-      // Pick the primary source or fallback
+      // Pick the primary source or fallback to profile's authentic Slack workspace
       const primarySource = activeSources[0]
-      const teamId = primarySource?.workspaceId || `team-${Date.now().toString(36)}`
-      const teamName = primarySource?.workspaceName || projectName.trim()
+      const selectedProf = individualProfiles.find((p) => p.id === profileId)
+      const authenticatedWorkspace = selectedProf?.apps?.slack?.availableWorkspaces?.find(
+        (w) => w.teamId && !w.teamId.startsWith('team-') && w.teamId !== 'team' && w.teamId !== 'T-PENDING'
+      ) ?? selectedProf?.apps?.slack?.pinnedWorkspaces?.find(
+        (w) => w.teamId && !w.teamId.startsWith('team-') && w.teamId !== 'team' && w.teamId !== 'T-PENDING'
+      )
+      const fallbackTeamId = authenticatedWorkspace?.teamId || `pending-${newProjectId}`
+      const fallbackTeamName = authenticatedWorkspace?.teamName || projectName.trim()
+
+      const rawWorkspaceId = primarySource?.workspaceId
+      const teamId = (rawWorkspaceId && !rawWorkspaceId.startsWith('team-') && rawWorkspaceId !== 'team' && rawWorkspaceId !== 'T-PENDING')
+        ? rawWorkspaceId
+        : fallbackTeamId
+      const teamName = primarySource?.workspaceName || fallbackTeamName
 
       const newProject: DashboardProject = {
         id: newProjectId,
@@ -397,62 +411,65 @@ export function NewProjectModal({
           </div>
 
           {/* Linked Workspaces & Accounts (+ Add Accounts) */}
-          <div
-            style={{
-              padding: '16px 18px',
-              borderRadius: '10px',
-              background: 'rgba(255, 255, 255, 0.03)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '16px'
-            }}
-          >
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '13.5px', fontWeight: 600, color: '#e2e8f0' }}>
-                  Linked Accounts &amp; Workspaces
-                </span>
-                <span
-                  style={{
-                    fontSize: '11px',
-                    fontWeight: 600,
-                    padding: '2px 8px',
-                    borderRadius: '10px',
-                    background: sources.length > 0 ? 'rgba(99, 102, 241, 0.2)' : 'rgba(255, 255, 255, 0.07)',
-                    color: sources.length > 0 ? '#a5b4fc' : '#94a3b8'
-                  }}
-                >
-                  {sources.length} Linked
-                </span>
-              </div>
-              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>
-                {sources.length > 0
-                  ? sources.map((s) => s.workspaceName).join(', ')
-                  : 'Link Global accounts (Claude, ChatGPT, Slack) or client links now or manage later.'}
-              </div>
-            </div>
-
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => setAddAccountsOpen(true)}
+          {showLinkedAccounts && (
+            <div
+              className="new-project-linked-accounts-section"
               style={{
-                padding: '7px 14px',
-                fontSize: '12.5px',
-                fontWeight: 600,
-                background: 'rgba(99, 102, 241, 0.18)',
-                color: '#a5b4fc',
-                border: '1px solid rgba(99, 102, 241, 0.35)',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                whiteSpace: 'nowrap'
+                padding: '16px 18px',
+                borderRadius: '10px',
+                background: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '16px'
               }}
             >
-              + Add Accounts
-            </button>
-          </div>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '13.5px', fontWeight: 600, color: '#e2e8f0' }}>
+                    Linked Accounts &amp; Workspaces
+                  </span>
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      padding: '2px 8px',
+                      borderRadius: '10px',
+                      background: sources.length > 0 ? 'rgba(99, 102, 241, 0.2)' : 'rgba(255, 255, 255, 0.07)',
+                      color: sources.length > 0 ? '#a5b4fc' : '#94a3b8'
+                    }}
+                  >
+                    {sources.length} Linked
+                  </span>
+                </div>
+                <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>
+                  {sources.length > 0
+                    ? sources.map((s) => s.workspaceName).join(', ')
+                    : 'Link Global accounts (Claude, ChatGPT, Slack) or client links now or manage later.'}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setAddAccountsOpen(true)}
+                style={{
+                  padding: '7px 14px',
+                  fontSize: '12.5px',
+                  fontWeight: 600,
+                  background: 'rgba(99, 102, 241, 0.18)',
+                  color: '#a5b4fc',
+                  border: '1px solid rgba(99, 102, 241, 0.35)',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                + Add Accounts
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

@@ -41,6 +41,7 @@ const SNAPSHOT: DashboardSnapshot = {
 
 const SETTINGS: AppSettings = {
   ...DEFAULT_APP_SETTINGS,
+  sidebarLook: 'ancient',
   recentWorkspaces: [
     {
       profileId: 'p1',

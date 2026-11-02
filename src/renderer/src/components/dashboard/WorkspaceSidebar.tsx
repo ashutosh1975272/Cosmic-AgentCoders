@@ -1,6 +1,7 @@
 import type React from 'react'
 import { Fragment, useRef, useMemo, useState, useEffect } from 'react'
 import type { DashboardProject } from '../../../../shared/dashboard-contract'
+import type { AppSettings } from '../../../../shared/ipc-contract'
 import type { CardView } from './card-view'
 import NavIcon from './nav-icons'
 import { AppIcon } from '../AppIcon'
@@ -48,7 +49,8 @@ interface WorkspaceSidebarProps {
   onToggleCollapse: () => void
   onResize: (width: number) => void
   onOpenAdd?: () => void
-  sidebarLook?: 'minimal' | 'ancient' | 'new-cosmic'
+  sidebarLook?: 'minimal' | 'ancient' | 'new-cosmic' | 'basic'
+  baseAppLayout?: BaseAppLayoutKey
 }
 
 /** Real counts only — a row with nothing in it is dimmed, never given a badge. */
@@ -171,14 +173,37 @@ export default function WorkspaceSidebar({
   onToggleCollapse,
   onResize,
   onOpenAdd,
-  sidebarLook: propSidebarLook
+  sidebarLook: propSidebarLook,
+  baseAppLayout: propBaseAppLayout
 }: WorkspaceSidebarProps): React.ReactElement {
   const collapsed = nav.collapsed
   const asideRef = useRef<HTMLElement>(null)
   const { layout } = useSidebarLayout(projectId)
   const profiles = useProfileStore((s) => s.profiles)
-  const [appLook, setAppLook] = useState<'minimal' | 'ancient' | 'new-cosmic'>('ancient')
-  const [baseAppLayout, setBaseAppLayout] = useState<BaseAppLayoutKey>('standard')
+  const [appLook, setAppLook] = useState<'minimal' | 'ancient' | 'new-cosmic' | 'basic'>('ancient')
+  const [baseAppLayout, setBaseAppLayout] = useState<BaseAppLayoutKey>(propBaseAppLayout ?? 'standard')
+  const [cardSlackAuth, setCardSlackAuth] = useState<boolean>(false)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!projectId) return
+    window.api?.dashboard?.checkCardAuth?.({ projectId, appId: 'slack' })
+      .then((isAuth) => {
+        if (!cancelled) setCardSlackAuth(Boolean(isAuth))
+      })
+      .catch(() => {
+        if (!cancelled) setCardSlackAuth(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [projectId])
+
+  useEffect(() => {
+    if (propBaseAppLayout) {
+      setBaseAppLayout(propBaseAppLayout)
+    }
+  }, [propBaseAppLayout])
 
   useEffect(() => {
     void window.api?.app?.getSettings?.().then((s) => {
@@ -189,15 +214,27 @@ export default function WorkspaceSidebar({
       if (s?.sidebarLook) setAppLook(s.sidebarLook)
       if (s?.baseAppLayout) setBaseAppLayout(s.baseAppLayout)
     })
+    const handleCustom = (e: Event): void => {
+      const s = (e as CustomEvent<AppSettings>).detail
+      if (s?.sidebarLook) setAppLook(s.sidebarLook)
+      if (s?.baseAppLayout) setBaseAppLayout(s.baseAppLayout)
+    }
+    window.addEventListener('orbit:settings-changed', handleCustom)
     return () => {
       unsub?.()
+      window.removeEventListener('orbit:settings-changed', handleCustom)
     }
   }, [])
 
   const baseItems = useMemo(() => getBaseLayoutItems(baseAppLayout), [baseAppLayout])
 
-  const isMinimal = layout.mode === 'minimal' || propSidebarLook === 'minimal' || appLook === 'minimal'
-  const isAddHidden = isMinimal ? (layout.custom.hideAddButton ?? true) : Boolean(layout.custom.hideAddButton)
+  const isMinimal =
+    layout.mode === 'minimal' ||
+    propSidebarLook === 'minimal' ||
+    propSidebarLook === 'basic' ||
+    appLook === 'minimal' ||
+    appLook === 'basic'
+  const isAddHidden = layout.custom.hideAddButton ?? true
   const [globalAccountsOpen, setGlobalAccountsOpen] = useState(true)
 
   // Collect all globally available workspaces and links grouped across profiles
@@ -610,9 +647,11 @@ export default function WorkspaceSidebar({
                                       <span className="ws-nav-tag" style={{ fontSize: 10, opacity: 0.7, flexShrink: 0 }}>
                                         {item.id === 'slack' && entries.length > 0
                                           ? `${entries.length} ch`
-                                          : item.type === 'app'
-                                            ? 'Active'
-                                            : 'Web'}
+                                          : item.id === 'slack'
+                                            ? (cardSlackAuth ? 'Active' : 'Ready')
+                                            : item.type === 'app'
+                                              ? 'Active'
+                                              : 'Web'}
                                       </span>
                                     </button>
                                   )

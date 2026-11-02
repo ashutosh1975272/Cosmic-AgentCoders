@@ -10,7 +10,7 @@ interface CentreVisualsProps {
 
 function formatDateShort(iso: string): string {
   try {
-    return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   } catch {
     return iso
   }

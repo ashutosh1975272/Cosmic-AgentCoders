@@ -28,6 +28,9 @@ interface DashboardState {
   /** Cosmic look: Level 2 active project card id if selected */
   cosmicSelectedCardId: string | null
   setCosmicNavigation: (level1: string, cardId?: string | null) => void
+  /** Basic look: Active tab under selected project card ('dashboard' | 'slack' | 'teams' | 'whatsapp' | string) */
+  basicActiveTab: string
+  setBasicNavigation: (projectId: string, tab?: string) => void
 
   openDashboard: (appId?: 'slack') => void
   closeDashboard: () => void
@@ -71,6 +74,13 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       cosmicLevel1: level1,
       cosmicSelectedCardId: cardId,
       dashboardOpen: level1 === 'all' || cardId !== null
+    }),
+  basicActiveTab: 'dashboard',
+  setBasicNavigation: (projectId: string, tab: string = 'dashboard') =>
+    set({
+      cosmicSelectedCardId: projectId,
+      basicActiveTab: tab,
+      dashboardOpen: tab === 'dashboard'
     }),
   loading: false,
   syncingProjectIds: [],

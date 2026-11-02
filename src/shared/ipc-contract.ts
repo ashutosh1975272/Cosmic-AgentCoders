@@ -83,6 +83,7 @@ export const IpcChannels = {
   ProfileUpdateBounds: 'profile:update-bounds',
   ProfileSetEmbedVisible: 'profile:set-embed-visible',
   ProfileActivateCardSlackEmbed: 'profile:activate-card-slack-embed',
+  ProfileStartCardAppLogin: 'profile:start-card-app-login',
   ProfileUpdateCardSlackEmbedBounds: 'profile:update-card-slack-embed-bounds',
   ProfileClearCardSlackEmbed: 'profile:clear-card-slack-embed',
   ProfileStartFirstLogin: 'profile:start-first-login',
@@ -134,6 +135,13 @@ export const IpcChannels = {
   AppAdminStatus: 'app:admin-status',
   AppAdminLogin: 'app:admin-login',
   AppAdminLogout: 'app:admin-logout',
+
+  LogsGetRecent: 'logs:get-recent',
+  LogsSetRetention: 'logs:set-retention',
+  LogsClear: 'logs:clear',
+  LogsExport: 'logs:export',
+  LogsLogAction: 'logs:log-action',
+  LogsOnEntry: 'logs:on-entry',
 
   OauthStartWorkspaceConnect: 'oauth:start-workspace-connect',
 
@@ -194,6 +202,7 @@ export const IpcChannels = {
   DashboardWorkspaceMappingSave: 'dashboard:workspace-mapping-save',
   DashboardWorkspaceMappingDelete: 'dashboard:workspace-mapping-delete',
   DashboardGetProjects: 'dashboard:get-projects',
+  DashboardCardCheckAuth: 'dashboard:card-check-auth',
   DashboardSyncSource: 'dashboard:sync-source',
   DashboardGetRunLogs: 'dashboard:get-run-logs',
   DashboardStartWatchLive: 'dashboard:start-watch-live',
@@ -225,7 +234,7 @@ export interface AppSettings {
     label: string
     at: string
   }>
-  sidebarLook: 'minimal' | 'ancient' | 'new-cosmic'
+  sidebarLook: 'minimal' | 'ancient' | 'new-cosmic' | 'basic'
   showLookSwitcher: boolean
   showRecentSection: boolean
   sidebarButtons: {
@@ -252,9 +261,12 @@ export interface AppSettings {
   showSidebarDashboardNavButton?: boolean
   /** Backward compatibility: display Profile and Dashboard navigation buttons in sidebar. Default: true. */
   showCosmicProfileNavButtons?: boolean
+  /** When true, display "Linked Accounts & Workspaces" section in the Create Project Card modal. Default: true. */
+  showNewProjectLinkedAccounts?: boolean
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
+  showNewProjectLinkedAccounts: true,
   baseAppLayout: 'standard',
   showSidebarItemActions: true,
   showSidebarProfileHideButton: false,
@@ -271,19 +283,19 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   splitViewEnabled: false,
   notificationSound: false,
   recentWorkspaces: [],
-  sidebarLook: 'ancient',
-  showLookSwitcher: true,
+  sidebarLook: 'basic',
+  showLookSwitcher: false,
   showRecentSection: true,
   showScrapeProgressLine: true,
   showGoogleEmailInputInSidebar: true,
   showProfileScopeSelector: false,
   showObserverViewHeader: false,
   sidebarButtons: {
-    addWebsite: true,
-    newProject: true,
-    newProfile: true,
-    observer: true,
-    profilesHub: true
+    addWebsite: false,
+    newProject: false,
+    newProfile: false,
+    observer: false,
+    profilesHub: false
   }
 }
 
@@ -299,7 +311,7 @@ export interface IpcApi {
   profiles: {
     list: () => Promise<Profile[]>
     create: (displayName: string) => Promise<Profile>
-    delete: (profileId: string) => Promise<void>
+    delete: (profileId: string, deleteCards?: boolean) => Promise<void>
     deleteUnsignedDuplicates: () => Promise<Profile[]>
     clearStuckAuth: () => Promise<Profile[]>
     cancelAuthBusy: (profileId?: string) => Promise<Profile[]>
@@ -336,7 +348,8 @@ export interface IpcApi {
     ) => Promise<void>
     updateBounds: (bounds: ViewportBounds) => Promise<void>
     setEmbedVisible: (visible: boolean) => Promise<void>
-    activateCardSlackEmbed: (payload: { profileId: string; teamId?: string; appId?: AppId; bounds: ViewportBounds }) => Promise<void>
+    activateCardSlackEmbed: (payload: { projectId?: string; profileId: string; teamId?: string; appId?: AppId; bounds: ViewportBounds }) => Promise<void>
+    startCardAppLogin: (payload: { projectId: string; profileId: string; appId: AppId; bounds?: ViewportBounds }) => Promise<Profile>
     updateCardSlackEmbedBounds: (bounds: ViewportBounds) => Promise<void>
     clearCardSlackEmbed: () => Promise<void>
     startGoogleAuth: (profileId: string, bounds?: ViewportBounds) => Promise<Profile>
@@ -462,6 +475,7 @@ export interface IpcApi {
     }) => Promise<void>
     deleteWorkspaceMapping: (workspaceId: string) => Promise<boolean>
     getProjects: () => Promise<{ id: string; name: string; clientName: string; teamId: string; profileId: string }[]>
+    checkCardAuth: (payload: { projectId: string; appId?: AppId }) => Promise<boolean>
     syncSource: (payload: { projectId: string; sourceId?: string }) => Promise<{
       channelsRead: number
       newMessages: number
@@ -506,6 +520,37 @@ export interface IpcApi {
       }) => void
     ) => () => void
   }
+  logs: {
+    getRecent: (filter?: LogFilter) => Promise<LogEntry[]>
+    setRetention: (minutes: number) => Promise<void>
+    clear: () => Promise<void>
+    export: () => Promise<{ ok: boolean; count: number; content: string }>
+    logAction: (
+      category: LogCategory,
+      level: LogLevel,
+      message: string,
+      meta?: unknown
+    ) => Promise<void>
+    onLogEntry: (callback: (entry: LogEntry) => void) => () => void
+  }
+}
+
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'security'
+export type LogCategory = 'ui' | 'nav' | 'ipc' | 'sync' | 'auth' | 'sec' | 'system' | 'error'
+
+export interface LogEntry {
+  id: string
+  level: LogLevel
+  category: LogCategory
+  message: string
+  meta?: unknown
+  ts: string
+}
+
+export interface LogFilter {
+  level?: LogLevel | 'all'
+  category?: LogCategory | 'all'
+  query?: string
 }
 
 export type {

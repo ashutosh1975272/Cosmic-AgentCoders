@@ -2,7 +2,13 @@ export const SLACK_CLIENT_URL = 'https://app.slack.com/client'
 
 export function slackClientUrlForTeam(teamId: string): string {
   const trimmed = teamId.trim()
-  if (!trimmed) {
+  if (
+    !trimmed ||
+    trimmed.startsWith('team-') ||
+    trimmed === 'T-PENDING' ||
+    trimmed === 'team' ||
+    !/^T[A-Z0-9]+$/i.test(trimmed)
+  ) {
     return SLACK_CLIENT_URL
   }
   return `${SLACK_CLIENT_URL}/${trimmed}`
@@ -57,11 +63,16 @@ export function resolvePinnedOpenUrl(input: {
   teamDomain?: string
 }): string {
   const stored = input.openUrl?.trim()
-  if (stored) {
+  if (
+    stored &&
+    !stored.includes('/client/team-') &&
+    stored !== 'https://app.slack.com/client/team' &&
+    !stored.includes('glitch')
+  ) {
     return stored
   }
   const domain = input.teamDomain?.trim()
-  if (domain) {
+  if (domain && domain !== 'team' && domain !== 'unknown' && !domain.startsWith('team-')) {
     return `https://${domain}.slack.com`
   }
   return slackClientUrlForTeam(input.teamId)

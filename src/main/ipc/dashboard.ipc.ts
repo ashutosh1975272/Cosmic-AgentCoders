@@ -1,4 +1,7 @@
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, session } from 'electron'
+import { partitionForCard } from '../profiles/session-partition'
+import { syncGoogleSessionFromProfileToCard } from '../profiles/google-session-sync'
+import { seedChromeCardProfile } from '../profiles/chrome-browser-auth'
 import { IpcChannels } from '../../shared/ipc-contract'
 import type {
   DashboardAiModelsQueryPayload,
@@ -209,6 +212,13 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
       }
       await deps.workspaceMapping.syncProjectWorkspaces(proj.id, workspaceIds)
     }
+
+    // Immediately seed the profile's authenticated Google session into this card
+    if (proj.profileId && proj.id) {
+      void syncGoogleSessionFromProfileToCard(proj.profileId, proj.id, 'slack').catch(() => undefined)
+      seedChromeCardProfile(proj.profileId, `card-${proj.id}`)
+    }
+
     await broadcastConfigChanged()
     return broadcastSnapshot()
   })
@@ -216,6 +226,9 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
   handleInvoke(IpcChannels.DashboardDeleteProject, async (payload: ProjectDeletePayload) => {
     await deps.monitorStore.deleteProject(payload.projectId)
     await deps.aiSettings?.clearProject(payload.projectId)
+    try {
+      await session.fromPartition(partitionForCard(payload.projectId, 'slack')).clearStorageData()
+    } catch {}
     return broadcastSnapshot()
   })
 
@@ -679,6 +692,21 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
         teamId: p.teamId,
         profileId: p.profileId
       }))
+    }
+  )
+
+  handleInvoke(
+    IpcChannels.DashboardCardCheckAuth,
+    async (payload: { projectId: string; appId?: string }): Promise<boolean> => {
+      if (!payload?.projectId) return false
+      try {
+        const partition = partitionForCard(payload.projectId, (payload.appId as any) || 'slack')
+        const sess = session.fromPartition(partition)
+        const cookies = await sess.cookies.get({ domain: '.slack.com' })
+        return cookies.some((c) => (c.name === 'd' || c.name === 'd-s') && Boolean(c.value))
+      } catch {
+        return false
+      }
     }
   )
 

@@ -4,8 +4,23 @@
  */
 const { spawnSync } = require('child_process')
 const { join } = require('path')
+const fs = require('fs')
 
 exports.default = async function afterPack(context) {
+  if (context.electronPlatformName === 'linux') {
+    const cosmicBin = join(context.appOutDir, 'Cosmic')
+    const slackBin = join(context.appOutDir, 'slack-dashboard')
+    if (fs.existsSync(cosmicBin) && !fs.existsSync(slackBin)) {
+      try {
+        fs.symlinkSync('Cosmic', slackBin)
+        console.log(`[afterPack] Created compatibility symlink: ${slackBin} -> Cosmic`)
+      } catch (err) {
+        console.warn(`[afterPack] Could not create symlink: ${err.message}`)
+      }
+    }
+    return
+  }
+
   if (context.electronPlatformName !== 'darwin') return
 
   const appName = context.packager.appInfo.productFilename

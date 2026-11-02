@@ -6,7 +6,12 @@ export type ProfileCreationMode = 'under_global' | 'individual' | 'both'
 interface NewProfileModalProps {
   open: boolean
   onClose: () => void
-  onCreate: (name: string, email: string, mode: ProfileCreationMode) => Promise<void>
+  onCreate: (
+    name: string,
+    email: string,
+    mode: ProfileCreationMode,
+    forceReauth?: boolean
+  ) => Promise<void>
   initialEmail?: string
   showScopeSelector?: boolean
 }
@@ -22,6 +27,7 @@ export function NewProfileModal({
   const [mode, setMode] = useState<ProfileCreationMode>('both')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [forceReauth, setForceReauth] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -32,11 +38,18 @@ export function NewProfileModal({
     }
   }, [open, initialEmail])
 
-  // Check if email already matches an existing profile
+  // Only treat as existing if genuinely signed in and visible
   const existingProfile = useMemo(() => {
     const trimmed = email.trim().toLowerCase()
     if (!trimmed || !trimmed.includes('@')) return null
-    return profiles.find((p) => p.displayName.trim().toLowerCase() === trimmed) || null
+    return (
+      profiles.find(
+        (p) =>
+          p.displayName.trim().toLowerCase() === trimmed &&
+          p.googleAuthStatus === 'signed-in' &&
+          !p.hiddenInSidebar
+      ) || null
+    )
   }, [email, profiles])
 
   if (!open) return null
@@ -45,7 +58,9 @@ export function NewProfileModal({
     setName('')
     setEmail('')
     setMode('both')
+    setForceReauth(false)
     setError(null)
+    setSubmitting(false)
     onClose()
   }
 
@@ -61,13 +76,15 @@ export function NewProfileModal({
     }
     setError(null)
     setSubmitting(true)
+    const n = name.trim()
+    const em = email.trim()
+    const m = mode
+    const reauth = forceReauth
+    handleClose()
     try {
-      await onCreate(name.trim(), email.trim(), mode)
-      handleClose()
+      await onCreate(n, em, m, reauth)
     } catch (err: any) {
-      setError(err instanceof Error ? err.message : 'Failed to create profile')
-    } finally {
-      setSubmitting(false)
+      console.error('Failed to create/auth profile:', err)
     }
   }
 
@@ -88,7 +105,7 @@ export function NewProfileModal({
         style={{
           width: '560px',
           maxWidth: '94vw',
-          backgroundColor: '#090d16',
+          backgroundColor: 'var(--surface-2)',
           borderRadius: '12px',
           border: '1px solid rgba(255, 255, 255, 0.1)',
           boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.85)',
@@ -248,16 +265,44 @@ export function NewProfileModal({
                 padding: '9px 12px',
                 borderRadius: '6px',
                 background: '#020617',
-                border: existingProfile ? '1px solid #38bdf8' : '1px solid rgba(255, 255, 255, 0.12)',
+                border: existingProfile && !forceReauth ? '1px solid #38bdf8' : '1px solid rgba(255, 255, 255, 0.12)',
                 color: '#fff',
                 fontSize: '13px',
                 boxSizing: 'border-box'
               }}
             />
-            {existingProfile ? (
-              <span style={{ fontSize: '12px', color: '#38bdf8', marginTop: '4px', display: 'block', lineHeight: 1.4 }}>
-                ℹ️ <b>Existing Account Found</b>: <code>{existingProfile.displayName}</code> is already authenticated (labeled as &ldquo;{existingProfile.customName || existingProfile.displayName}&rdquo;). Submitting will link this account with your selected scope.
-              </span>
+            {existingProfile && !forceReauth ? (
+              <div
+                style={{
+                  marginTop: '8px',
+                  padding: '10px 12px',
+                  borderRadius: '6px',
+                  background: 'rgba(56, 189, 248, 0.08)',
+                  border: '1px solid rgba(56, 189, 248, 0.25)'
+                }}
+              >
+                <div style={{ fontSize: '12px', color: '#38bdf8', lineHeight: 1.4 }}>
+                  ℹ️ <b>Active Account Found</b>: <code>{existingProfile.displayName}</code> is already authenticated (labeled as &ldquo;{existingProfile.customName || existingProfile.displayName}&rdquo;).
+                </div>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setForceReauth(true)}
+                    style={{
+                      background: 'rgba(56, 189, 248, 0.15)',
+                      border: '1px solid rgba(56, 189, 248, 0.4)',
+                      color: '#38bdf8',
+                      borderRadius: '4px',
+                      padding: '4px 10px',
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                      fontWeight: 500
+                    }}
+                  >
+                    🔄 Re-authenticate in Google
+                  </button>
+                </div>
+              </div>
             ) : (
               <span style={{ fontSize: '12px', color: '#64748b', marginTop: '4px', display: 'block' }}>
                 Chrome will open to verify Google session and 2SV before activating.
@@ -270,7 +315,11 @@ export function NewProfileModal({
               Cancel
             </button>
             <button type="submit" className="btn primary" disabled={submitting}>
-              {submitting ? 'Connecting…' : existingProfile ? 'Update & Link Account' : 'Add Account & Verify'}
+              {submitting
+                ? 'Connecting…'
+                : existingProfile && !forceReauth
+                  ? 'Update & Link Account'
+                  : 'Add Account & Verify'}
             </button>
           </div>
         </form>

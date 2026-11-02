@@ -120,6 +120,10 @@ export interface DashboardProject {
   monitors: DashboardMonitor[]
   /** Project lifecycle/workflow status (Active, Stopped, Removed/Cancelled, Completed) */
   workflowStatus?: ProjectWorkflowStatus
+  /** When true, desktop notifications are silenced for this project card */
+  muted?: boolean
+  /** When true, this project card is hidden from the sidebar view */
+  hiddenInSidebar?: boolean
   /** Additive multi-source model (SLK-1) */
   sources?: ProjectSource[]
   sourcePreference?: 'token_first' | 'browser_only'

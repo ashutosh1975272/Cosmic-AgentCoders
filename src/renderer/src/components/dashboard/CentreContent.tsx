@@ -11,8 +11,8 @@ function formatTime(iso: string): string {
     const today = new Date()
     const sameDay = d.toDateString() === today.toDateString()
     return sameDay
-      ? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-      : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+      ? d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+      : d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
   } catch {
     return iso
   }

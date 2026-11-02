@@ -12,21 +12,33 @@ export type CommandItem = {
 interface CommandPaletteProps {
   open: boolean
   profiles: Profile[]
+  projects?: Array<{ id: string; name: string; clientName?: string }>
   onClose: () => void
   onSelectProfile: (profileId: string) => void
   onSelectApp: (profileId: string, appId: AppId) => void
   onOpenWorkspace: (profileId: string, appId: AppId, teamId: string) => void
   onOpenInSplit?: (profileId: string, appId: AppId) => void
+  onSelectProject?: (projectId: string) => void
+  onOpenSettings?: () => void
+  onLockApp?: () => void
+  onSyncAll?: () => void
+  onOpenObserver?: () => void
 }
 
 export function CommandPalette({
   open,
   profiles,
+  projects,
   onClose,
   onSelectProfile,
   onSelectApp,
   onOpenWorkspace,
-  onOpenInSplit
+  onOpenInSplit,
+  onSelectProject,
+  onOpenSettings,
+  onLockApp,
+  onSyncAll,
+  onOpenObserver
 }: CommandPaletteProps): React.JSX.Element | null {
   const [query, setQuery] = useState('')
   const [index, setIndex] = useState(0)
@@ -36,6 +48,55 @@ export function CommandPalette({
     const q = query.trim().toLowerCase()
     const out: CommandItem[] = []
     const seenWs = new Set<string>()
+
+    // Global quick action commands
+    if (onOpenSettings) {
+      out.push({
+        id: 'cmd:settings',
+        label: '⚙ Open Settings Hub',
+        hint: 'Settings',
+        run: onOpenSettings
+      })
+    }
+    if (onOpenObserver) {
+      out.push({
+        id: 'cmd:observer',
+        label: '🔭 Open Observer Mode',
+        hint: 'Observer',
+        run: onOpenObserver
+      })
+    }
+    if (onSyncAll) {
+      out.push({
+        id: 'cmd:sync',
+        label: '🔄 Sync All Projects',
+        hint: 'Sync',
+        run: onSyncAll
+      })
+    }
+    if (onLockApp) {
+      out.push({
+        id: 'cmd:lock',
+        label: '🔒 Lock App',
+        hint: 'Lock',
+        run: onLockApp
+      })
+    }
+
+    // Projects index
+    if (projects && onSelectProject) {
+      for (const proj of projects) {
+        const client = proj.clientName ? ` · ${proj.clientName}` : ''
+        out.push({
+          id: `proj:${proj.id}`,
+          label: `📁 ${proj.name}${client}`,
+          hint: 'Project',
+          run: () => onSelectProject(proj.id)
+        })
+      }
+    }
+
+    // Profiles, apps & workspaces index
     for (const p of profiles) {
       const name = profileDisplayLabel(p)
       out.push({
@@ -77,7 +138,21 @@ export function CommandPalette({
     return out
       .filter((i) => i.label.toLowerCase().includes(q) || (i.hint ?? '').toLowerCase().includes(q))
       .slice(0, 40)
-  }, [open, profiles, query, onSelectProfile, onSelectApp, onOpenWorkspace, onOpenInSplit])
+  }, [
+    open,
+    profiles,
+    projects,
+    query,
+    onSelectProfile,
+    onSelectApp,
+    onOpenWorkspace,
+    onOpenInSplit,
+    onSelectProject,
+    onOpenSettings,
+    onLockApp,
+    onSyncAll,
+    onOpenObserver
+  ])
 
   if (!open) return null
 
@@ -115,7 +190,7 @@ export function CommandPalette({
         <input
           className="cmdk-input"
           autoFocus
-          placeholder="Jump to profile, app, or workspace…"
+          placeholder="Jump to project, profile, app, or action…"
           value={query}
           onChange={(e) => {
             setQuery(e.target.value)

@@ -1,4 +1,5 @@
-import { WebContentsView, type BrowserWindow, type Rectangle } from 'electron'
+import { WebContentsView, session, type BrowserWindow, type Rectangle } from 'electron'
+import { join } from 'node:path'
 import type { AppId, AvailableWorkspace, DiscoveredWorkspace } from '../../shared/types'
 import {
   isSlackPlaceholderName,
@@ -33,12 +34,15 @@ import {
   isTeamsSignedInUrl,
   normalizeTeamsOpenUrl,
   partitionForProfile,
+  partitionForCard,
   profileSessionWebPreferences,
+  cardSessionWebPreferences,
   SLACK_CLIENT_URL,
   TEAMS_HOME_URL,
   WHATSAPP_WEB_URL
 } from './session-partition'
 import { parseUnreadFromTitle, READ_PAGE_UNREAD_SCRIPT, unreadKey } from './unread-from-title'
+import { syncGoogleSessionFromProfileToCard } from './google-session-sync'
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -54,6 +58,10 @@ function safeHostname(urlString: string): string {
 
 export function viewKey(profileId: string, appId: AppId): string {
   return `${profileId}:${appId}`
+}
+
+export function cardViewKey(projectId: string, appId: AppId): string {
+  return `card:${projectId}:${appId}`
 }
 
 export function customLinkKey(profileId: string, linkId: string): string {
@@ -354,6 +362,7 @@ export class BrowserViewManager {
     const view = new WebContentsView({
       webPreferences: profileSessionWebPreferences(profileId, appId)
     })
+    view.setBackgroundColor(appId === 'whatsapp' ? '#111B21' : '#0C0D11')
 
     view.webContents.setZoomFactor(1)
 
@@ -383,6 +392,55 @@ export class BrowserViewManager {
       profileId,
       appId,
       partition: partitionForProfile(profileId, appId),
+      deferLoad: Boolean(options?.deferLoad)
+    })
+    return view
+  }
+
+  getOrCreateCardView(
+    projectId: string,
+    appId: AppId,
+    options?: { deferLoad?: boolean }
+  ): WebContentsView {
+    const key = cardViewKey(projectId, appId)
+    const existing = this.views.get(key)
+    if (existing && !existing.webContents.isDestroyed()) {
+      return existing
+    }
+
+    const webPrefs = cardSessionWebPreferences(projectId, appId)
+    const view = new WebContentsView({
+      webPreferences: {
+        ...webPrefs,
+        preload: join(__dirname, '../preload/index.js')
+      }
+    })
+    view.setBackgroundColor(appId === 'whatsapp' ? '#111B21' : '#0C0D11')
+
+    if (appId === 'teams') {
+      applyTeamsWebContentsTweaks(view.webContents)
+    } else if (appId === 'whatsapp') {
+      applyWhatsAppWebContentsTweaks(view.webContents)
+    } else {
+      applySlackWebContentsTweaks(view.webContents)
+    }
+
+    this.wireEmbedNavigation(projectId, appId, view)
+
+    view.webContents.on('dom-ready', () => {
+      if (appId === 'slack') {
+        injectHideDmCss(view.webContents)
+      }
+    })
+
+    if (!options?.deferLoad) {
+      void view.webContents.loadURL(homeUrlForApp(appId))
+    }
+    this.views.set(key, view)
+    log.info('card browser view created', {
+      projectId,
+      appId,
+      partition: partitionForCard(projectId, appId),
       deferLoad: Boolean(options?.deferLoad)
     })
     return view
@@ -862,6 +920,7 @@ export class BrowserViewManager {
           sandbox: true
         }
       })
+      view.setBackgroundColor('#0C0D11')
       view.webContents.setWindowOpenHandler(({ url: openUrl }) => {
         void view?.webContents.loadURL(openUrl)
         return { action: 'deny' }
@@ -940,10 +999,18 @@ export class BrowserViewManager {
     teamId: string,
     mainWindow: BrowserWindow,
     bounds: Rectangle,
-    appId: AppId = 'slack'
+    appId: AppId = 'slack',
+    projectId?: string
   ): Promise<void> {
-    const key = viewKey(profileId, appId)
-    const view = this.getOrCreate(profileId, appId)
+    const key = projectId ? cardViewKey(projectId, appId) : viewKey(profileId, appId)
+    const view = projectId ? this.getOrCreateCardView(projectId, appId) : this.getOrCreate(profileId, appId)
+
+    // Propagate the profile's Google session cookies into the card partition so that
+    // "Continue with Google" OAuth flows inside the card are pre-seeded with the
+    // profile's Google identity.  Slack / Teams / WhatsApp cookies are never copied.
+    if (projectId && profileId) {
+      void syncGoogleSessionFromProfileToCard(profileId, projectId, appId).catch(() => undefined)
+    }
 
     // If switching card views, detach the previously embedded view first
     if (this.cardEmbedKey && this.cardEmbedKey !== key) {
@@ -962,13 +1029,25 @@ export class BrowserViewManager {
     view.setBounds(bounds)
 
     // Ensure we are navigated appropriately
-    if (appId === 'slack' && teamId) {
+    if (appId === 'slack') {
+      const isRealTeamId = Boolean(teamId && /^T[A-Z0-9]+$/i.test(teamId))
       const currentUrl = view.webContents.getURL()
-      if (!currentUrl || !currentUrl.includes(teamId)) {
-        try {
-          await this.navigateToWorkspace(profileId, 'slack', { teamId })
-        } catch (err) {
-          log.warn('Card live slack navigate failed or partially loaded', { profileId, teamId, err: String(err) })
+      if (isRealTeamId) {
+        if (!currentUrl || !currentUrl.includes(teamId)) {
+          if (projectId) {
+            void view.webContents.loadURL(`https://app.slack.com/client/${teamId}`)
+          } else {
+            try {
+              await this.navigateToWorkspace(profileId, 'slack', { teamId })
+            } catch (err) {
+              log.warn('Card live slack navigate failed or partially loaded', { profileId, teamId, err: String(err) })
+            }
+          }
+        }
+      } else {
+        // teamId is missing or placeholder. If not on Slack or if stuck on glitch page, load SLACK_CLIENT_URL
+        if (!currentUrl || !currentUrl.includes('slack.com') || currentUrl.includes('/client/team')) {
+          void view.webContents.loadURL(SLACK_CLIENT_URL)
         }
       }
     } else if (appId === 'whatsapp') {
@@ -987,7 +1066,21 @@ export class BrowserViewManager {
     }
 
     this.noteActivity()
-    log.info('card live embed activated', { profileId, appId, teamId, bounds })
+    log.info('card live embed activated', { profileId, appId, teamId, bounds, projectId })
+  }
+
+  async isCardSessionAuthenticated(projectId: string, appId: AppId = 'slack'): Promise<boolean> {
+    const partition = partitionForCard(projectId, appId)
+    const sess = session.fromPartition(partition)
+    if (appId === 'slack') {
+      const cookies = await sess.cookies.get({ domain: '.slack.com' })
+      return cookies.some((c) => (c.name === 'd' || c.name === 'd-s') && Boolean(c.value))
+    }
+    if (appId === 'teams') {
+      const cookies = await sess.cookies.get({ domain: '.microsoft.com' })
+      return cookies.some((c) => Boolean(c.value))
+    }
+    return false
   }
 
   updateCardSlackEmbedBounds(mainWindow: BrowserWindow, bounds: Rectangle): void {
@@ -1005,6 +1098,10 @@ export class BrowserViewManager {
 
   getCardEmbedBounds(): Rectangle | null {
     return this.cardEmbedBounds
+  }
+
+  isCardEmbedActive(): boolean {
+    return Boolean(this.cardEmbedKey && this.cardEmbedBounds)
   }
 
   clearCardSlackEmbed(mainWindow: BrowserWindow): void {
@@ -1093,6 +1190,10 @@ export class BrowserViewManager {
 
   updateBounds(mainWindow: BrowserWindow, bounds: Rectangle): void {
     this.lastBounds = bounds
+    if (this.cardEmbedKey) {
+      // In-card embed is actively positioned inside a card; do not overwrite with full viewport bounds
+      return
+    }
     if (!this.activeKey || this.embedHidden) {
       return
     }
@@ -1109,6 +1210,16 @@ export class BrowserViewManager {
   setEmbedVisible(mainWindow: BrowserWindow, visible: boolean): void {
     if (visible) {
       this.embedHidden = false
+      if (this.cardEmbedKey && this.cardEmbedBounds) {
+        const view = this.views.get(this.cardEmbedKey)
+        if (view) {
+          if (!mainWindow.contentView.children.includes(view)) {
+            mainWindow.contentView.addChildView(view)
+          }
+          view.setBounds(this.cardEmbedBounds)
+          return
+        }
+      }
       if (this.activeKey) {
         const view = this.views.get(this.activeKey)
         if (view) {
@@ -1133,6 +1244,7 @@ export class BrowserViewManager {
     this.embedHidden = true
     for (const key of [this.activeKey, this.secondaryKey]) {
       if (!key) continue
+      if (key === this.cardEmbedKey) continue
       const view = this.views.get(key)
       if (view) {
         mainWindow.contentView.removeChildView(view)
