@@ -55,3 +55,4 @@ except Exception as e:
     print(f"Notice: ICNS save returned: {e}")
 
 print("Successfully generated all brand icon assets!")
+

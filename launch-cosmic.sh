@@ -16,3 +16,4 @@ fi
 echo "Launching Cosmic..."
 pnpm run build || npm run build
 ELECTRON_OZONE_PLATFORM_HINT=x11 ./node_modules/.pnpm/electron@*/node_modules/electron/dist/electron out/main/index.js --no-sandbox --disable-dev-shm-usage --disable-gpu --disable-gpu-compositing --ozone-platform=x11 "$@"
+

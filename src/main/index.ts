@@ -64,6 +64,9 @@ if (loadedEnvPath) {
 
 /** One process / one tray — second launches focus the existing window. */
 app.setName(APP_DISPLAY_NAME)
+if (typeof (app as unknown as { setDesktopName?: (name: string) => void }).setDesktopName === 'function') {
+  ;(app as unknown as { setDesktopName: (name: string) => void }).setDesktopName('cosmic.desktop')
+}
 app.disableHardwareAcceleration()
 app.commandLine.appendSwitch('disable-gpu')
 app.commandLine.appendSwitch('no-sandbox')
