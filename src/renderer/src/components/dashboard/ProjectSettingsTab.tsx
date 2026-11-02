@@ -46,7 +46,6 @@ export default function ProjectSettingsTab({
   const [cardAddModalOpen, setCardAddModalOpen] = useState(false)
   const [cardAddModalTab, setCardAddModalTab] = useState<'global' | 'my' | 'client'>('my')
   const [pickerSourceId, setPickerSourceId] = useState<string | null>(null)
-  const [dismissedPickers, setDismissedPickers] = useState<Set<string>>(new Set())
 
   // Schedule state
   const [startDate, setStartDate] = useState(project.startDate ?? '')
@@ -79,20 +78,6 @@ export default function ProjectSettingsTab({
     }
   }, [project.id])
 
-  // After a card login the source starts empty and unreviewed. Open the picker
-  // instead of letting a scrape silently read the whole sidebar.
-  useEffect(() => {
-    if (pickerSourceId) return
-    const unreviewed = (project.sources ?? []).find(
-      (source) =>
-        source.kind === 'browser' &&
-        source.enabled !== false &&
-        !source.channelsReviewedAt &&
-        !dismissedPickers.has(source.id)
-    )
-    if (unreviewed) setPickerSourceId(unreviewed.id)
-  }, [project.sources, dismissedPickers, pickerSourceId])
-
   useEffect(() => {
     if (pickerSourceId) {
       void window.api?.profiles?.setEmbedVisible?.(false)
@@ -102,9 +87,6 @@ export default function ProjectSettingsTab({
   }, [pickerSourceId])
 
   const closeChannelPicker = (): void => {
-    if (pickerSourceId) {
-      setDismissedPickers((current) => new Set(current).add(pickerSourceId))
-    }
     setPickerSourceId(null)
   }
 
@@ -1924,11 +1906,6 @@ export default function ProjectSettingsTab({
                 open
                 onClose={closeChannelPicker}
                 onSaved={() => {
-                  setDismissedPickers((current) => {
-                    const next = new Set(current)
-                    next.delete(pickerSource.id)
-                    return next
-                  })
                   setSourceNotice('Channel selection saved')
                   setTimeout(() => setSourceNotice(null), 3000)
                 }}

@@ -124,7 +124,6 @@ export default function WorkspaceContent({
   const [slackViewMode, setSlackViewMode] = useState<'messages' | 'live'>('live')
   const [cardAuthenticated, setCardAuthenticated] = useState<boolean | null>(null)
   const [channelPickerSourceId, setChannelPickerSourceId] = useState<string | null>(null)
-  const [dismissedPickers, setDismissedPickers] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     let cancelled = false
@@ -158,16 +157,6 @@ export default function WorkspaceContent({
       ) ?? null,
     [project.sources]
   )
-
-  useEffect(() => {
-    if (
-      unreviewedSource &&
-      !channelPickerSourceId &&
-      !dismissedPickers.has(unreviewedSource.id)
-    ) {
-      setChannelPickerSourceId(unreviewedSource.id)
-    }
-  }, [unreviewedSource, channelPickerSourceId, dismissedPickers])
 
   useEffect(() => {
     if (channelPickerSourceId) {
@@ -983,9 +972,6 @@ export default function WorkspaceContent({
             source={pickerSource}
             open={true}
             onClose={() => {
-              if (channelPickerSourceId) {
-                setDismissedPickers((prev) => new Set(prev).add(channelPickerSourceId))
-              }
               setChannelPickerSourceId(null)
             }}
             onSaved={() => {

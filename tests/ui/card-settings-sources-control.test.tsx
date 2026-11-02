@@ -265,7 +265,7 @@ describe('ProjectSettingsTab: Sources Tab Categorized Sections & Scrape Control'
     })
   })
 
-  it('automatically triggers the channel picker modal for unreviewed sources', async () => {
+  it('does not auto-trigger channel picker modal for unreviewed sources, but opens on manual click', async () => {
     const unreviewedProject = {
       ...mockProject,
       sources: [
@@ -289,6 +289,17 @@ describe('ProjectSettingsTab: Sources Tab Categorized Sections & Scrape Control'
     }
 
     render(<ProjectSettingsTab project={unreviewedProject} />)
+
+    // Modal must NOT pop up automatically
+    expect(screen.queryByRole('dialog', { name: /select channels to scrape/i })).toBeNull()
+
+    // Switch to Sources tab
+    const sourcesTabBtn = screen.getByRole('tab', { name: /Sources/i })
+    fireEvent.click(sourcesTabBtn)
+
+    // Click Channels button manually
+    const channelsBtn = screen.getByRole('button', { name: /Channels \(0\)/i })
+    fireEvent.click(channelsBtn)
 
     await waitFor(() => {
       expect(screen.getByRole('dialog', { name: /select channels to scrape/i })).toBeDefined()

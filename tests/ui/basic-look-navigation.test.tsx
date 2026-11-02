@@ -349,7 +349,7 @@ describe('BasicSidebarProjectTree & Basic Look Navigation', () => {
       basicActiveTab: 'slack'
     })
 
-    const { getByText, queryByText } = render(
+    const { getByText, queryByText, queryByRole, findByRole } = render(
       <CosmicWorkspaceView sidebarLook="basic" />
     )
 
@@ -360,5 +360,12 @@ describe('BasicSidebarProjectTree & Basic Look Navigation', () => {
 
     // Must NOT render yellow banner
     expect(queryByText(/Choose the 2–3 channels this card should scrape/i)).toBeNull()
+
+    // Must NOT automatically open the channel picker modal dialog
+    expect(queryByRole('dialog', { name: /select channels to scrape/i })).toBeNull()
+
+    // Clicking Choose channels manually opens the modal
+    fireEvent.click(getByText('Choose channels'))
+    expect(await findByRole('dialog', { name: /select channels to scrape/i })).not.toBeNull()
   })
 })
