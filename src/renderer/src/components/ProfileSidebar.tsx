@@ -360,7 +360,7 @@ export const ProfileSidebar = memo(function ProfileSidebar({
   sidebarLook: propSidebarLook,
   showLookSwitcher = true,
   showRecentSection = true,
-  showGoogleEmailInputInSidebar = true,
+  showGoogleEmailInputInSidebar = false,
   showObserverViewHeader = false,
   baseAppLayout = 'standard',
   showSidebarItemActions = true,
@@ -369,15 +369,15 @@ export const ProfileSidebar = memo(function ProfileSidebar({
   showSidebarDashboardNavButton,
   showCosmicProfileNavButtons = true,
   sidebarButtons = {
-    addWebsite: true,
-    newProject: true,
-    newProfile: true,
-    observer: true,
-    profilesHub: true
+    addWebsite: false,
+    newProject: false,
+    newProfile: false,
+    observer: false,
+    profilesHub: false
   },
   onLookChange
 }: ProfileSidebarProps): React.JSX.Element {
-  const activeLook = propSidebarLook ?? 'ancient'
+  const activeLook = propSidebarLook ?? 'basic'
   const cosmicLevel1 = useDashboardStore((s) => s.cosmicLevel1)
   const isCosmicManagedMiddle =
     activeLook === 'minimal' ||
@@ -402,32 +402,8 @@ export const ProfileSidebar = memo(function ProfileSidebar({
     if (fromHistory.length > 0) {
       return fromHistory.slice(0, 5)
     }
-
-    // Fallback: If no explicit history is recorded yet, surface available / pinned workspaces
-    const fallbackList: RecentWorkspace[] = []
-    for (const p of profiles) {
-      for (const appId of APP_IDS) {
-        const session = p.apps[appId]
-        if (!session) continue
-        const allWs = [
-          ...session.pinnedWorkspaces.map((w) => ({ ...w, lastSeenAt: undefined })),
-          ...session.availableWorkspaces
-        ]
-        for (const ws of allWs) {
-          if (!fallbackList.some((existing) => existing.profileId === p.id && existing.teamId === ws.teamId)) {
-            fallbackList.push({
-              profileId: p.id,
-              appId,
-              teamId: ws.teamId,
-              label: displayWorkspaceName(ws),
-              at: ws.lastSeenAt || p.createdAt
-            })
-          }
-        }
-      }
-    }
-    return fallbackList.slice(0, 5)
-  }, [recentWorkspaces, profileIdSet, profiles])
+    return []
+  }, [recentWorkspaces, profileIdSet])
 
   const isProfileOpen = (profileId: string): boolean => {
     if (profileId in profileExpanded) {
@@ -1219,7 +1195,7 @@ export const ProfileSidebar = memo(function ProfileSidebar({
 
         <div className="nav-action-compact-container">
           {/* Configurable Action: + Website */}
-          {sidebarButtons.addWebsite !== false ? (
+          {Boolean(sidebarButtons.addWebsite) ? (
             <button
               type="button"
               className="nav-action-compact-btn nav-btn-prominent"
@@ -1233,7 +1209,7 @@ export const ProfileSidebar = memo(function ProfileSidebar({
           ) : null}
 
           {/* Configurable Action: + Project */}
-          {sidebarButtons.newProject !== false && onNewProject ? (
+          {Boolean(sidebarButtons.newProject) && onNewProject ? (
             <button
               type="button"
               className="nav-action-compact-btn"
@@ -1247,7 +1223,7 @@ export const ProfileSidebar = memo(function ProfileSidebar({
           ) : null}
 
           {/* Configurable Action: + Profile */}
-          {sidebarButtons.newProfile !== false && onNewProfile ? (
+          {Boolean(sidebarButtons.newProfile) && onNewProfile ? (
             <button
               type="button"
               className="nav-action-compact-btn"
@@ -1273,7 +1249,7 @@ export const ProfileSidebar = memo(function ProfileSidebar({
           </button>
 
           {/* Configurable Action: 🔭 Observer */}
-          {sidebarButtons.observer !== false && onObserver ? (
+          {Boolean(sidebarButtons.observer) && onObserver ? (
             <button
               type="button"
               className="nav-action-compact-btn"
@@ -1287,7 +1263,7 @@ export const ProfileSidebar = memo(function ProfileSidebar({
           ) : null}
 
           {/* Configurable Action: 👥 Profiles */}
-          {sidebarButtons.profilesHub !== false ? (
+          {Boolean(sidebarButtons.profilesHub) ? (
             <button
               type="button"
               className="nav-action-compact-btn"

@@ -878,7 +878,7 @@ export function UnifiedSettingsModal({
                       </span>
                       <input
                         type="checkbox"
-                        checked={settings.showGoogleEmailInputInSidebar ?? true}
+                        checked={settings.showGoogleEmailInputInSidebar ?? false}
                         onChange={(e) =>
                           onChangeSettings({ showGoogleEmailInputInSidebar: e.target.checked })
                         }
@@ -1090,16 +1090,16 @@ export function UnifiedSettingsModal({
                         <span>🌐 + Website (Add Platform &amp; Custom Web Links)</span>
                         <input
                           type="checkbox"
-                          checked={settings.sidebarButtons?.addWebsite ?? true}
+                          checked={settings.sidebarButtons?.addWebsite ?? false}
                           onChange={(e) =>
                             onChangeSettings({
                               sidebarButtons: {
                                 ...(settings.sidebarButtons ?? {
-                                  addWebsite: true,
-                                  newProject: true,
-                                  newProfile: true,
-                                  observer: true,
-                                  profilesHub: true
+                                  addWebsite: false,
+                                  newProject: false,
+                                  newProfile: false,
+                                  observer: false,
+                                  profilesHub: false
                                 }),
                                 addWebsite: e.target.checked
                               }
@@ -1112,16 +1112,16 @@ export function UnifiedSettingsModal({
                         <span>📁 + Project (Create Project / Workspace)</span>
                         <input
                           type="checkbox"
-                          checked={settings.sidebarButtons?.newProject ?? true}
+                          checked={settings.sidebarButtons?.newProject ?? false}
                           onChange={(e) =>
                             onChangeSettings({
                               sidebarButtons: {
                                 ...(settings.sidebarButtons ?? {
-                                  addWebsite: true,
-                                  newProject: true,
-                                  newProfile: true,
-                                  observer: true,
-                                  profilesHub: true
+                                  addWebsite: false,
+                                  newProject: false,
+                                  newProfile: false,
+                                  observer: false,
+                                  profilesHub: false
                                 }),
                                 newProject: e.target.checked
                               }
@@ -1134,16 +1134,16 @@ export function UnifiedSettingsModal({
                         <span>👤 + Profile (Create Profile / Account)</span>
                         <input
                           type="checkbox"
-                          checked={settings.sidebarButtons?.newProfile ?? true}
+                          checked={settings.sidebarButtons?.newProfile ?? false}
                           onChange={(e) =>
                             onChangeSettings({
                               sidebarButtons: {
                                 ...(settings.sidebarButtons ?? {
-                                  addWebsite: true,
-                                  newProject: true,
-                                  newProfile: true,
-                                  observer: true,
-                                  profilesHub: true
+                                  addWebsite: false,
+                                  newProject: false,
+                                  newProfile: false,
+                                  observer: false,
+                                  profilesHub: false
                                 }),
                                 newProfile: e.target.checked
                               }
@@ -1156,16 +1156,16 @@ export function UnifiedSettingsModal({
                         <span>🔭 Observer (Live Workspace &amp; Observer View)</span>
                         <input
                           type="checkbox"
-                          checked={settings.sidebarButtons?.observer ?? true}
+                          checked={settings.sidebarButtons?.observer ?? false}
                           onChange={(e) =>
                             onChangeSettings({
                               sidebarButtons: {
                                 ...(settings.sidebarButtons ?? {
-                                  addWebsite: true,
-                                  newProject: true,
-                                  newProfile: true,
-                                  observer: true,
-                                  profilesHub: true
+                                  addWebsite: false,
+                                  newProject: false,
+                                  newProfile: false,
+                                  observer: false,
+                                  profilesHub: false
                                 }),
                                 observer: e.target.checked
                               }
@@ -1178,16 +1178,16 @@ export function UnifiedSettingsModal({
                         <span>👥 Profiles (Profiles &amp; Accounts Management Hub)</span>
                         <input
                           type="checkbox"
-                          checked={settings.sidebarButtons?.profilesHub ?? true}
+                          checked={settings.sidebarButtons?.profilesHub ?? false}
                           onChange={(e) =>
                             onChangeSettings({
                               sidebarButtons: {
                                 ...(settings.sidebarButtons ?? {
-                                  addWebsite: true,
-                                  newProject: true,
-                                  newProfile: true,
-                                  observer: true,
-                                  profilesHub: true
+                                  addWebsite: false,
+                                  newProject: false,
+                                  newProfile: false,
+                                  observer: false,
+                                  profilesHub: false
                                 }),
                                 profilesHub: e.target.checked
                               }

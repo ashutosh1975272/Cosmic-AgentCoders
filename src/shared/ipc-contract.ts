@@ -283,19 +283,19 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   splitViewEnabled: false,
   notificationSound: false,
   recentWorkspaces: [],
-  sidebarLook: 'ancient',
+  sidebarLook: 'basic',
   showLookSwitcher: true,
   showRecentSection: true,
   showScrapeProgressLine: true,
-  showGoogleEmailInputInSidebar: true,
+  showGoogleEmailInputInSidebar: false,
   showProfileScopeSelector: false,
   showObserverViewHeader: false,
   sidebarButtons: {
-    addWebsite: true,
-    newProject: true,
-    newProfile: true,
-    observer: true,
-    profilesHub: true
+    addWebsite: false,
+    newProject: false,
+    newProfile: false,
+    observer: false,
+    profilesHub: false
   }
 }
 

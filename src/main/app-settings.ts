@@ -89,7 +89,7 @@ export function normalizeAppSettings(parsed: Partial<AppSettings>): AppSettings 
     showGoogleEmailInputInSidebar:
       typeof parsed.showGoogleEmailInputInSidebar === 'boolean'
         ? parsed.showGoogleEmailInputInSidebar
-        : DEFAULT_APP_SETTINGS.showGoogleEmailInputInSidebar ?? true,
+        : DEFAULT_APP_SETTINGS.showGoogleEmailInputInSidebar ?? false,
     showProfileScopeSelector:
       typeof parsed.showProfileScopeSelector === 'boolean'
         ? parsed.showProfileScopeSelector
