@@ -209,7 +209,7 @@ export class DashboardChatRetriever implements ProjectChatRetriever {
       {
         source: 'client',
         profileId: project.profileId,
-        teamId: project.teamId,
+        teamId: settings.client.teamId || project.teamId,
         channels: settings.client.channels
       }
     ]

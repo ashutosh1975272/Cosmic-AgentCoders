@@ -13,6 +13,7 @@ import type { AiSettingsService, ResolvedAiSettings } from './ai-settings'
 import type { MonitorStore } from './monitor-store'
 import type { WorkspaceMappingStore } from './workspace-mapping-store'
 import type { ProjectSource } from '../../shared/dashboard-contract'
+import { resolveProjectMessageSources } from './message-sources'
 import { maskToken, type TeamWorkspaceStore } from './team-workspace-store'
 
 export interface ResolvedProjectSettings {
@@ -126,12 +127,42 @@ export class ConfigService {
       }
     }
 
+    const resolvedSources = project
+      ? resolveProjectMessageSources(project, {
+          mappedTeamId: mappedWorkspaceId ?? project.teamId,
+          ourSlack: globalOurSlack
+            ? {
+                profileId: globalOurSlack.profileId,
+                teamId: globalOurSlack.teamId,
+                channels: globalOurSlack.channels
+              }
+            : null
+        })
+      : []
+    const clientChannels = resolvedSources
+      .filter((source) => source.role === 'client')
+      .flatMap((source) =>
+        source.channels.map((channel) => ({
+          channelId: channel.channelId,
+          channelName: channel.channelName
+        }))
+      )
+    const resolvedOurChannels = resolvedSources
+      .filter((source) => source.role === 'ours')
+      .flatMap((source) =>
+        source.channels.map((channel) => ({
+          channelId: channel.channelId,
+          channelName: channel.channelName
+        }))
+      )
+    const clientTeamId = mappedWorkspaceId ?? project?.teamId ?? ''
+
     return {
       client: {
         token: clientToken,
-        workspaceName: project?.teamName ?? null,
-        teamId: project?.teamId ?? '',
-        channels: project?.monitors ?? [],
+        workspaceName: mappedWorkspaceName ?? project?.teamName ?? null,
+        teamId: clientTeamId,
+        channels: clientChannels,
         source: project ? 'project' : 'none',
         mappedWorkspaceId,
         mappedWorkspaceName,
@@ -146,7 +177,7 @@ export class ConfigService {
         teamId: project?.ourSlackTokenKey
           ? (project.ourSlackTeamId ?? null)
           : (globalOurSlack?.teamId ?? null),
-        channels: ourSlackChannels,
+        channels: resolvedOurChannels.length > 0 ? resolvedOurChannels : ourSlackChannels,
         source: ourSlackSource
       },
       ai

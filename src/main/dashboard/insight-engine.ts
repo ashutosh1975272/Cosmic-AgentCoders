@@ -16,6 +16,7 @@ import type {
 import type { DashboardDeltaStore, DashboardStoredMessage } from './delta-store'
 import type { HistoryStore, InsightHistoryEntry } from './history-store'
 import { compareTs } from './delta-store'
+import type { ResolvedMessageSource } from './message-sources'
 
 export interface InsightEngineDeps {
   provider: NimProvider | null
@@ -23,6 +24,8 @@ export interface InsightEngineDeps {
   resolveProvider?: (projectId: string) => Promise<NimProvider | null>
   historyStore: HistoryStore
   deltaStore: DashboardDeltaStore
+  /** Source-aware reader: browser cards must include their selected channels. */
+  resolveSources?: (project: DashboardProject) => Promise<ResolvedMessageSource[]>
   /** users.list per token — name mapping for prompts (best effort). */
   fetchUsers?: (token: string) => Promise<Map<string, string>>
   /** log fn for observability */
@@ -38,6 +41,7 @@ export class InsightEngine {
   private readonly resolveProvider: ((projectId: string) => Promise<NimProvider | null>) | null
   private readonly historyStore: HistoryStore
   private readonly deltaStore: DashboardDeltaStore
+  private readonly resolveSources: ((project: DashboardProject) => Promise<ResolvedMessageSource[]>) | null
   private readonly fetchUsers: (token: string) => Promise<Map<string, string>>
   private readonly log: (msg: string) => void
 
@@ -46,6 +50,7 @@ export class InsightEngine {
     this.resolveProvider = deps.resolveProvider ?? null
     this.historyStore = deps.historyStore
     this.deltaStore = deps.deltaStore
+    this.resolveSources = deps.resolveSources ?? null
     this.fetchUsers = deps.fetchUsers ?? (async () => new Map())
     this.log = deps.log ?? (() => undefined)
   }
@@ -66,11 +71,35 @@ export class InsightEngine {
     sinceTs: string
   ): Promise<Array<{ msg: DashboardStoredMessage; channel: string }>> {
     const out: Array<{ msg: DashboardStoredMessage; channel: string }> = []
-    for (const monitor of project.monitors) {
-      const delta = await this.deltaStore.load(project.profileId, project.teamId, monitor.channelId)
-      for (const msg of delta?.messages ?? []) {
-        if (compareTs(msg.ts, sinceTs) > 0 && !msg.subtype && (msg.text ?? '').trim()) {
-          out.push({ msg, channel: monitor.channelName })
+    const sources = this.resolveSources
+      ? await this.resolveSources(project)
+      : [
+          {
+            source: 'client' as const,
+            profileId: project.profileId,
+            teamId: project.teamId,
+            role: 'client' as const,
+            origin: 'legacy' as const,
+            channels: project.monitors.map((monitor) => ({
+              channelId: monitor.channelId,
+              channelName: monitor.channelName,
+              kind: 'public' as const,
+              enabled: true
+            }))
+          }
+        ]
+
+    for (const workspace of sources) {
+      for (const channel of workspace.channels) {
+        const delta = await this.deltaStore.load(
+          workspace.profileId,
+          workspace.teamId,
+          channel.channelId
+        )
+        for (const msg of delta?.messages ?? []) {
+          if (compareTs(msg.ts, sinceTs) > 0 && !msg.subtype && (msg.text ?? '').trim()) {
+            out.push({ msg, channel: channel.channelName })
+          }
         }
       }
     }
@@ -106,7 +135,7 @@ export class InsightEngine {
   /** Refresh the insight for one project (post-sync). Returns updated snapshot. */
   async refresh(
     project: DashboardProject,
-    token: string,
+    token: string | null | undefined,
     baseSnapshot: DashboardProjectSnapshot,
     options?: { force?: boolean }
   ): Promise<DashboardProjectSnapshot> {
@@ -150,7 +179,9 @@ export class InsightEngine {
           minutesSince >= HEARTBEAT_MINUTES)
       if (due) {
         try {
-          const userNames = await this.fetchUsers(token)
+          const userNames = token
+            ? await this.fetchUsers(token)
+            : new Map<string, string>()
           const chatInput = this.toChatInput(raw, userNames, project)
           const messages = buildInsightMessages({
             projectName: project.name,

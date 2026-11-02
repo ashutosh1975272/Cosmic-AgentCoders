@@ -2,6 +2,7 @@ import { SlackPoller, isSlackAuthFailure } from './slack-poller'
 import { slackTokenKey } from './slack-throttle'
 import type { InsightEngine } from './insight-engine'
 import { SlackReaderView, type ScrapeStepEvent } from '../slack-reader/slack-reader-view'
+import { resolveProjectMessageSources, type ResolvedChannel } from './message-sources'
 import { RunLogStore } from './run-log-store'
 import type {
   DashboardCancelScrapePayload,
@@ -83,7 +84,7 @@ interface StoredWorkspace {
   source: DashboardSource
   profileId: string
   teamId: string
-  monitors: DashboardMonitor[]
+  channels: ResolvedChannel[]
 }
 
 /** v2.3 — lets the engine show the last AI insight without a network sync. */
@@ -135,7 +136,7 @@ export class DashboardSyncEngine {
     ((projectId: string) => Promise<InsightHistoryEntry[]>) | undefined
   private readonly viewedStore: { get(projectId: string): Promise<string | null> } | undefined
   private readonly metricsCache: Map<string, { key: string; value: DashboardMetrics }> = new Map()
-  private readonly onSynced: ((snapshots: DashboardProjectSnapshot[]) => void) | undefined
+  protected readonly onSynced: ((snapshots: DashboardProjectSnapshot[]) => void) | undefined
   private readonly getExistingBrowserView?: (profileId: string, appId: 'slack') => any
   private readonly getExistingCardView?: (projectId: string, appId: 'slack') => any
   private readonly getScrapePersonalDms: () => boolean | Promise<boolean>
@@ -157,7 +158,7 @@ export class DashboardSyncEngine {
   }
   private readonly progressCallbacks: Array<(payload: DashboardSyncProgressPayload) => void> = []
   /** per-project cached snapshot — rebuilt after any sync */
-  private readonly lastResults: Map<string, DashboardProjectSnapshot> = new Map()
+  protected readonly lastResults: Map<string, DashboardProjectSnapshot> = new Map()
 
   constructor(deps: DashboardSyncEngineDeps) {
     this.monitorStore = deps.monitorStore
@@ -326,42 +327,38 @@ export class DashboardSyncEngine {
     }
   }
 
-  /** Workspaces this card reads: its own (always) and ours (when connected). */
+  /**
+   * Workspaces this card reads: its selected sources and ours (when connected).
+   * This is the read-side twin of scrapeSource: browser cards read exactly the
+   * channels saved on their browser source, not the legacy monitors mirror.
+   */
   private async storedWorkspaces(
     project: DashboardProject
   ): Promise<{ workspaces: StoredWorkspace[]; error: string | null }> {
-    // Phase 3: if project is mapped to a workspace, use that workspace ID instead
-    // of the project's own teamId. Channels come from the project's own monitors.
-    let teamId = project.teamId
-    let profileId = project.profileId
+    let mappedTeamId = project.teamId
     if (this.workspaceMapping) {
       const mappedWorkspace = await this.workspaceMapping.getWorkspaceForProject(project.id)
-      if (mappedWorkspace) {
-        teamId = mappedWorkspace
-      }
+      if (mappedWorkspace) mappedTeamId = mappedWorkspace
     }
-    const workspaces: StoredWorkspace[] = [
-      {
-        source: 'client',
-        profileId,
-        teamId,
-        monitors: project.monitors
-      }
-    ]
-    // project-level override channels take precedence over global pinned channels
+
     const { connection, error } = await this.ourWorkspace()
-    const oursChannels =
-      project.ourSlackChannels && project.ourSlackChannels.length > 0
-        ? project.ourSlackChannels
-        : (connection?.channels ?? [])
-    if (oursChannels.length > 0) {
-      workspaces.push({
-        source: 'ours',
-        profileId: connection?.profileId ?? project.profileId,
-        teamId: connection?.teamId ?? project.teamId,
-        monitors: oursChannels
-      })
-    }
+    const resolved = resolveProjectMessageSources(project, {
+      mappedTeamId,
+      ourSlack: connection
+        ? {
+            profileId: connection.profileId,
+            teamId: connection.teamId,
+            channels: connection.channels
+          }
+        : null
+    })
+    const workspaces: StoredWorkspace[] = resolved.map((workspace) => ({
+      source: workspace.source,
+      profileId: workspace.profileId,
+      teamId: workspace.teamId,
+      channels: workspace.channels
+    }))
+
     // token resolution handled in tokenFor via override; keep connection for error
     if (error) return { workspaces, error }
     return { workspaces, error: null }
@@ -656,7 +653,34 @@ export class DashboardSyncEngine {
       else if (result.status === 'partial' && status === 'success') status = 'partial'
     }
 
+    // A scrape can change messages, channel metadata, and metrics. Rebuild
+    // before returning so manual and scheduled runs both publish fresh data.
+    await this.refreshProjectSnapshot(projectId).catch((err) => {
+      this.log(`[dashboard] post-scrape snapshot refresh failed (${projectId}): ${String(err)}`)
+    })
+
     return { runId: lastRunId, channelsRead, newMessages, status, error: runError }
+  }
+
+  /**
+   * Force a fresh snapshot from stored data after a scrape, bypassing the
+   * lastResults cache. This is what makes browser scrapes visible to the
+   * Dashboard without a token sync.
+   */
+  async refreshProjectSnapshot(projectId: string): Promise<DashboardProjectSnapshot | null> {
+    this.lastResults.delete(projectId)
+    this.metricsCache.delete(projectId)
+    const snapshots = await this.buildSnapshot(projectId)
+    const snapshot = snapshots[0] ?? null
+    if (snapshot) {
+      this.lastResults.set(projectId, snapshot)
+      try {
+        this.onSynced?.([snapshot])
+      } catch (err) {
+        this.logInfo(`[dashboard] post-scrape hook failed: ${String(err)}`)
+      }
+    }
+    return snapshot
   }
 
   /**
@@ -1231,11 +1255,11 @@ export class DashboardSyncEngine {
     const out: DashboardChannelDelta[] = []
 
     for (const workspace of workspaces) {
-      for (const monitor of workspace.monitors) {
+      for (const channel of workspace.channels) {
         const d = await this.deltaStore.load(
           workspace.profileId,
           workspace.teamId,
-          monitor.channelId
+          channel.channelId
         )
         if (d) out.push(this.perChannelDelta(d, workspace.source))
       }
@@ -1261,11 +1285,11 @@ export class DashboardSyncEngine {
     const { workspaces } = await this.storedWorkspaces(project)
     const out: DashboardStoredMessage[] = []
     for (const workspace of workspaces) {
-      for (const monitor of workspace.monitors) {
+      for (const channel of workspace.channels) {
         const messages = await this.deltaStore.messagesSince(
           workspace.profileId,
           workspace.teamId,
-          monitor.channelId
+          channel.channelId
         )
         for (const message of messages) {
           out.push(message.source ? message : { ...message, source: workspace.source })
@@ -1300,7 +1324,7 @@ export class DashboardInsightSyncEngine extends DashboardSyncEngine {
   private async enrich(
     project: DashboardProject,
     snapshot: DashboardProjectSnapshot,
-    token: string
+    token: string | null
   ): Promise<DashboardProjectSnapshot> {
     if (!this.insightEngine) return snapshot
     try {
@@ -1310,6 +1334,10 @@ export class DashboardInsightSyncEngine extends DashboardSyncEngine {
     }
   }
 
+  /**
+   * Browser-only cards have no Slack token. They still get a heuristic insight
+   * from the messages they scraped, so this must not skip enrichment.
+   */
   override async syncProject(
     projectId: string,
     historyCache?: CycleHistoryCache,
@@ -1320,12 +1348,50 @@ export class DashboardInsightSyncEngine extends DashboardSyncEngine {
     const projects = await this.monitorStore.listProjects()
     const project = projects.find((p) => p.id === projectId)
     if (!project) return snapshot
-    const token = await this.tokenFor(project)
-    if (!token) {
-      this.logInfo(`[dashboard] no token for ${project.name} — insight refresh skipped`)
-      return snapshot
+    const token = await this.tokenFor(project).catch(() => null)
+    const enriched = await this.enrich(project, snapshot, token)
+    this.lastResults.set(projectId, enriched)
+    return enriched
+  }
+
+  override async syncProjectSource(
+    projectId: string,
+    sourceId?: string,
+    extra: { trigger?: ScrapeTrigger; options?: DashboardScrapeOptions } = {}
+  ): Promise<{
+    runId: string
+    channelsRead: number
+    newMessages: number
+    status: ScrapeRunStatus
+    error?: string
+  }> {
+    const result = await super.syncProjectSource(projectId, sourceId, extra)
+    await this.refreshInsightForProject(projectId).catch((err) => {
+      this.logInfo(`[dashboard] post-scrape insight refresh failed (${projectId}): ${String(err)}`)
+    })
+    return result
+  }
+
+  /** Refresh insight from stored messages, with or without a token. */
+  async refreshInsightForProject(
+    projectId: string
+  ): Promise<DashboardProjectSnapshot | null> {
+    if (!this.insightEngine) return null
+    const projects = await this.monitorStore.listProjects()
+    const project = projects.find((p) => p.id === projectId)
+    if (!project) return null
+    const token = await this.tokenFor(project).catch(() => null)
+    const snapshots = await this.buildSnapshot(projectId)
+    const snapshot = snapshots[0]
+    if (!snapshot) return null
+    const enriched = await this.enrich(project, snapshot, token)
+    this.lastResults.set(projectId, enriched)
+    try {
+      this.onSynced?.([enriched])
+    } catch (err) {
+      this.logInfo(`[dashboard] post-insight hook failed: ${String(err)}`)
     }
-    return await this.enrich(project, snapshot, token)
+    return enriched
   }
 }
 

@@ -8,6 +8,7 @@ import { APP_BUNDLE_ID, APP_DISPLAY_NAME } from '../shared/brand'
 import { IpcChannels } from '../shared/ipc-contract'
 import type {
   DashboardDigest,
+  DashboardProject,
   DashboardTeamWorkspaceCandidate,
   RecentActivity
 } from '../shared/dashboard-contract'
@@ -42,6 +43,7 @@ import { AiSettingsService, DEFAULT_EMBEDDING_MODEL } from './dashboard/ai-setti
 import { ConfigService } from './dashboard/config-service'
 import { migrateConfigV1 } from './dashboard/config-migration'
 import { InsightEngine } from './dashboard/insight-engine'
+import { resolveProjectMessageSources } from './dashboard/message-sources'
 import { SlackPoller } from './dashboard/slack-poller'
 import { loadAppEnv } from './load-app-env'
 import { log } from './logging'
@@ -356,6 +358,20 @@ if (!gotSingleInstanceLock) {
       workspaceMapping: workspaceMappingStore,
       oauthTokenProvider: { tryGet: (profileId, teamId) => tokenStore.tryGet(profileId, teamId) }
     })
+    const resolveProjectSources = async (project: DashboardProject) => {
+      const mappedWorkspace = await workspaceMappingStore.getWorkspaceForProject(project.id)
+      const connection = await teamWorkspaceReader.getConnection().catch(() => null)
+      return resolveProjectMessageSources(project, {
+        mappedTeamId: mappedWorkspace ?? project.teamId,
+        ourSlack: connection
+          ? {
+              profileId: connection.profileId,
+              teamId: connection.teamId,
+              channels: connection.channels
+            }
+          : null
+      })
+    }
     // D7 — an older build could write a secret as plaintext before the save path
     // blocked it. Seal anything it left behind, once, before any sync runs.
     await Promise.all([
@@ -382,6 +398,7 @@ if (!gotSingleInstanceLock) {
       resolveProvider: (projectId: string) => aiSettings.getProvider(projectId),
       historyStore: dashboardHistoryStore,
       deltaStore: dashboardDeltaStore,
+      resolveSources: resolveProjectSources,
       fetchUsers: (token: string) => new SlackPoller().usersList(token),
       log: (msg) => log.info(msg)
     })
@@ -444,6 +461,7 @@ if (!gotSingleInstanceLock) {
       buildRecentFeed({
         monitorStore: dashboardMonitorStore,
         deltaStore: dashboardDeltaStore,
+        resolveSources: resolveProjectSources,
         getLastInsight: (projectId: string) => insightEngine.existingInsight(projectId),
         getNewMessageCount: (projectId: string) => dashboardEngine.newMessageCountFor(projectId),
         getLastViewedAt: (projectId: string) => dashboardViewedStore.get(projectId)

@@ -15,6 +15,7 @@ import type { MonitorStore } from './monitor-store'
 import { maskKey } from './ai-settings-store'
 import { SlackPoller } from './slack-poller'
 import { buildProjectActivity, type ActivityInputRow } from './activity-summary'
+import { resolveProjectMessageSources } from './message-sources'
 
 /** Minimal poller surface the chat service needs (fakeable in tests). */
 export interface ChatPoller {
@@ -190,12 +191,21 @@ export class DashboardChatService {
         monitors: connection.channels
       }
     }
+    const resolved = resolveProjectMessageSources(project)
+    const clientSource = resolved.find((workspace) => workspace.role === 'client')
     return {
       source: 'client',
-      profileId: project.profileId,
-      teamId: project.teamId,
+      profileId: clientSource?.profileId ?? project.profileId,
+      teamId: clientSource?.teamId ?? project.teamId,
       token: await this.tokenFor(project),
-      monitors: project.monitors
+      monitors: resolved
+        .filter((workspace) => workspace.role === 'client')
+        .flatMap((workspace) =>
+          workspace.channels.map((channel) => ({
+            channelId: channel.channelId,
+            channelName: channel.channelName
+          }))
+        )
     }
   }
 

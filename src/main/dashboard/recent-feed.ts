@@ -11,6 +11,7 @@
  */
 
 import type {
+  DashboardProject,
   InsightStatus,
   RecentActivity,
   RecentActivityKind
@@ -18,12 +19,15 @@ import type {
 import type { DashboardDeltaStore, DashboardStoredMessage } from './delta-store'
 import type { MonitorStore } from './monitor-store'
 import type { ProjectInsight } from '../../shared/dashboard-contract'
+import type { ResolvedMessageSource } from './message-sources'
 import { compareTs } from './delta-store'
 import { isNoise } from './summary-engine'
 
 export interface RecentFeedDeps {
   monitorStore: MonitorStore
   deltaStore: DashboardDeltaStore
+  /** Source-aware reader for browser cards. */
+  resolveSources?: (project: DashboardProject) => Promise<ResolvedMessageSource[]>
   /** last insight per project (status, needsReply, recentLine, statusChange) */
   getLastInsight: (projectId: string) => Promise<ProjectInsight | null>
   /** how many messages arrived with the last sync (activity signal) */
@@ -95,14 +99,37 @@ export async function buildRecentFeed(deps: RecentFeedDeps): Promise<RecentActiv
     // newest meaningful message of this project (own workspace bucket only)
     let newest: { msg: DashboardStoredMessage; channel: string } | null = null
     let unread = 0
-    for (const monitor of project.monitors) {
-      const delta = await deps.deltaStore.load(project.profileId, project.teamId, monitor.channelId)
-      for (const msg of delta?.messages ?? []) {
-        if (isNoise(msg)) continue
-        if (!newest || compareTs(msg.ts, newest.msg.ts) > 0) {
-          newest = { msg, channel: monitor.channelName }
+    const sources = deps.resolveSources
+      ? await deps.resolveSources(project)
+      : [
+          {
+            source: 'client' as const,
+            profileId: project.profileId,
+            teamId: project.teamId,
+            role: 'client' as const,
+            origin: 'legacy' as const,
+            channels: project.monitors.map((monitor) => ({
+              channelId: monitor.channelId,
+              channelName: monitor.channelName,
+              kind: 'public' as const,
+              enabled: true
+            }))
+          }
+        ]
+    for (const workspace of sources) {
+      for (const channel of workspace.channels) {
+        const delta = await deps.deltaStore.load(
+          workspace.profileId,
+          workspace.teamId,
+          channel.channelId
+        )
+        for (const msg of delta?.messages ?? []) {
+          if (isNoise(msg)) continue
+          if (!newest || compareTs(msg.ts, newest.msg.ts) > 0) {
+            newest = { msg, channel: channel.channelName }
+          }
+          if (Number.isFinite(viewedMs) && Number(msg.ts) * 1000 > viewedMs) unread += 1
         }
-        if (Number.isFinite(viewedMs) && Number(msg.ts) * 1000 > viewedMs) unread += 1
       }
     }
 
