@@ -956,6 +956,29 @@ export class ProfileStore {
     return updated
   }
 
+  async setAvailableWorkspaces(
+    profileId: string,
+    appId: AppId,
+    workspaces: AvailableWorkspace[]
+  ): Promise<Profile> {
+    const data = await this.read()
+    const index = data.profiles.findIndex((p) => p.id === profileId)
+    if (index < 0) {
+      throw new Error(`Profile not found: ${profileId}`)
+    }
+    const current = data.profiles[index]
+    const app = current.apps[appId]
+    const pinnedWorkspaces = reconcilePins(workspaces, app.pinnedWorkspaces)
+    const updated = updateApp(current, appId, {
+      ...app,
+      availableWorkspaces: workspaces,
+      pinnedWorkspaces
+    })
+    data.profiles[index] = updated
+    await this.write(data)
+    return updated
+  }
+
   async mergeAvailable(
     profileId: string,
     appId: AppId,

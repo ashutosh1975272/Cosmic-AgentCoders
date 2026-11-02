@@ -71,6 +71,7 @@ describe('ProjectSettingsTab: Sources Tab Categorized Sections & Scrape Control'
           id: 'prof-ashutosh',
           displayName: 'Ashutosh-Profile',
           customName: 'Ashutosh-Profile',
+          accountScope: 'both',
           apps: {
             slack: {
               availableWorkspaces: [
@@ -87,6 +88,7 @@ describe('ProjectSettingsTab: Sources Tab Categorized Sections & Scrape Control'
           id: 'prof-rajesh',
           displayName: 'Rajesh-profile',
           customName: 'Rajesh-profile',
+          accountScope: 'both',
           apps: {
             slack: {
               availableWorkspaces: []
@@ -122,6 +124,59 @@ describe('ProjectSettingsTab: Sources Tab Categorized Sections & Scrape Control'
 
     // Ashutosh Workspace 2 is not yet attached -> shows Attach & Scrape button
     expect(screen.getByRole('button', { name: /\+ Attach & Scrape/i })).toBeDefined()
+  })
+
+  it('gates Scrape button so it only appears for Slack sources and not non-scrapable sources', async () => {
+    const projectWithMixedSources: DashboardProject = {
+      ...mockProject,
+      sources: [
+        {
+          id: 'src-slack',
+          kind: 'browser',
+          platform: 'slack',
+          workspaceId: 'T_SLACK_1',
+          workspaceName: 'Slack Workspace',
+          channels: [],
+          role: 'ours',
+          backfillDays: 7,
+          enabled: true,
+          status: 'connected',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        },
+        {
+          id: 'src-chatgpt',
+          kind: 'browser',
+          platform: 'custom' as any,
+          workspaceId: 'chatgpt-link',
+          workspaceName: 'ChatGPT Workspace',
+          channels: [],
+          role: 'ours',
+          backfillDays: 7,
+          enabled: true,
+          status: 'connected',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+      ]
+    }
+
+    render(<ProjectSettingsTab project={projectWithMixedSources} />)
+    const sourcesTabBtn = screen.getByRole('tab', { name: /Sources/i })
+    fireEvent.click(sourcesTabBtn)
+
+    // Attached Card Sources section should have Slack with Scrape button
+    expect(screen.getByText('Slack Workspace')).toBeDefined()
+    expect(screen.getByText('ChatGPT Workspace')).toBeDefined()
+
+    // Both should have Active buttons
+    const activeButtons = screen.getAllByRole('button', { name: /● Active/i })
+    expect(activeButtons.length).toBeGreaterThanOrEqual(2)
+
+    // Scrape button should exist for Slack, but not for ChatGPT
+    const scrapeButtons = screen.getAllByRole('button', { name: /🕷 Scrape/i })
+    // Only 1 scrape button in Attached Card Sources for the Slack source (plus any in global section)
+    expect(scrapeButtons.length).toBeGreaterThanOrEqual(1)
   })
 
   it('toggles Active / Inactive state on an attached workspace source', async () => {

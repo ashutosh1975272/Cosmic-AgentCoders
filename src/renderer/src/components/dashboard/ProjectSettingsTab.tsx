@@ -526,12 +526,22 @@ export default function ProjectSettingsTab({
                     </span>
                   </div>
 
-                  {profiles.length === 0 || profiles.every((p) => (p.apps?.slack?.availableWorkspaces?.length ?? 0) === 0 && (p.customLinks?.length ?? 0) === 0) ? (
-                    <div style={{ padding: 14, border: '1px dashed var(--border)', borderRadius: 8, color: 'var(--text-muted)', fontSize: 13, textAlign: 'center' }}>
-                      No connected Slack workspaces or links found in global profiles.
-                    </div>
-                  ) : (
-                    profiles.map((p) => {
+                  {(() => {
+                    const globalProfiles = profiles.filter(
+                      (p) => p.isGlobalProfile || p.accountScope === 'global' || p.accountScope === 'both'
+                    )
+                    const hasAny = globalProfiles.some(
+                      (p) => (p.apps?.slack?.availableWorkspaces?.length ?? 0) > 0 || (p.customLinks?.length ?? 0) > 0
+                    )
+                    if (!hasAny) {
+                      return (
+                        <div style={{ padding: 14, border: '1px dashed var(--border)', borderRadius: 8, color: 'var(--text-muted)', fontSize: 13, textAlign: 'center' }}>
+                          No connected Slack workspaces or links found in global profiles.
+                        </div>
+                      )
+                    }
+
+                    return globalProfiles.map((p) => {
                       const pName = p.customName || p.displayName
                       const slackWorkspaces = p.apps?.slack?.availableWorkspaces ?? []
                       const customLinks = p.customLinks ?? []
@@ -668,7 +678,7 @@ export default function ProjectSettingsTab({
                         </div>
                       )
                     })
-                  )}
+                  })()}
                 </div>
 
                 {/* 2. MY ACCOUNTS & 3. CLIENT ACCOUNTS (Attached Card Sources) */}
@@ -719,7 +729,8 @@ export default function ProjectSettingsTab({
                           </div>
 
                           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                            {src.kind === 'browser' && (
+                            {/* Capability Gating: ONLY show Scrape on Slack browser workspaces where our scraper is implemented */}
+                            {src.kind === 'browser' && (src.platform === 'slack' || (!src.platform && src.workspaceId?.startsWith('T'))) ? (
                               <button
                                 type="button"
                                 className="dash-subtle"
@@ -735,7 +746,7 @@ export default function ProjectSettingsTab({
                               >
                                 {isScraping ? '⏳ Scraping…' : '🕷 Scrape'}
                               </button>
-                            )}
+                            ) : null}
                             <button
                               type="button"
                               style={{

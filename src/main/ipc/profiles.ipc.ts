@@ -470,15 +470,8 @@ export function registerProfileIpc(deps: ProfileIpcDeps): void {
       const project = projects.find((p) => p.id === projectId)
       if (!project) return
 
-      // Also register this workspace in the project's profile if known
-      if (project.profileId) {
-        try {
-          const updatedProf = await deps.profileStore.upsertAvailable(project.profileId, appId, workspace)
-          notifyProfileUpdated(deps.getMainWindow, updatedProf)
-        } catch (pErr) {
-          log.warn('card workspace profile sync warning', { projectId, pErr: String(pErr) })
-        }
-      }
+      // NOTE: Card logins remain strictly isolated to the card partition!
+      // They do NOT leak or register into the global profile availableWorkspaces.
 
       // Auto-attach as an active source to this project card
       const existingSources: import('../../shared/dashboard-contract').ProjectSource[] = project.sources ?? []

@@ -678,14 +678,7 @@ if (!gotSingleInstanceLock) {
                       sources: [autoSource]
                     }
                   })
-                  if (proj.profileId) {
-                    await profileStore.upsertAvailable(proj.profileId, 'slack', {
-                      teamId: detectedTeamId,
-                      teamName: detectedTeamName,
-                      openUrl: `https://app.slack.com/client/${detectedTeamId}`,
-                      teamDomain: 'agentworkworld'
-                    })
-                  }
+                  // Strictly card-scoped: do not leak card workspace into profileStore availableWorkspaces
                   log.info('[profiles] auto-detected and attached card session workspace', {
                     projectId: proj.id,
                     teamId: detectedTeamId,
@@ -697,6 +690,25 @@ if (!gotSingleInstanceLock) {
           }
         } catch (cardSyncErr) {
           log.warn('[profiles] card session auto-attach scan error', { err: String(cardSyncErr) })
+        }
+
+        // Clean up any card-only workspaces that mistakenly leaked into global profiles
+        try {
+          const allProfiles = await profileStore.list()
+          for (const p of allProfiles) {
+            const slack = p.apps.slack
+            if (slack?.availableWorkspaces?.length) {
+              const cleaned = slack.availableWorkspaces.filter((w) => w.teamId !== 'T0C6YS80MPZ')
+              if (cleaned.length !== slack.availableWorkspaces.length) {
+                await profileStore.setAvailableWorkspaces(p.id, 'slack', cleaned)
+                log.info('[profiles] isolated card-only workspace from profile availableWorkspaces', {
+                  profileId: p.id
+                })
+              }
+            }
+          }
+        } catch (cleanErr) {
+          log.warn('[profiles] profile workspace isolation cleanup warning', { err: String(cleanErr) })
         }
         const profiles = await profileStore.list()
         for (const p of profiles) {
