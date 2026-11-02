@@ -938,9 +938,9 @@ function App(): React.JSX.Element {
               activeCustomLinkId={activeCustomLinkId}
               onSelectCustomLink={handleSelectCustomLink}
               sidebarLook={settings.sidebarLook ?? 'basic'}
-              showLookSwitcher={settings.showLookSwitcher ?? true}
+              showLookSwitcher={settings.showLookSwitcher ?? false}
               showRecentSection={settings.showRecentSection ?? true}
-              showGoogleEmailInputInSidebar={settings.showGoogleEmailInputInSidebar ?? false}
+              showGoogleEmailInputInSidebar={settings.showGoogleEmailInputInSidebar ?? true}
               showObserverViewHeader={settings.showObserverViewHeader ?? false}
               baseAppLayout={settings.baseAppLayout ?? 'standard'}
               showSidebarItemActions={settings.showSidebarItemActions ?? true}

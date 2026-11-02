@@ -284,10 +284,10 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   notificationSound: false,
   recentWorkspaces: [],
   sidebarLook: 'basic',
-  showLookSwitcher: true,
+  showLookSwitcher: false,
   showRecentSection: true,
   showScrapeProgressLine: true,
-  showGoogleEmailInputInSidebar: false,
+  showGoogleEmailInputInSidebar: true,
   showProfileScopeSelector: false,
   showObserverViewHeader: false,
   sidebarButtons: {
