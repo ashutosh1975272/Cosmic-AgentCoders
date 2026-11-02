@@ -112,16 +112,16 @@ export default function AiSettingsForm({ projectId }: AiSettingsFormProps): Reac
 
   const modelOptions = useMemo(() => {
     const all = new Set(models)
-    if (view?.effective.chatModel) all.add(view.effective.chatModel)
-    const stored = isProject ? view?.project?.model : view?.global.model
+    if (view?.effective?.chatModel) all.add(view.effective.chatModel)
+    const stored = isProject ? view?.project?.model : view?.global?.model
     if (stored) all.add(stored)
     return Array.from(all).sort()
   }, [models, view, isProject])
 
   const embeddingOptions = useMemo(() => {
     const all = new Set(embeddingModels)
-    if (view?.effective.embeddingModel) all.add(view.effective.embeddingModel)
-    const stored = isProject ? view?.project?.embeddingModel : view?.global.embeddingModel
+    if (view?.effective?.embeddingModel) all.add(view.effective.embeddingModel)
+    const stored = isProject ? view?.project?.embeddingModel : view?.global?.embeddingModel
     if (stored) all.add(stored)
     return Array.from(all).sort()
   }, [embeddingModels, view, isProject])
@@ -139,7 +139,7 @@ export default function AiSettingsForm({ projectId }: AiSettingsFormProps): Reac
     )
 
   const keyHint = ((): string => {
-    if (!view) return ''
+    if (!view || !view.effective) return ''
     if (isProject && useGlobal) {
       if (view.effective.keySource === 'none') return 'No key configured anywhere — AI stays off.'
       return `This project uses the ${KEY_SOURCE_LABEL[view.effective.keySource]} ${view.effective.apiKeyMask ?? ''}`.trim()
@@ -276,14 +276,14 @@ export default function AiSettingsForm({ projectId }: AiSettingsFormProps): Reac
 
       {isProject && useGlobal && view ? (
         <div style={{ padding: '6px 0', fontSize: '13px', color: 'var(--text-muted)' }}>
-          Using global key: <span className="proj-token-chip">{view.global.apiKeyMask || '••••'}</span> · Global model: <span style={{ color: 'var(--text)' }}>{view.global.model || 'nvidia/nemotron-3.5-super-vl-120b-a12b'}</span>
+          Using global key: <span className="proj-token-chip">{view.global?.apiKeyMask || '••••'}</span> · Global model: <span style={{ color: 'var(--text)' }}>{view.global?.model || 'nvidia/nemotron-3.5-super-vl-120b-a12b'}</span>
         </div>
       ) : null}
 
       {projectOverrideActive && view ? (
         <div className="ai-settings-override" data-testid="ai-project-override">
           <span>
-            <b>Project override is active</b> — chat uses {view.effective.chatModel}.
+            <b>Project override is active</b> — chat uses {view.effective?.chatModel}.
           </span>
           <button
             type="button"
@@ -367,14 +367,18 @@ export default function AiSettingsForm({ projectId }: AiSettingsFormProps): Reac
 
       <div className="ai-settings-effective" data-testid="ai-effective">
         <span className="ai-settings-label">Effective now</span>
-        <b>{view ? `${view.effective.chatModel} · ${view.effective.embeddingModel}` : '…'}</b>
+        <b>
+          {view?.effective
+            ? `${view.effective.chatModel} · ${view.effective.embeddingModel}`
+            : '…'}
+        </b>
         <span className="ai-settings-hint">
-          Chat: {SOURCE_LABEL[view?.effective.chatModelSource ?? 'none']} · Embedding:{' '}
-          {SOURCE_LABEL[view?.effective.embeddingModelSource ?? 'none']} ·{' '}
-          {KEY_SOURCE_LABEL[view?.effective.keySource ?? 'none']}
-          {view?.effective.apiKeyMask ? ` ${view.effective.apiKeyMask}` : ''}
+          Chat: {SOURCE_LABEL[view?.effective?.chatModelSource ?? 'none']} · Embedding:{' '}
+          {SOURCE_LABEL[view?.effective?.embeddingModelSource ?? 'none']} ·{' '}
+          {KEY_SOURCE_LABEL[view?.effective?.keySource ?? 'none']}
+          {view?.effective?.apiKeyMask ? ` ${view.effective.apiKeyMask}` : ''}
         </span>
-        {view?.global.lastVerifiedAt ? (
+        {view?.global?.lastVerifiedAt ? (
           <span className="ai-settings-hint">
             Last checked {new Date(view.global.lastVerifiedAt).toLocaleString()}
           </span>

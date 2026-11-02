@@ -60,7 +60,12 @@ describe('ProjectSettingsTab: Sources Tab Categorized Sections & Scrape Control'
         upsertProject: upsertProjectMock,
         updateSource: updateSourceMock,
         discoverSourceChannels: vi.fn().mockResolvedValue({ channels: [] }),
-        getRunLogs: vi.fn().mockResolvedValue([])
+        getRunLogs: vi.fn().mockResolvedValue([]),
+        aiGetConfigView: vi.fn().mockResolvedValue({
+          global: { model: 'nvidia/nemotron-3.5-super-vl-120b-a12b', apiKeyMask: '••••' },
+          project: null,
+          effective: { chatModel: 'nvidia/nemotron-3.5-super-vl-120b-a12b', embeddingModel: 'nvidia/nv-embed-v1', keySource: 'global', apiKeyMask: '••••' }
+        })
       }
     } as any
 
@@ -254,6 +259,36 @@ describe('ProjectSettingsTab: Sources Tab Categorized Sections & Scrape Control'
         })
       )
       expect(syncSourceMock).not.toHaveBeenCalled()
+    })
+  })
+
+  it('automatically triggers the channel picker modal for unreviewed sources', async () => {
+    const unreviewedProject = {
+      ...mockProject,
+      sources: [
+        {
+          id: 'src-unreviewed-1',
+          kind: 'browser' as const,
+          platform: 'slack' as const,
+          profileId: 'prof-ashutosh',
+          workspaceId: 'T_UNREVIEWED',
+          workspaceName: 'Unreviewed Workspace',
+          channels: [],
+          role: 'ours' as const,
+          enabled: true,
+          backfillDays: 7 as const,
+          status: 'connected' as const,
+          selectionMode: 'include' as const,
+          createdAt: '2026-11-02T10:00:00.000Z',
+          updatedAt: '2026-11-02T10:00:00.000Z'
+        }
+      ]
+    }
+
+    render(<ProjectSettingsTab project={unreviewedProject} />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /select channels to scrape/i })).toBeDefined()
     })
   })
 })

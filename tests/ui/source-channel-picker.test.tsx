@@ -89,4 +89,30 @@ describe('SourceChannelPicker', () => {
       )
     ).toEqual(['C1'])
   })
+
+  it('renders DMs by default without search bar and automatically sets allowDms on when a DM is selected', async () => {
+    render(
+      <SourceChannelPicker projectId="proj-1" source={source} open onClose={vi.fn()} />
+    )
+
+    await screen.findByText(/general/i)
+    // No search input rendered
+    expect(screen.queryByPlaceholderText(/search/i)).toBeNull()
+
+    // DMs are visible by default
+    expect(screen.getByText(/Priya/i)).toBeDefined()
+
+    // Select DM Priya
+    fireEvent.click(screen.getByLabelText(/Priya/i))
+    fireEvent.click(screen.getByRole('button', { name: /save channel selection/i }))
+
+    await waitFor(() => expect(updateSource).toHaveBeenCalledTimes(1))
+    const payload = updateSource.mock.calls[0]![0]
+    expect(payload.patch.allowDms).toBe('on')
+    expect(
+      payload.patch.channels.filter((channel: { enabled: boolean }) => channel.enabled).map(
+        (channel: { id: string }) => channel.id
+      )
+    ).toEqual(['D1'])
+  })
 })

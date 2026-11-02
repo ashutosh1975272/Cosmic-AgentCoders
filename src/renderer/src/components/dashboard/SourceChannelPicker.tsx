@@ -37,20 +37,16 @@ export function SourceChannelPicker({
   const [selectionMode, setSelectionMode] = useState<ProjectSourceSelectionMode>(
     source.selectionMode ?? 'include'
   )
-  const [includeDms, setIncludeDms] = useState(source.allowDms === 'on')
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [query, setQuery] = useState('')
 
   useEffect(() => {
     if (!open) return
     let alive = true
     setLoading(true)
     setError(null)
-    setQuery('')
     setSelectionMode(source.selectionMode ?? 'include')
-    setIncludeDms(source.allowDms === 'on')
     const existing = new Map(source.channels.map((channel) => [channel.id, channel]))
     setSelected(
       new Set(
@@ -98,26 +94,17 @@ export function SourceChannelPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, projectId, source.id])
 
-  const visibleChannels = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-    return channels.filter((channel) => {
-      if (!includeDms && (channel.isDm || channel.kind === 'dm')) return false
-      if (!needle) return true
-      return (channel.name || channel.id).toLowerCase().includes(needle)
-    })
-  }, [channels, includeDms, query])
-
   const grouped = useMemo(() => {
     const publicChannels: ProjectSourceChannel[] = []
     const privateChannels: ProjectSourceChannel[] = []
     const dms: ProjectSourceChannel[] = []
-    for (const channel of visibleChannels) {
+    for (const channel of channels) {
       if (channel.isDm || channel.kind === 'dm') dms.push(channel)
       else if (channel.isPrivate || channel.kind === 'private') privateChannels.push(channel)
       else publicChannels.push(channel)
     }
     return { publicChannels, privateChannels, dms }
-  }, [visibleChannels])
+  }, [channels])
 
   const toggle = (channelId: string): void => {
     setSelected((current) => {
@@ -144,6 +131,9 @@ export function SourceChannelPicker({
     setError(null)
     try {
       const fullList = channels.length > 0 ? channels : source.channels
+      const hasDmsSelected = fullList.some(
+        (channel) => selected.has(channel.id) && (channel.isDm || channel.kind === 'dm')
+      )
       const nextChannels = fullList.map((channel) => ({
         ...channel,
         enabled: selected.has(channel.id)
@@ -155,7 +145,7 @@ export function SourceChannelPicker({
           channels: nextChannels,
           channelsReviewedAt: new Date().toISOString(),
           selectionMode,
-          allowDms: includeDms ? 'on' : 'off'
+          allowDms: hasDmsSelected ? 'on' : 'off'
         }
       })
       onSaved?.()
@@ -285,25 +275,20 @@ export function SourceChannelPicker({
             : 'Ticked channels are skipped. Every other visible channel is read.'}
         </p>
 
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 14, flexWrap: 'wrap' }}>
-          <input
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search channels…"
-            style={{ flex: 1, minWidth: 200, fontSize: 12, padding: '7px 10px' }}
-          />
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-            <input
-              type="checkbox"
-              checked={includeDms}
-              onChange={(event) => setIncludeDms(event.target.checked)}
-            />
-            Include DMs
-          </label>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-            {selected.size} ticked · {visibleChannels.length} visible
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            <b style={{ color: '#f8fafc' }}>{selected.size}</b> selected · <b style={{ color: '#f8fafc' }}>{channels.length}</b> total channels &amp; DMs
           </span>
+          {selected.size > 0 && (
+            <button
+              type="button"
+              className="dash-subtle"
+              style={{ fontSize: 11, padding: '2px 8px' }}
+              onClick={() => setSelected(new Set())}
+            >
+              Clear all
+            </button>
+          )}
         </div>
 
         {loading ? (
@@ -329,9 +314,7 @@ export function SourceChannelPicker({
             ) : null}
             {renderGroup('Public channels', grouped.publicChannels, 'No public channels visible.')}
             {renderGroup('Private channels', grouped.privateChannels, 'No private channels visible.')}
-            {includeDms
-              ? renderGroup('Direct messages', grouped.dms, 'No DMs visible in this session.')
-              : null}
+            {renderGroup('Direct messages (DMs)', grouped.dms, 'No direct messages found in this session.')}
           </>
         )}
 

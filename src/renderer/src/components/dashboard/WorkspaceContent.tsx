@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react'
 import type { CardView, CardSummary } from './card-view'
 import type {
   DashboardProject,
-  DashboardProjectSnapshot
+  DashboardProjectSnapshot,
+  ProjectSource
 } from '../../../../shared/dashboard-contract'
 import CentreContent from './CentreContent'
 import CentreVisuals from './CentreVisuals'
@@ -123,6 +124,7 @@ export default function WorkspaceContent({
   const [slackViewMode, setSlackViewMode] = useState<'messages' | 'live'>('live')
   const [cardAuthenticated, setCardAuthenticated] = useState<boolean | null>(null)
   const [channelPickerSourceId, setChannelPickerSourceId] = useState<string | null>(null)
+  const [dismissedPickers, setDismissedPickers] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     let cancelled = false
@@ -156,6 +158,16 @@ export default function WorkspaceContent({
       ) ?? null,
     [project.sources]
   )
+
+  useEffect(() => {
+    if (
+      unreviewedSource &&
+      !channelPickerSourceId &&
+      !dismissedPickers.has(unreviewedSource.id)
+    ) {
+      setChannelPickerSourceId(unreviewedSource.id)
+    }
+  }, [unreviewedSource, channelPickerSourceId, dismissedPickers])
 
   const slackBrowserSource = useMemo(
     () =>
@@ -216,6 +228,45 @@ export default function WorkspaceContent({
         })
         const isAuth = await window.api.dashboard.checkCardAuth({ projectId, appId: 'slack' })
         setCardAuthenticated(Boolean(isAuth))
+        if (isAuth) {
+          await useDashboardStore.getState().loadSnapshot()
+          const currentProject =
+            useDashboardStore
+              .getState()
+              .snapshot?.projects.find((p) => p.project.id === projectId)?.project ?? project
+          let existingSource = (currentProject.sources ?? []).find(
+            (s) => s.kind === 'browser' && s.platform === 'slack' && s.enabled !== false
+          )
+          if (!existingSource) {
+            const now = new Date().toISOString()
+            const newSourceId = `src-browser-${Date.now()}`
+            const newSource: ProjectSource = {
+              id: newSourceId,
+              kind: 'browser',
+              platform: 'slack',
+              profileId,
+              workspaceId: effectiveSlackTeamId || currentProject.teamId || 'team',
+              workspaceName: currentProject.teamName || 'Slack Workspace',
+              channels: [],
+              role: 'ours',
+              enabled: true,
+              backfillDays: 7,
+              status: 'connected',
+              selectionMode: 'include',
+              createdAt: now,
+              updatedAt: now
+            }
+            existingSource = newSource
+            await useDashboardStore.getState().upsertProject({
+              ...currentProject,
+              sources: [...(currentProject.sources ?? []), newSource]
+            })
+            await useDashboardStore.getState().loadSnapshot()
+          }
+          if (existingSource && !existingSource.channelsReviewedAt) {
+            setChannelPickerSourceId(existingSource.id)
+          }
+        }
       } else {
         await startAppLogin(profileId, appId)
       }
@@ -924,7 +975,12 @@ export default function WorkspaceContent({
             projectId={project.id}
             source={pickerSource}
             open={true}
-            onClose={() => setChannelPickerSourceId(null)}
+            onClose={() => {
+              if (channelPickerSourceId) {
+                setDismissedPickers((prev) => new Set(prev).add(channelPickerSourceId))
+              }
+              setChannelPickerSourceId(null)
+            }}
             onSaved={() => {
               void useDashboardStore.getState().loadSnapshot()
               setChannelPickerSourceId(null)
