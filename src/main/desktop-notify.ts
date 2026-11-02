@@ -186,8 +186,9 @@ export async function notifyUnreadIncrease(
 
   const sig = `${options.subtitle ?? ''}|${options.body}`
   const now = Date.now()
-  if (sig === lastBannerSig && now - lastBannerAt < 4_000) {
-    log.info('notification skipped (duplicate)', { body: options.body })
+  // 60-second cooldown per signature to avoid constant desktop banner spam on polling
+  if (sig === lastBannerSig && now - lastBannerAt < 60_000) {
+    log.info('notification skipped (duplicate or cooldown)', { body: options.body })
     return { ok: true, via: 'fallback' }
   }
   lastBannerSig = sig

@@ -14,7 +14,7 @@ export const SLACK_SELECTORS = {
   // Channel sidebar elements (Only public & private channels — personal DMs excluded)
   channelListContainer: '[data-qa="channel_sidebar_name_page"], .p-channel_sidebar__list',
   channelItem:
-    '[data-qa="channel_sidebar_name_page"] [role="treeitem"]:not([data-qa-channel-sidebar-item="user"]):not(.p-channel_sidebar__item--user), .p-channel_sidebar__channel:not(.p-channel_sidebar__item--user), [data-qa-channel-sidebar-item="true"]:not([data-qa-channel-sidebar-item="user"])',
+    '[data-qa="channel_sidebar_name_page"] [role="treeitem"]:not([data-qa-channel-sidebar-item="user"]):not(.p-channel_sidebar__item--user), .p-channel_sidebar__channel:not(.p-channel_sidebar__item--user), [data-qa-channel-sidebar-item="true"]:not([data-qa-channel-sidebar-item="user"]), [data-qa-channel-sidebar-channel-id]',
   channelName: '.p-channel_sidebar__name, [data-qa="channel_sidebar_name"], span[data-qa="channel_sidebar_name"]',
   channelUnreadBadge:
     '.p-channel_sidebar__badge, [data-qa="channel-sidebar-unread-badge"], .c-mention_badge',

@@ -831,6 +831,11 @@ if (!gotSingleInstanceLock) {
 
             if (!settings.notificationsEnabled || batch.length === 0) return
 
+            // If main application window is currently visible and focused by the user, do not show popups
+            if (win && !win.isDestroyed() && win.isFocused() && win.isVisible()) {
+              return
+            }
+
             for (const [key, next] of batch) {
               const parsed = splitUnreadKey(key)
               if (!parsed) continue

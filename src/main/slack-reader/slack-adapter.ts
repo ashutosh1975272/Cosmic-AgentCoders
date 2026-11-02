@@ -41,6 +41,7 @@ export const DETECT_STATE_SCRIPT = `
 export const LIST_CHANNELS_SCRIPT = `
 (function() {
   const channels = [];
+  const seenIds = new Set();
   const items = document.querySelectorAll('${SLACK_SELECTORS.channelItem}');
   items.forEach((item) => {
     // Detect if this is a direct message container or user row
@@ -53,22 +54,45 @@ export const LIST_CHANNELS_SCRIPT = `
     const nameEl = item.querySelector('${SLACK_SELECTORS.channelName}');
     const badgeEl = item.querySelector('${SLACK_SELECTORS.channelUnreadBadge}');
     const linkEl = item.querySelector('a[href]');
-    const name = nameEl ? nameEl.textContent.trim() : '';
+    const name = nameEl ? nameEl.textContent.trim() : (item.textContent || '').trim().split('\\n')[0].trim();
     if (!name) return;
 
     let id = '';
-    const href = linkEl ? linkEl.getAttribute('href') || '' : '';
-    const match = href.match(/\\/messages\\/([^/?]+)/) || href.match(/\\/client\\/[^/]+\\/([^/?]+)/);
-    if (match && match[1]) {
-      id = match[1];
+    // Priority 1: Official data-qa attribute on item or link (e.g. data-qa-channel-sidebar-channel-id="C0123...")
+    const dataQaId =
+      item.getAttribute('data-qa-channel-sidebar-channel-id') ||
+      (linkEl ? linkEl.getAttribute('data-qa-channel-sidebar-channel-id') : '') ||
+      item.getAttribute('data-channel-id') ||
+      (linkEl ? linkEl.getAttribute('data-channel-id') : '');
+
+    if (dataQaId) {
+      id = dataQaId.trim();
     } else {
-      id = name.toLowerCase().replace(/[^a-z0-9-_]/g, '');
+      // Priority 2: Standard Slack client URL structure (/messages/ID or /client/T.../ID)
+      const href = linkEl ? linkEl.getAttribute('href') || '' : '';
+      const match = href.match(/\\/messages\\/([^/?]+)/) || href.match(/\\/client\\/[^/]+\\/([^/?]+)/);
+      if (match && match[1]) {
+        id = match[1];
+      } else {
+        // Priority 3: data-item-key or role attributes
+        const itemKey = item.getAttribute('data-item-key') || '';
+        const keyMatch = itemKey.match(/([CGD][A-Z0-9]{8,12})/);
+        if (keyMatch) {
+          id = keyMatch[1];
+        } else {
+          id = name.toLowerCase().replace(/[^a-z0-9-_]/g, '');
+        }
+      }
     }
+
+    if (!id || seenIds.has(id)) return;
+    seenIds.add(id);
 
     const ariaLabel = item.getAttribute('aria-label') || '';
     const isPrivate =
       ariaLabel.toLowerCase().includes('private') ||
       name.startsWith('🔒') ||
+      id.startsWith('G') ||
       Boolean(item.querySelector('[data-qa="channel_icon_private"]')) ||
       Boolean(item.querySelector('.c-icon--lock'));
 

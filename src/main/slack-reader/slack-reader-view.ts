@@ -2,6 +2,7 @@ import { WebContentsView } from 'electron'
 import { partitionForProfile, partitionForCard } from '../profiles/session-partition'
 import { log } from '../logging'
 import { SlackAdapter, type SlackSessionState, type ScrapedChannelItem } from './slack-adapter'
+import { SLACK_SELECTORS } from './slack-selectors'
 import { deduplicateMessages, normalizeScrapedMessage } from './normalizer'
 import type { DashboardStoredMessage } from '../dashboard/delta-store'
 
@@ -111,7 +112,7 @@ export class SlackReaderView {
     }
 
     const channelUrl = `https://app.slack.com/client/${this.workspaceId}/${channelId}`
-    const currentUrl = this.view!.webContents.getURL()
+    let currentUrl = this.view!.webContents.getURL()
 
     this.onEvent?.({
       type: 'navigate',
@@ -119,7 +120,10 @@ export class SlackReaderView {
       text: `Navigating to channel ${channelId}…`
     })
 
-    if (!currentUrl.includes(`/${this.workspaceId}/${channelId}`)) {
+    // If channelId is a standard Slack ID (C... for public, G... for private, D... for DM), direct URL navigation works best.
+    const isStandardSlackId = /^[CGD][A-Z0-9]{8,12}$/.test(channelId)
+
+    if (isStandardSlackId && !currentUrl.includes(`/${this.workspaceId}/${channelId}`)) {
       try {
         await this.view!.webContents.loadURL(channelUrl)
       } catch (err: any) {
@@ -132,7 +136,38 @@ export class SlackReaderView {
       }
       // Allow DOM to settle passively
       await new Promise((resolve) => setTimeout(resolve, 2500))
+    } else if (!isStandardSlackId) {
+      // If channelId was a slugified name, try to locate and click the corresponding sidebar channel item
+      try {
+        await this.view!.webContents.executeJavaScript(`
+          (() => {
+            const target = ${JSON.stringify(channelId.toLowerCase())};
+            const items = document.querySelectorAll('${SLACK_SELECTORS.channelItem}');
+            for (const item of items) {
+              const nameEl = item.querySelector('${SLACK_SELECTORS.channelName}');
+              const text = (nameEl ? nameEl.textContent : item.textContent || '').trim().toLowerCase();
+              const slug = text.replace(/[^a-z0-9-_]/g, '');
+              if (slug === target || text === target) {
+                const clickTarget = item.querySelector('a') || item.querySelector('button') || item;
+                clickTarget.click();
+                return true;
+              }
+            }
+            return false;
+          })()
+        `, true)
+        await new Promise((resolve) => setTimeout(resolve, 2000))
+      } catch {
+        // ignore
+      }
     }
+
+    currentUrl = this.view!.webContents.getURL()
+
+    // Safety check: ensure we didn't land on a completely different conversation (e.g. redirected fallback DM)
+    const isTargetConversation = isStandardSlackId
+      ? currentUrl.includes(`/${this.workspaceId}/${channelId}`)
+      : true
 
     this.onEvent?.({
       type: 'status',
@@ -161,10 +196,15 @@ export class SlackReaderView {
       // ignore
     }
 
-    const rawMessages = await this.adapter.readVisibleMessages(this.view!)
+    // Only read messages if we actually reached the target conversation (avoid polluting channels with wrong DM messages)
+    const rawMessages = isTargetConversation ? await this.adapter.readVisibleMessages(this.view!) : []
     const normalized: DashboardStoredMessage[] = []
 
     for (const raw of rawMessages) {
+      // If message permalink indicates a different channel archive and standard Slack ID was expected, filter it out
+      if (isStandardSlackId && raw.permalink && !raw.permalink.includes(`/archives/${channelId}/`)) {
+        continue
+      }
       const msg = normalizeScrapedMessage(raw, channelId)
       if (msg) normalized.push(msg)
     }

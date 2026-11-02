@@ -201,10 +201,23 @@ export class BrowserViewManager {
     try {
       for (const [key, view] of this.views) {
         if (view.webContents.isDestroyed()) continue
-        const sep = key.lastIndexOf(':')
-        if (sep < 0) continue
-        const profileId = key.slice(0, sep)
-        const appId = key.slice(sep + 1) as AppId
+        // Ignore custom links
+        if (key.startsWith('link:')) continue
+        let profileId: string
+        let appId: AppId
+
+        if (key.startsWith('card:')) {
+          // card:${projectId}:${appId}
+          const parts = key.split(':')
+          if (parts.length < 3) continue
+          profileId = parts.slice(0, 2).join(':') // e.g. 'card:proj-123'
+          appId = parts[2] as AppId
+        } else {
+          const sep = key.lastIndexOf(':')
+          if (sep < 0) continue
+          profileId = key.slice(0, sep)
+          appId = key.slice(sep + 1) as AppId
+        }
         if (!profileId || !appId) continue
         try {
           const title = view.webContents.getTitle()
