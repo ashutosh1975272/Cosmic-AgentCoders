@@ -165,11 +165,12 @@ export default function ProjectSettingsTab({
   }
 
   const handleToggleHideAddButton = (): void => {
+    const isCurrentlyHidden = layout.custom.hideAddButton ?? true
     updateLayout({
       ...layout,
       custom: {
         ...layout.custom,
-        hideAddButton: !layout.custom.hideAddButton
+        hideAddButton: !isCurrentlyHidden
       }
     })
   }
@@ -833,7 +834,7 @@ export default function ProjectSettingsTab({
                     <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px' }}>
                       <input
                         type="checkbox"
-                        checked={!layout.custom.hideAddButton}
+                        checked={layout.custom.hideAddButton === false}
                         onChange={handleToggleHideAddButton}
                       />
                       <span><b>Show "+ Add" button</b> in this card's sidebar footer (alongside Settings)</span>

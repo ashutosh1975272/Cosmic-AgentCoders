@@ -15,12 +15,13 @@ import DashboardView from './components/dashboard/DashboardView'
 import DashboardRail from './components/dashboard/DashboardRail'
 import { CosmicWorkspaceView } from './components/dashboard/CosmicWorkspaceView'
 import { useDashboardStore } from './hooks/useDashboard'
-import { SettingsPanel } from './components/SettingsPanel'
+import ObserverView from './components/dashboard/ObserverView'
 import { SidebarPanelIcon } from './components/SidebarPanelIcon'
 import { SlackViewport } from './components/SlackViewport'
 import { PlatformSettingsPanel } from './components/dashboard/PlatformSettingsPanel'
 import { AddPlatformPage } from './components/dashboard/AddPlatformPage'
 import { AccountsManagementModal } from './components/dashboard/AccountsManagementModal'
+import { DeleteConfirmNoticeModal, type ProfileDeleteTarget } from './components/dashboard/DeleteConfirmNoticeModal'
 import { UnifiedSettingsModal, type SettingsTabKey } from './components/dashboard/UnifiedSettingsModal'
 import { NewProfileModal } from './components/dashboard/NewProfileModal'
 import { NewProjectModal } from './components/dashboard/NewProjectModal'
@@ -84,7 +85,8 @@ function App(): React.JSX.Element {
     'Enter Google email → Continue. Slack / Teams / WhatsApp open from the sidebar.'
   )
   const [cmdkOpen, setCmdkOpen] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [showObserverView, setShowObserverView] = useState(false)
+  const [sidebarDeleteTarget, setSidebarDeleteTarget] = useState<ProfileDeleteTarget | null>(null)
   const [unifiedSettingsOpen, setUnifiedSettingsOpen] = useState(false)
   const [unifiedSettingsTab, setUnifiedSettingsTab] = useState<SettingsTabKey>('general')
   const [platformSettings, setPlatformSettings] = useState<{
@@ -109,7 +111,7 @@ function App(): React.JSX.Element {
     '~/Library/Application Support/slack-dashboard/.env'
   )
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({})
-  const [toast, setToast] = useState<string | null>(null)
+  const [toast, setToastState] = useState<string | null>(null)
   const [showOnboarding, setShowOnboarding] = useState(
     () => localStorage.getItem('onboardingDone') !== '1'
   )
@@ -174,12 +176,18 @@ function App(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
-    void window.api.app.adminStatus().then((status) => {
-      setAdminConfigured(status.configured)
-      setAdminAuthenticated(status.authenticated)
-      if (status.envPathHint) setAdminEnvPathHint(status.envPathHint)
-      setAdminReady(true)
-    })
+    void window.api.app
+      .adminStatus()
+      .then((status) => {
+        setAdminConfigured(status.configured)
+        setAdminAuthenticated(status.authenticated)
+        if (status.envPathHint) setAdminEnvPathHint(status.envPathHint)
+        setAdminReady(true)
+      })
+      .catch((err) => {
+        console.error('Failed to get admin status', err)
+        setAdminReady(true)
+      })
   }, [])
 
   useEffect(() => {
@@ -261,14 +269,22 @@ function App(): React.JSX.Element {
     }
   }, [])
 
-  const showToast = useCallback((message: string, ms = 4500): void => {
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
-    setToast(message)
-    toastTimerRef.current = setTimeout(() => {
+  const showToast = useCallback((message: string | null, ms = 4500): void => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current)
       toastTimerRef.current = null
-      setToast(null)
-    }, ms)
+    }
+    setToastState(message)
+    if (message) {
+      void window.api?.logs?.logAction('ui', 'info', `Notification: ${message}`)
+      toastTimerRef.current = setTimeout(() => {
+        toastTimerRef.current = null
+        setToastState(null)
+      }, ms)
+    }
   }, [])
+
+  const setToast = showToast
 
   useEffect(() => {
     return window.api.app.onToast((message) => showToast(message))
@@ -280,6 +296,7 @@ function App(): React.JSX.Element {
       applyDocumentTheme(next.theme)
       applySidebarDensity(next.sidebarDensity)
       applySidebarWidth(next.sidebarWidth)
+      window.dispatchEvent(new CustomEvent('orbit:settings-changed', { detail: next }))
     })
   }, [])
 
@@ -335,9 +352,25 @@ function App(): React.JSX.Element {
   const browserAuthBusy = authPhase === 'google' || authPhase === 'slack'
   const cosmicLevel1 = useDashboardStore((s) => s.cosmicLevel1)
   const cosmicSelectedCardId = useDashboardStore((s) => s.cosmicSelectedCardId)
+  const snapshot = useDashboardStore((s) => s.snapshot)
+  const commandPaletteProjects = useMemo(() => {
+    if (!snapshot?.projects) return []
+    return snapshot.projects
+      .map((p) => {
+        const proj = (p as any).project ?? p
+        if (!proj || !proj.id) return null
+        return {
+          id: String(proj.id),
+          name: String(proj.name || 'Untitled Project'),
+          clientName: proj.clientName ? String(proj.clientName) : undefined
+        }
+      })
+      .filter(Boolean) as Array<{ id: string; name: string; clientName?: string }>
+  }, [snapshot])
   const isCosmicActive = settings.sidebarLook === 'new-cosmic'
   const isMinimalActive = settings.sidebarLook === 'minimal'
-  const isCosmicOrMinimal = isCosmicActive || isMinimalActive
+  const isBasicActive = settings.sidebarLook === 'basic'
+  const isCosmicOrMinimal = isCosmicActive || isMinimalActive || isBasicActive
   const showCosmicCard = Boolean(isCosmicOrMinimal && cosmicSelectedCardId && !browserAuthBusy)
   const dashboardOpen = useDashboardStore((s) => s.dashboardOpen)
   const closeDashboard = useDashboardStore((s) => s.closeDashboard)
@@ -345,8 +378,10 @@ function App(): React.JSX.Element {
     isCosmicActive && cosmicLevel1 && cosmicLevel1 !== 'all' && cosmicLevel1 !== 'global'
   )
   const showDashboard =
+    !isMinimalActive &&
+    !isBasicActive &&
     (dashboardOpen ||
-      (isCosmicOrMinimal && (cosmicLevel1 === 'all' || isMinimalActive || (isCosmicProfileActive && !cosmicSelectedCardId)))) &&
+      (isCosmicActive && (cosmicLevel1 === 'all' || (isCosmicProfileActive && !cosmicSelectedCardId)))) &&
     !browserAuthBusy &&
     !showCosmicCard
   const wizardOpen = useDashboardStore((s) => s.wizardOpenFor) != null
@@ -361,10 +396,10 @@ function App(): React.JSX.Element {
     (activeAppId || activeCustomLinkId) &&
     !showDashboard &&
     !showCosmicCard &&
+    !showObserverView &&
     !wizardOpen &&
     !browserAuthBusy &&
     !locked &&
-    !settingsOpen &&
     !unifiedSettingsOpen &&
     !cmdkOpen &&
     !platformSettings &&
@@ -456,10 +491,21 @@ function App(): React.JSX.Element {
           const message = sidebarToastFor(previousCollapsed, s.sidebarCollapsed)
           if (message) showToast(message, 6000)
         }
+        window.dispatchEvent(new Event('resize'))
+        window.dispatchEvent(new CustomEvent('layout-bounds-change'))
+        const startTime = Date.now()
+        const loop = () => {
+          window.dispatchEvent(new CustomEvent('layout-bounds-change'))
+          if (Date.now() - startTime < 420) {
+            window.requestAnimationFrame(loop)
+          }
+        }
+        window.requestAnimationFrame(loop)
+
         window.requestAnimationFrame(() => {
           window.requestAnimationFrame(() => {
             const bounds = viewportBounds()
-            if (useProfileStore.getState().activeAppId) {
+            if (useProfileStore.getState().activeAppId && !showCosmicCard) {
               void window.api.profiles.updateBounds(bounds)
             }
           })
@@ -564,7 +610,12 @@ function App(): React.JSX.Element {
   }, [email])
 
   const handleCreateAndAuthProfile = useCallback(
-    async (displayName: string, targetEmail: string, mode?: 'under_global' | 'individual' | 'both') => {
+    async (
+      displayName: string,
+      targetEmail: string,
+      mode?: 'under_global' | 'individual' | 'both',
+      forceReauth?: boolean
+    ) => {
       const hint = targetEmail.trim()
       if (!hint) return
       setLocalAuthPhase('google')
@@ -583,7 +634,7 @@ function App(): React.JSX.Element {
         const latest = useProfileStore.getState().profiles.find((p) => p.id === targetProfileId)
         const googleOk = latest?.googleAuthStatus === 'signed-in'
 
-        if (googleOk) {
+        if (googleOk && !forceReauth) {
           await activateProfile(targetProfileId, viewportBounds())
           setToast(
             mode === 'both'
@@ -716,8 +767,8 @@ function App(): React.JSX.Element {
           setUnifiedSettingsOpen(false)
           return
         }
-        if (settingsOpen) {
-          setSettingsOpen(false)
+        if (showObserverView) {
+          setShowObserverView(false)
           return
         }
         if (cmdkOpen) {
@@ -762,7 +813,7 @@ function App(): React.JSX.Element {
     browserAuthBusy,
     localAuthPhase,
     cmdkOpen,
-    settingsOpen,
+    showObserverView,
     settings.sidebarCollapsed,
     locked,
     handleSelectProfile,
@@ -820,9 +871,19 @@ function App(): React.JSX.Element {
               onSelect={(id) => void handleSelectProfile(id)}
               onSelectApp={handleSidebarSelectApp}
               onDelete={(id) => {
-                void deleteProfile(id).then(async () => {
-                  const s = await window.api.app.getSettings()
-                  setSettings(s)
+                const p = profiles.find((x) => x.id === id)
+                if (!p) return
+                const linked = (snapshot?.projects ?? [])
+                  .filter((proj) => proj.project.profileId === id)
+                  .map((proj) => ({
+                    id: proj.project.id,
+                    name: proj.project.name || proj.project.teamName || 'Card'
+                  }))
+                setSidebarDeleteTarget({
+                  id,
+                  name: p.customName || p.displayName,
+                  email: p.displayName,
+                  cards: linked
                 })
               }}
               onRename={(id, name) => {
@@ -865,7 +926,7 @@ function App(): React.JSX.Element {
               }}
               onNewProfile={() => setNewProfileModalOpen(true)}
               onObserver={() => {
-                setToast('Observer Mode enabled. Observer channel streams active.')
+                setShowObserverView(true)
               }}
               onOpenAccountsSettings={() => {
                 setUnifiedSettingsTab('general')
@@ -951,8 +1012,10 @@ function App(): React.JSX.Element {
             </div>
           ) : null}
 
-          {showCosmicCard ? (
-            <CosmicWorkspaceView />
+          {showObserverView ? (
+            <ObserverView onBack={() => setShowObserverView(false)} />
+          ) : showCosmicCard ? (
+            <CosmicWorkspaceView sidebarLook={settings.sidebarLook ?? 'ancient'} />
           ) : showDashboard ? (
             <DashboardView />
           ) : showEmbed ? (
@@ -966,7 +1029,7 @@ function App(): React.JSX.Element {
             </div>
           ) : null}
 
-          {!browserAuthBusy && !showEmbed && !showDashboard && !showCosmicCard && !locked ? (
+          {!browserAuthBusy && !showEmbed && !showDashboard && !showCosmicCard && !showObserverView && !locked ? (
             <div className="empty-main">
               <img className="empty-main-icon" src={appIcon} alt="" aria-hidden />
               <h1>{emptyCopy.title}</h1>
@@ -983,79 +1046,50 @@ function App(): React.JSX.Element {
       <CommandPalette
         open={cmdkOpen && !locked}
         profiles={profiles}
+        projects={commandPaletteProjects}
         onClose={() => setCmdkOpen(false)}
-        onSelectProfile={(id) => void handleSelectProfile(id)}
-        onSelectApp={handleSidebarSelectApp}
-        onOpenWorkspace={handleOpenWorkspace}
+        onSelectProfile={(id) => {
+          setShowObserverView(false)
+          void handleSelectProfile(id)
+        }}
+        onSelectApp={(profileId, appId) => {
+          setShowObserverView(false)
+          handleSidebarSelectApp(profileId, appId)
+        }}
+        onOpenWorkspace={(profileId, appId, teamId) => {
+          setShowObserverView(false)
+          handleOpenWorkspace(profileId, appId, teamId)
+        }}
         onOpenInSplit={(profileId, appId) => {
           if (!settings.splitViewEnabled) {
             setToast('Enable Split view in Settings first.')
             return
           }
+          setShowObserverView(false)
           setSplitSecondary({ profileId, appId })
         }}
-      />
-
-      <SettingsPanel
-        open={settingsOpen && !locked}
-        settings={settings}
-        onClose={() => setSettingsOpen(false)}
-        onChange={(patch) => {
-          void window.api.app.setSettings(patch).then((s) => {
-            setSettings(s)
-            applyDocumentTheme(s.theme)
-            applySidebarDensity(s.sidebarDensity)
-            applySidebarWidth(s.sidebarWidth)
-            if (!s.splitViewEnabled) setSplitSecondary(null)
-          })
+        onSelectProject={(projectId) => {
+          setShowObserverView(false)
+          useDashboardStore.getState().setCosmicNavigation('all', projectId)
+          useDashboardStore.getState().openDashboard()
         }}
-        onClearAllProfiles={() => {
-          void window.api.profiles.clearAll().then(async () => {
-            useProfileStore.setState({
-              profiles: [],
-              activeProfileId: null,
-              activeAppId: null
-            })
-            const s = await window.api.app.getSettings()
-            setSettings(s)
-            setStatusLine('All profiles removed.')
-            setSettingsOpen(false)
-          })
+        onOpenSettings={() => {
+          setUnifiedSettingsTab('general')
+          setUnifiedSettingsOpen(true)
+          void window.api?.logs?.logAction('ui', 'info', 'Opened Settings Hub')
         }}
-        onExportProfiles={() => {
-          void window.api.profiles.exportMetadata().then((list) => {
-            const blob = new Blob([JSON.stringify(list, null, 2)], {
-              type: 'application/json'
-            })
-            const a = document.createElement('a')
-            a.href = URL.createObjectURL(blob)
-            a.download = 'slack-dashboard-profiles.json'
-            a.click()
-          })
+        onLockApp={() => {
+          void window.api.app.lock()
+          void window.api?.logs?.logAction('sec', 'info', 'App locked by user command')
         }}
-        onImportProfiles={() => {
-          const input = document.createElement('input')
-          input.type = 'file'
-          input.accept = 'application/json,.json'
-          input.onchange = () => {
-            const file = input.files?.[0]
-            if (!file) return
-            void file.text().then(async (text) => {
-              const parsed = JSON.parse(text) as Profile[]
-              const list = await window.api.profiles.importMetadata(parsed)
-              useProfileStore.setState({ profiles: list })
-              setToast(`Imported — ${list.length} profiles total (sessions still need sign-in).`)
-            })
-          }
-          input.click()
+        onSyncAll={() => {
+          void useDashboardStore.getState().syncNow()
+          setToast('Syncing all project cards…')
+          void window.api?.logs?.logAction('sync', 'info', 'Manual sync triggered for all projects')
         }}
-        onAdminLogout={() => {
-          void window.api.app.adminLogout().then(() => {
-            setSettingsOpen(false)
-            setCmdkOpen(false)
-            setAdminAuthenticated(false)
-            void window.api.profiles.setEmbedVisible(false)
-          })
+        onOpenObserver={() => {
+          setShowObserverView(true)
+          void window.api?.logs?.logAction('nav', 'info', 'Opened Observer View')
         }}
       />
 
@@ -1064,7 +1098,10 @@ function App(): React.JSX.Element {
         open={unifiedSettingsOpen && !locked}
         initialTab={unifiedSettingsTab}
         settings={settings}
-        onClose={() => setUnifiedSettingsOpen(false)}
+        onClose={() => {
+          setUnifiedSettingsOpen(false)
+          void window.api?.logs?.logAction('ui', 'info', 'Closed Settings Hub')
+        }}
         onChangeSettings={(patch) => {
           void window.api.app.setSettings(patch).then((s) => {
             setSettings(s)
@@ -1072,6 +1109,7 @@ function App(): React.JSX.Element {
             applySidebarDensity(s.sidebarDensity)
             applySidebarWidth(s.sidebarWidth)
             if (!s.splitViewEnabled) setSplitSecondary(null)
+            window.dispatchEvent(new CustomEvent('orbit:settings-changed', { detail: s }))
           })
         }}
         onClearAllProfiles={() => {
@@ -1122,6 +1160,13 @@ function App(): React.JSX.Element {
           setUnifiedSettingsOpen(false)
           setNewProfileModalOpen(true)
         }}
+        onDeleteProfile={(id, deleteCards) => {
+          void deleteProfile(id, deleteCards).then(async () => {
+            const s = await window.api.app.getSettings()
+            setSettings(s)
+            await useDashboardStore.getState().loadSnapshot()
+          })
+        }}
         onSelectProfile={(id) => {
           setUnifiedSettingsOpen(false)
           void handleSelectProfile(id)
@@ -1156,6 +1201,14 @@ function App(): React.JSX.Element {
         <NewProjectModal
           open={true}
           onClose={() => setNewProjectModalOpen(false)}
+          onSuccess={(projectId) => {
+            setNewProjectModalOpen(false)
+            const p = useDashboardStore.getState().snapshot?.projects.find((proj) => proj.project.id === projectId)
+            const pProfileId = p?.project.profileId || 'all'
+            useDashboardStore.getState().setCosmicNavigation(pProfileId, projectId)
+            useProfileStore.getState().clearActiveApp()
+          }}
+          showLinkedAccounts={settings.showNewProjectLinkedAccounts ?? true}
         />
       ) : null}
 
@@ -1218,8 +1271,22 @@ function App(): React.JSX.Element {
           }}
           onSelectProfile={(id) => void handleSelectProfile(id)}
           onOpenCustomLink={(pId, link) => void handleSelectCustomLink(pId, link)}
+          onOpenObserver={() => setShowObserverView(true)}
         />
       ) : null}
+
+      <DeleteConfirmNoticeModal
+        open={Boolean(sidebarDeleteTarget)}
+        onClose={() => setSidebarDeleteTarget(null)}
+        target={sidebarDeleteTarget ? { type: 'profile', profile: sidebarDeleteTarget } : null}
+        onConfirmProfileDelete={async (profileId, deleteCards) => {
+          await deleteProfile(profileId, deleteCards)
+          const s = await window.api.app.getSettings()
+          setSettings(s)
+          await useDashboardStore.getState().loadSnapshot()
+          setSidebarDeleteTarget(null)
+        }}
+      />
 
       {showOnboarding && !locked ? (
         <div className="onboarding-backdrop">
@@ -1245,8 +1312,24 @@ function App(): React.JSX.Element {
       ) : null}
 
       {toast ? (
-        <div className="app-toast" role="status">
-          {toast}
+        <div
+          className="app-toast"
+          role="status"
+          onClick={() => setToast(null)}
+          title="Click to dismiss"
+        >
+          <span className="app-toast-text">{toast}</span>
+          <button
+            type="button"
+            className="app-toast-close"
+            onClick={(e) => {
+              e.stopPropagation()
+              setToast(null)
+            }}
+            aria-label="Dismiss notification"
+          >
+            ×
+          </button>
         </div>
       ) : null}
 

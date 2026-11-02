@@ -1,4 +1,4 @@
-import type React from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import type { CardView, CardSummary } from './card-view'
 import type {
   DashboardProject,
@@ -16,6 +16,9 @@ import AgentChatPanel from './AgentChatPanel'
 import { requestMessageJump } from './jump-to-message'
 import SchedulesPage from './SchedulesPage'
 import { AppIcon } from '../AppIcon'
+import { useProfileStore } from '../../hooks/useProfiles'
+import { useDashboardStore } from '../../hooks/useDashboard'
+import { BASE_APP_PRESETS } from '../../../../shared/base-app-presets'
 import {
   channelIdOf,
   connectorOf,
@@ -110,6 +113,116 @@ export default function WorkspaceContent({
   const { title, desc } = panelMeta(nav, channels)
   const sel = nav.selection
 
+  const profiles = useProfileStore((s) => s.profiles)
+  const startAppLogin = useProfileStore((s) => s.startAppLogin)
+  const targetProfile = profiles.find((p) => p.id === project.profileId) ?? profiles[0]
+
+  const [authBusyApp, setAuthBusyApp] = useState<'slack' | 'teams' | 'whatsapp' | null>(null)
+  const [authError, setAuthError] = useState<string | null>(null)
+  const [slackViewMode, setSlackViewMode] = useState<'messages' | 'live'>('live')
+  const [cardAuthenticated, setCardAuthenticated] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!project?.id) return
+    window.api?.dashboard?.checkCardAuth?.({ projectId: project.id, appId: 'slack' })
+      .then((isAuth) => {
+        if (!cancelled) setCardAuthenticated(Boolean(isAuth))
+      })
+      .catch(() => {
+        if (!cancelled) setCardAuthenticated(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [project?.id, authBusyApp])
+
+  // Resolve genuine Slack team ID strictly for THIS card / profile, without cross-profile leakage
+  const effectiveSlackTeamId = useMemo(() => {
+    if (project?.teamId && /^T[A-Z0-9]+$/i.test(project.teamId)) {
+      return project.teamId
+    }
+    const realWs = targetProfile?.apps?.slack?.availableWorkspaces?.find(
+      (w) => w.teamId && /^T[A-Z0-9]+$/i.test(w.teamId)
+    )
+    if (realWs?.teamId) {
+      return realWs.teamId
+    }
+    return ''
+  }, [project?.teamId, targetProfile])
+
+  // Auto-heal project teamId if placeholder
+  useEffect(() => {
+    if (!project || !effectiveSlackTeamId) return
+    const isPlaceholder = !project.teamId || !/^T[A-Z0-9]+$/i.test(project.teamId)
+    if (isPlaceholder && effectiveSlackTeamId) {
+      const realWs = targetProfile?.apps?.slack?.availableWorkspaces?.find(
+        (w) => w.teamId === effectiveSlackTeamId
+      )
+      void window.api?.dashboard?.upsertProject?.({
+        project: {
+          ...project,
+          teamId: effectiveSlackTeamId,
+          teamName: realWs?.teamName || project.teamName || 'Slack Workspace'
+        }
+      }).then(() => {
+        void useDashboardStore.getState().loadSnapshot()
+      }).catch(() => undefined)
+    }
+  }, [project?.id, project?.teamId, effectiveSlackTeamId, targetProfile])
+
+  const handleStartCardAppLogin = async (
+    projectId?: string,
+    profileId?: string,
+    appId?: 'slack' | 'teams' | 'whatsapp'
+  ) => {
+    if (!projectId || !profileId || !appId) return
+    setAuthBusyApp(appId)
+    setAuthError(null)
+    try {
+      if (appId === 'slack' && window.api?.profiles?.startCardAppLogin) {
+        await window.api.profiles.startCardAppLogin({
+          projectId,
+          profileId,
+          appId: 'slack'
+        })
+        const isAuth = await window.api.dashboard.checkCardAuth({ projectId, appId: 'slack' })
+        setCardAuthenticated(Boolean(isAuth))
+      } else {
+        await startAppLogin(profileId, appId)
+      }
+    } catch (err) {
+      console.error('Card app login error', err)
+      setAuthError(String(err))
+    } finally {
+      setAuthBusyApp(null)
+    }
+  }
+
+  const handleStartAppLogin = async (profileId?: string, appId?: 'slack' | 'teams' | 'whatsapp') => {
+    if (!profileId || !appId) return
+    setAuthBusyApp(appId)
+    setAuthError(null)
+    try {
+      await startAppLogin(profileId, appId)
+    } catch (err) {
+      console.error('App login error', err)
+      setAuthError(String(err))
+    } finally {
+      setAuthBusyApp(null)
+    }
+  }
+
+  const handleCancelAppLogin = async (profileId?: string) => {
+    if (!profileId) return
+    setAuthBusyApp(null)
+    try {
+      await window.api?.profiles?.clearStuckAuth?.()
+    } catch (err) {
+      console.warn('Cancel login error', err)
+    }
+  }
+
   // Dashboard brings its own scroll surface and width; the generic panel header
   // would repeat the project name above the freshness line.
   if (nav.openGroup === 'dash') {
@@ -171,72 +284,528 @@ export default function WorkspaceContent({
           key={`global-embed:${pId}:${tId}`}
           profileId={pId}
           teamId={tId}
+          appId="slack"
         />
       )
+    } else if (sel && sel.startsWith('c:preset:')) {
+      const presetId = sel.replace('c:preset:', '')
+      const presetItem = BASE_APP_PRESETS.full.find((p) => p.id === presetId)
+      const url = presetItem?.url || 'https://google.com'
+      const name = presetItem?.name || presetId
+      const icon = presetItem?.icon || '🌐'
+
+      body = (
+        <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: 'var(--bg-page)' }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '8px 14px',
+            background: 'var(--surface)',
+            borderBottom: '1px solid var(--border)',
+            fontSize: 12,
+            color: 'var(--text)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 16 }}>{icon}</span>
+              <span style={{ fontWeight: 650, color: '#f8fafc' }}>{name}</span>
+              <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>· {url}</span>
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                fontSize: 11,
+                color: '#60a5fa',
+                background: 'rgba(96, 165, 250, 0.1)',
+                padding: '2px 7px',
+                borderRadius: 12,
+                fontWeight: 600
+              }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#60a5fa' }} />
+                Web Tool
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button
+                type="button"
+                onClick={() => window.open(url, '_blank')}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  color: '#cbd5e1',
+                  fontSize: 11,
+                  borderRadius: 6,
+                  padding: '3px 9px',
+                  cursor: 'pointer'
+                }}
+                title="Open in external browser"
+              >
+                Open in Browser ↗
+              </button>
+            </div>
+          </div>
+          <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
+            <iframe
+              src={url}
+              title={name}
+              style={{
+                width: '100%',
+                height: '100%',
+                border: 'none',
+                background: '#fff'
+              }}
+              allow="microphone; camera; clipboard-read; clipboard-write"
+            />
+          </div>
+        </div>
+      )
     } else if (sel && sel.startsWith('c:teams')) {
-      body = (
-        <div className="ws-agent">
-          <div className="ws-agent-empty">
-            <span className="ws-agent-empty-icon" style={{ display: 'inline-flex', padding: 8 }}>
-              <AppIcon appId="teams" size={36} />
-            </span>
-            <p className="ws-agent-empty-title">Microsoft Teams</p>
-            <p className="ws-agent-empty-hint">
-              Microsoft Teams integration for this card. Connect or open Teams from the app sidebar or profiles hub.
-            </p>
+      const teamsStatus = targetProfile?.apps?.teams?.sessionStatus ?? 'not-signed-in'
+      if (teamsStatus === 'signed-in') {
+        body = (
+          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: 'var(--bg-page)' }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '8px 14px',
+              background: 'var(--surface)',
+              borderBottom: '1px solid var(--border)',
+              fontSize: 12,
+              color: 'var(--text)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <AppIcon appId="teams" size={16} />
+                <span style={{ fontWeight: 650, color: '#f8fafc' }}>Microsoft Teams</span>
+                <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>· {targetProfile?.displayName}</span>
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  fontSize: 11,
+                  color: '#4ade80',
+                  background: 'rgba(74, 222, 128, 0.1)',
+                  padding: '2px 7px',
+                  borderRadius: 12,
+                  fontWeight: 600
+                }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4ade80' }} />
+                  Connected
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => void handleStartAppLogin(targetProfile?.id, 'teams')}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.06)',
+                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    color: '#cbd5e1',
+                    fontSize: 11,
+                    borderRadius: 6,
+                    padding: '3px 9px',
+                    cursor: 'pointer'
+                  }}
+                  title="Re-open Microsoft login flow"
+                >
+                  Re-authenticate
+                </button>
+              </div>
+            </div>
+            <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
+              <CardLiveSlackEmbed appId="teams" profileId={targetProfile?.id} />
+            </div>
           </div>
-        </div>
-      )
+        )
+      } else if (teamsStatus === 'signing-in' || authBusyApp === 'teams') {
+        body = (
+          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: 'var(--bg-page)' }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '8px 14px',
+              background: 'color-mix(in srgb, var(--accent) 15%, var(--surface))',
+              borderBottom: '1px solid var(--border)',
+              fontSize: 12,
+              color: 'var(--text)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                <span style={{ fontWeight: 600, color: '#f8fafc' }}>Signing in to Microsoft Teams...</span>
+                <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>Enter credentials in the window below</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleCancelAppLogin(targetProfile?.id)}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.08)',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  color: '#fff',
+                  fontSize: 11,
+                  borderRadius: 6,
+                  padding: '3px 10px',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+            <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
+              <CardLiveSlackEmbed appId="teams" profileId={targetProfile?.id} />
+            </div>
+          </div>
+        )
+      } else {
+        body = (
+          <div className="ws-agent" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+            <div className="ws-agent-empty" style={{ maxWidth: 420, padding: 24, textAlign: 'center' }}>
+              <span className="ws-agent-empty-icon" style={{ display: 'inline-flex', padding: 12, background: 'rgba(98, 100, 167, 0.15)', borderRadius: 16 }}>
+                <AppIcon appId="teams" size={48} />
+              </span>
+              <h3 style={{ margin: '14px 0 6px', fontSize: 18, color: '#f8fafc', fontWeight: 650 }}>
+                Microsoft Teams
+              </h3>
+              <p style={{ margin: '0 0 16px', fontSize: 13, color: '#94a3b8', lineHeight: 1.5 }}>
+                Sign in with your Microsoft work, school, or personal account to view channels and chats for this project card.
+              </p>
+              <div style={{ fontSize: 11, color: '#64748b', marginBottom: 18 }}>
+                Associated Profile: <strong style={{ color: '#cbd5e1' }}>{targetProfile?.displayName}</strong>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
+                <button
+                  type="button"
+                  disabled={authBusyApp !== null}
+                  onClick={() => void handleStartAppLogin(targetProfile?.id, 'teams')}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    padding: '8px 20px',
+                    fontSize: 13,
+                    fontWeight: 650,
+                    borderRadius: 8,
+                    background: '#6264a7',
+                    border: '1px solid #7b7db7',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    width: '100%',
+                    maxWidth: 240
+                  }}
+                >
+                  <AppIcon appId="teams" size={16} />
+                  <span>Sign in with Microsoft</span>
+                </button>
+              </div>
+              {authError && (
+                <p style={{ color: '#f87171', fontSize: 12, marginTop: 12 }}>{authError}</p>
+              )}
+            </div>
+          </div>
+        )
+      }
     } else if (sel && sel.startsWith('c:whatsapp')) {
-      body = (
-        <div className="ws-agent">
-          <div className="ws-agent-empty">
-            <span className="ws-agent-empty-icon" style={{ display: 'inline-flex', padding: 8 }}>
-              <AppIcon appId="whatsapp" size={36} />
-            </span>
-            <p className="ws-agent-empty-title">WhatsApp</p>
-            <p className="ws-agent-empty-hint">
-              WhatsApp integration for this card. Connect or open WhatsApp from the app sidebar or profiles hub.
-            </p>
+      const whatsappStatus = targetProfile?.apps?.whatsapp?.sessionStatus ?? 'not-signed-in'
+      if (whatsappStatus === 'signed-in') {
+        body = (
+          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: '#111b21' }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '8px 14px',
+              background: 'var(--surface)',
+              borderBottom: '1px solid var(--border)',
+              fontSize: 12,
+              color: 'var(--text)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <AppIcon appId="whatsapp" size={16} />
+                <span style={{ fontWeight: 650, color: '#f8fafc' }}>WhatsApp Web</span>
+                <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>· {targetProfile?.displayName}</span>
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  fontSize: 11,
+                  color: '#4ade80',
+                  background: 'rgba(74, 222, 128, 0.1)',
+                  padding: '2px 7px',
+                  borderRadius: 12,
+                  fontWeight: 600
+                }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4ade80' }} />
+                  Connected
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => void handleStartAppLogin(targetProfile?.id, 'whatsapp')}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.06)',
+                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    color: '#cbd5e1',
+                    fontSize: 11,
+                    borderRadius: 6,
+                    padding: '3px 9px',
+                    cursor: 'pointer'
+                  }}
+                  title="Refresh or reconnect WhatsApp session"
+                >
+                  Refresh Session
+                </button>
+              </div>
+            </div>
+            <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
+              <CardLiveSlackEmbed appId="whatsapp" profileId={targetProfile?.id} />
+            </div>
           </div>
-        </div>
-      )
-    } else if (slackSourceOf(nav) === 'team' && !channels.teamConnected) {
+        )
+      } else {
+        body = (
+          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: '#111b21' }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '8px 14px',
+              background: 'color-mix(in srgb, #22c55e 12%, var(--surface))',
+              borderBottom: '1px solid var(--border)',
+              fontSize: 12,
+              color: 'var(--text)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <AppIcon appId="whatsapp" size={16} />
+                <span style={{ fontWeight: 650, color: '#f8fafc' }}>Scan WhatsApp QR Code</span>
+                <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>
+                  Open WhatsApp on your phone ➔ Linked Devices ➔ Link a Device
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleStartAppLogin(targetProfile?.id, 'whatsapp')}
+                style={{
+                  background: '#25d366',
+                  border: 'none',
+                  color: '#000',
+                  fontWeight: 650,
+                  fontSize: 11,
+                  borderRadius: 6,
+                  padding: '4px 12px',
+                  cursor: 'pointer'
+                }}
+              >
+                {authBusyApp === 'whatsapp' ? 'Watching for QR Scan…' : 'Start QR Scan'}
+              </button>
+            </div>
+            <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
+              <CardLiveSlackEmbed appId="whatsapp" profileId={targetProfile?.id} />
+            </div>
+          </div>
+        )
+      }
+    } else if (
+      cardAuthenticated === false ||
+      (cardAuthenticated === null && !channels.teamConnected && targetProfile?.apps?.slack?.sessionStatus === 'not-signed-in')
+    ) {
       body = (
-        <div className="ws-agent">
-          <div className="ws-agent-empty">
-            <span className="ws-agent-empty-icon">
+        <div className="ws-agent" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+          <div className="ws-agent-empty" style={{ maxWidth: 440, padding: 24, textAlign: 'center' }}>
+            <span className="ws-agent-empty-icon" style={{ display: 'inline-flex', padding: 12, background: 'rgba(234, 179, 8, 0.15)', borderRadius: 16 }}>
               <NavIcon name="slack" />
             </span>
-            <p className="ws-agent-empty-title">Connect workspace</p>
-            <p className="ws-agent-empty-hint">
-              Our team&apos;s workspace is connected once for all cards, from the dashboard&apos;s
-              settings menu. It isn&apos;t connected yet, so there is nothing to show here — the
-              channels our team pins for this project appear in this panel once it is.
+            <h3 style={{ margin: '14px 0 6px', fontSize: 18, color: '#f8fafc', fontWeight: 650 }}>
+              Slack Workspace
+            </h3>
+            <p style={{ margin: '0 0 16px', fontSize: 13, color: '#94a3b8', lineHeight: 1.5 }}>
+              Sign in with Google OAuth in Chrome to connect this project card to your Slack workspace.
             </p>
+            <div style={{ fontSize: 11, color: '#64748b', marginBottom: 18 }}>
+              Associated Profile: <strong style={{ color: '#cbd5e1' }}>{targetProfile?.displayName}</strong>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
+              <button
+                type="button"
+                disabled={authBusyApp === 'slack'}
+                onClick={() => void handleStartCardAppLogin(project.id, targetProfile?.id, 'slack')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  padding: '9px 20px',
+                  fontSize: 13,
+                  fontWeight: 650,
+                  borderRadius: 8,
+                  background: 'color-mix(in srgb, var(--accent) 30%, #fff 10%)',
+                  border: '1px solid var(--accent)',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  width: '100%',
+                  maxWidth: 270
+                }}
+              >
+                <span style={{ fontSize: 15 }}>🌐</span>
+                <span>{authBusyApp === 'slack' ? 'Opening Chrome for Google OAuth…' : 'Sign in with Google for Slack'}</span>
+              </button>
+            </div>
+            {authBusyApp === 'slack' && (
+              <p style={{ color: '#cbd5e1', fontSize: 12, marginTop: 12 }}>
+                Finish Google sign-in in Chrome popup, then return here.
+              </p>
+            )}
+            {authError && authBusyApp === 'slack' && (
+              <p style={{ color: '#f87171', fontSize: 12, marginTop: 12 }}>{authError}</p>
+            )}
           </div>
         </div>
       )
     } else {
       const source = slackSourceOf(nav) === 'team' ? 'ours' : 'client'
       const listed = channels[connectorOfSelection(sel) === 'team' ? 'team' : 'client']
-      body = (
-        <SlackChatTab
-          key={`${source}:${sel ?? 'all'}`}
-          projectId={summary.projectId}
-          source={source}
-          lockedChannel={
-            sel && isChannelId(sel)
-              ? (() => {
-                  const id = channelIdOf(sel)
-                  const entry = listed?.entries.find((ch) => ch.id === id)
-                  const watched = identity.channels.find((c) => c.channelId === id)
-                  return { id, name: entry?.name ?? watched?.channelName ?? id }
-                })()
-              : null
-          }
-        />
-      )
+      const isWholeWorkspace = sel === 's:team' || sel === 's:client' || !isChannelId(sel)
+
+      if (isWholeWorkspace && slackViewMode === 'live' && (cardAuthenticated === true || effectiveSlackTeamId || project.teamId || channels.teamConnected)) {
+        body = (
+          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: 'var(--bg-page)' }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '6px 14px',
+              background: 'var(--surface)',
+              borderBottom: '1px solid var(--border)',
+              fontSize: 12,
+              color: 'var(--text)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <AppIcon appId="slack" size={15} />
+                <span style={{ fontWeight: 650, color: '#f8fafc' }}>Slack Workspace</span>
+                <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>· {project.teamName || targetProfile?.displayName}</span>
+                {cardAuthenticated === true && (
+                  <span style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    fontSize: 11,
+                    color: '#4ade80',
+                    background: 'rgba(74, 222, 128, 0.1)',
+                    padding: '2px 7px',
+                    borderRadius: 12,
+                    fontWeight: 600
+                  }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4ade80' }} />
+                    Connected
+                  </span>
+                )}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => void handleStartCardAppLogin(project.id, targetProfile?.id, 'slack')}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.06)',
+                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    color: '#cbd5e1',
+                    fontSize: 11,
+                    borderRadius: 6,
+                    padding: '3px 9px',
+                    cursor: 'pointer'
+                  }}
+                  title="Re-open Slack login flow"
+                >
+                  Re-authenticate
+                </button>
+              </div>
+            </div>
+            <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
+              <CardLiveSlackEmbed
+                projectId={project.id}
+                appId="slack"
+                profileId={targetProfile?.id}
+                teamId={
+                  effectiveSlackTeamId ||
+                  (project.teamId &&
+                  !project.teamId.startsWith('team-') &&
+                  !project.teamId.startsWith('pending-') &&
+                  project.teamId !== 'team'
+                    ? project.teamId
+                    : undefined)
+                }
+              />
+            </div>
+          </div>
+        )
+      } else {
+        body = (
+          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
+            {isWholeWorkspace && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'flex-end',
+                padding: '4px 14px',
+                background: 'rgba(255, 255, 255, 0.02)',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.06)'
+              }}>
+                <div style={{ display: 'flex', background: 'rgba(0,0,0,0.3)', borderRadius: 6, padding: 2 }}>
+                  <button
+                    type="button"
+                    onClick={() => setSlackViewMode('live')}
+                    style={{
+                      padding: '3px 8px',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      border: 'none',
+                      borderRadius: 4,
+                      background: 'transparent',
+                      color: '#fff',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Live Embed
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSlackViewMode('messages')}
+                    style={{
+                      padding: '3px 8px',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      border: 'none',
+                      borderRadius: 4,
+                      background: 'var(--accent)',
+                      color: '#fff',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Messages
+                  </button>
+                </div>
+              </div>
+            )}
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <SlackChatTab
+                key={`${source}:${sel ?? 'all'}`}
+                projectId={summary.projectId}
+                source={source}
+                lockedChannel={
+                  sel && isChannelId(sel)
+                    ? (() => {
+                        const id = channelIdOf(sel)
+                        const entry = listed?.entries.find((ch) => ch.id === id)
+                        const watched = identity.channels.find((c) => c.channelId === id)
+                        return { id, name: entry?.name ?? watched?.channelName ?? id }
+                      })()
+                    : null
+                }
+              />
+            </div>
+          </div>
+        )
+      }
     }
     bare = true
   } else if (nav.openGroup === 'settings') {
@@ -271,14 +840,22 @@ export default function WorkspaceContent({
 
   if (bare) {
     return (
-      <section className="ws-content is-bare" aria-label={title}>
+      <section
+        className="ws-content is-bare"
+        aria-label={title}
+        style={{ flex: '1 1 0%', height: '100%', minHeight: 0, width: '100%' }}
+      >
         {body}
       </section>
     )
   }
 
   return (
-    <section className="ws-content" aria-label={title}>
+    <section
+      className="ws-content"
+      aria-label={title}
+      style={{ flex: '1 1 0%', height: '100%', minHeight: 0, width: '100%' }}
+    >
       <div className="ws-content-scroll">
         <div className="ws-content-inner">
           <p className="ws-content-eyebrow">{identity.name}</p>

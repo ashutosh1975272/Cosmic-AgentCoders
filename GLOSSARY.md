@@ -27,3 +27,8 @@
 | **Visualizations** | The sidebar section whose rows (Progress, Time elapsed, Last 7 days) render their chart in the centre panel only — never inside the sidebar. |
 | **Global Settings** | The dashboard's one settings modal, opened from the toolbar button beside *New project*. Holds the values shared by every Project — AI model and key first — each of which a card may override. Never called the "AI settings menu": the overflow-menu route is gone. |
 | **Inheritance** | How a card resolves one of those values: project override (only when its *Use global settings* switch is off) → Global Settings → environment default. The card shows which source is in effect. |
+| **Observability Hub** | The interactive live diagnostics and monitoring feed inside the Settings sidebar (`UnifiedSettingsModal.tsx`). |
+| **Ephemeral Ring Buffer** | The in-memory collection of the most recent 2,000 log events in `src/main/logging.ts`. Automatically prunes entries older than the configured TTL. |
+| **Log Retention (TTL)** | The duration after which live log events expire (default: 15 minutes, configurable to 5m, 15m, 30m, 1h, or Session). |
+| **Log Sweeper** | The background interval task in `src/main/logging.ts` that purges stale log entries every 30 seconds. |
+| **Token Redaction** | The security layer that automatically replaces sensitive secrets (tokens, API keys, passwords, cookies) with `[REDACTED]`. |

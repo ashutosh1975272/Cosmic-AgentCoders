@@ -5,6 +5,7 @@ import { profileDisplayLabel, Profile } from '../../../../shared/types'
 
 interface CosmicSidebarContentProps {
   isMinimalLook?: boolean
+  isBasicLook?: boolean
   profiles?: Profile[]
   showSidebarProfileNavButton?: boolean
   showSidebarDashboardNavButton?: boolean
@@ -15,6 +16,7 @@ interface CosmicSidebarContentProps {
 
 export function CosmicSidebarContent({
   isMinimalLook = false,
+  isBasicLook = false,
   profiles: propProfiles,
   showSidebarProfileNavButton: propShowProfileNavButton,
   showSidebarDashboardNavButton: propShowDashboardNavButton,
@@ -38,7 +40,8 @@ export function CosmicSidebarContent({
     propShowDashboardNavButton ??
     showCosmicProfileNavButtons ??
     true
-  const hasAnyQuickNav = showProfileBtn || showDashboardBtn
+  const isFlatNav = isMinimalLook || isBasicLook
+  const hasAnyQuickNav = !isFlatNav && (showProfileBtn || showDashboardBtn)
 
   // Ensure snapshot and profiles are loaded
   useEffect(() => {
@@ -50,24 +53,17 @@ export function CosmicSidebarContent({
     }
   }, [snapshot, loadSnapshot, profiles.length])
 
-  // In Minimal look, always enforce 'all' navigation if currently set to something else
-  useEffect(() => {
-    if (isMinimalLook && cosmicLevel1 !== 'all') {
-      setCosmicNavigation('all', cosmicSelectedCardId)
-    }
-  }, [isMinimalLook, cosmicLevel1, cosmicSelectedCardId, setCosmicNavigation])
-
   // All selectable user profiles (exclude special global-account-profile singleton)
   const selectableProfiles = useMemo(() => {
     return profiles.filter((p) => p.id !== 'global-account-profile')
   }, [profiles])
 
   // Active projects to display:
-  // For 'all' (or minimal): all active projects across all profiles
+  // For 'all' (or minimal/basic): all active projects across all profiles
   // For a specific profile: all active projects for that profile
   const displayedProjects = useMemo(() => {
     if (!snapshot) return []
-    if (isMinimalLook || cosmicLevel1 === 'all') {
+    if (isFlatNav || cosmicLevel1 === 'all') {
       return snapshot.projects.filter(
         (p) =>
           p.project.workflowStatus !== 'completed' &&
@@ -83,7 +79,20 @@ export function CosmicSidebarContent({
         p.project.workflowStatus !== 'completed' &&
         p.project.workflowStatus !== 'removed'
     )
-  }, [snapshot, cosmicLevel1, isMinimalLook])
+  }, [snapshot, cosmicLevel1, isFlatNav])
+
+  // In Minimal/Basic look, always enforce 'all' navigation if currently set to something else,
+  // and auto-select the first available project card if none is selected.
+  useEffect(() => {
+    if (isFlatNav) {
+      if (cosmicLevel1 !== 'all') {
+        setCosmicNavigation('all', cosmicSelectedCardId)
+      }
+      if (!cosmicSelectedCardId && displayedProjects.length > 0) {
+        setCosmicNavigation('all', displayedProjects[0].project.id)
+      }
+    }
+  }, [isFlatNav, cosmicLevel1, cosmicSelectedCardId, displayedProjects, setCosmicNavigation])
 
   const handleLevel1Change = useCallback(
     (val: string) => {
@@ -106,9 +115,9 @@ export function CosmicSidebarContent({
     [snapshot, setCosmicNavigation]
   )
 
-  const isAllProjects = isMinimalLook || cosmicLevel1 === 'all'
+  const isAllProjects = isFlatNav || cosmicLevel1 === 'all'
   const isProfileSelected = Boolean(
-    !isMinimalLook && cosmicLevel1 && cosmicLevel1 !== 'all' && cosmicLevel1 !== 'global'
+    !isFlatNav && cosmicLevel1 && cosmicLevel1 !== 'all' && cosmicLevel1 !== 'global'
   )
   const showCardsSection = isAllProjects || isProfileSelected
 
@@ -123,38 +132,18 @@ export function CosmicSidebarContent({
         gap: '4px'
       }}
     >
-      {/* Dropdown Navigation Container */}
-      <div
-        className="cosmic-nav-selectors"
-        style={{
-          padding: showCardsSection ? '4px 10px 8px' : '0 0 2px',
-          display: 'flex',
-          flexDirection: 'column',
-          background: showCardsSection ? 'rgba(255, 255, 255, 0.02)' : 'transparent',
-          borderBottom: showCardsSection ? '1px solid rgba(255, 255, 255, 0.06)' : 'none'
-        }}
-      >
-        {isMinimalLook ? (
-          <div
-            style={{
-              width: '100%',
-              padding: '7px 10px',
-              fontSize: '12.5px',
-              fontWeight: 600,
-              borderRadius: '7px',
-              background: 'color-mix(in srgb, var(--surface, #1e293b) 90%, black)',
-              color: '#fff',
-              border: '1px solid rgba(255, 255, 255, 0.12)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              boxSizing: 'border-box'
-            }}
-          >
-            <span>▦</span>
-            <span>All Projects</span>
-          </div>
-        ) : (
+      {/* Dropdown Navigation Container (Hidden in Minimal / Basic Look) */}
+      {!isFlatNav && (
+        <div
+          className="cosmic-nav-selectors"
+          style={{
+            padding: showCardsSection ? '4px 10px 8px' : '0 0 2px',
+            display: 'flex',
+            flexDirection: 'column',
+            background: showCardsSection ? 'rgba(255, 255, 255, 0.02)' : 'transparent',
+            borderBottom: showCardsSection ? '1px solid rgba(255, 255, 255, 0.06)' : 'none'
+          }}
+        >
           <select
             id="cosmic-level1-select"
             aria-label="Dashboard"
@@ -191,8 +180,8 @@ export function CosmicSidebarContent({
               </optgroup>
             )}
           </select>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* When All Projects or a Profile is selected: Show Profile & Dashboard buttons + compact projects list */}
       {showCardsSection && (
@@ -209,6 +198,7 @@ export function CosmicSidebarContent({
           {/* Quick Action Navigation Buttons */}
           {hasAnyQuickNav && (
             <div
+              className="cosmic-quick-nav-buttons"
               style={{
                 display: 'grid',
                 gridTemplateColumns: showProfileBtn && showDashboardBtn ? '1fr 1fr' : '1fr',
@@ -359,7 +349,10 @@ export function CosmicSidebarContent({
                   <button
                     key={entry.project.id}
                     type="button"
-                    onClick={() => setCosmicNavigation(cosmicLevel1, entry.project.id)}
+                    onClick={() => {
+                      setCosmicNavigation(cosmicLevel1, entry.project.id)
+                      useProfileStore.getState().clearActiveApp()
+                    }}
                     style={{
                       display: 'flex',
                       alignItems: 'center',

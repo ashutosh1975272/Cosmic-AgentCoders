@@ -85,4 +85,66 @@ describe('MonitorStore', () => {
     expect(await store.readPinnedOrder()).toEqual([b.id])
     expect((await store.listProjects()).map((p) => p.id)).toEqual([b.id, c.id])
   })
+
+  it('unassigns profile from projects without deleting cards', async () => {
+    const store = await tmpStore()
+    const a = await store.upsertProject({ project: { ...project('a'), id: '', profileId: 'prof-1' } })
+    const b = await store.upsertProject({ project: { ...project('b'), id: '', profileId: 'prof-1' } })
+    const c = await store.upsertProject({ project: { ...project('c'), id: '', profileId: 'prof-2' } })
+
+    await store.unassignProjectsForProfile('prof-1')
+
+    const list = await store.listProjects()
+    expect(list).toHaveLength(3)
+    const projA = list.find((p) => p.id === a.id)
+    const projB = list.find((p) => p.id === b.id)
+    const projC = list.find((p) => p.id === c.id)
+
+    expect(projA?.profileId).toBe('')
+    expect(projB?.profileId).toBe('')
+    expect(projC?.profileId).toBe('prof-2')
+  })
+
+  it('deletes all projects belonging to a profile and cleans pinned order', async () => {
+    const store = await tmpStore()
+    const a = await store.upsertProject({ project: { ...project('a'), id: '', profileId: 'prof-1' } })
+    const b = await store.upsertProject({ project: { ...project('b'), id: '', profileId: 'prof-1' } })
+    const c = await store.upsertProject({ project: { ...project('c'), id: '', profileId: 'prof-2' } })
+    await store.setPinnedOrder([a.id, b.id, c.id])
+
+    const deleted = await store.deleteProjectsForProfile('prof-1')
+    expect(deleted.sort()).toEqual([a.id, b.id].sort())
+
+    const list = await store.listProjects()
+    expect(list).toHaveLength(1)
+    expect(list[0].id).toBe(c.id)
+
+    expect(await store.readPinnedOrder()).toEqual([c.id])
+  })
+
+  it('allows creating project card under client profile before Slack is linked (pending teamId)', async () => {
+    const store = await tmpStore()
+    const card = await store.upsertProject({
+      project: {
+        id: '',
+        name: 'Ashutosh-testing-01',
+        clientName: 'Client-Test-01',
+        profileId: 'profile-ashutosh',
+        teamId: '',
+        teamName: '',
+        appId: 'slack',
+        tokenSource: 'oauth',
+        monitors: []
+      }
+    })
+
+    expect(card.id).toBeTruthy()
+    expect(card.name).toBe('Ashutosh-testing-01')
+    expect(card.teamId).toMatch(/^pending-/)
+    expect(card.teamName).toBe('Ashutosh-testing-01')
+
+    const list = await store.listProjects()
+    expect(list).toHaveLength(1)
+    expect(list[0].teamId).toMatch(/^pending-/)
+  })
 })

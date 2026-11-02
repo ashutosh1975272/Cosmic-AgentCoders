@@ -3,11 +3,19 @@ import type { AppSettings } from '../../../../shared/ipc-contract'
 import type { DashboardGlobalConfig } from '../../../../shared/dashboard-contract'
 import { CustomLink, Profile } from '../../../../shared/types'
 import { useProfileStore } from '../../hooks/useProfiles'
+import { useDashboardStore } from '../../hooks/useDashboard'
+import { DeleteConfirmNoticeModal, type ProfileDeleteTarget } from './DeleteConfirmNoticeModal'
 import { modKey } from '../../lib/shortcut-label'
 import AiSettingsForm from './AiSettingsForm'
-import TeamSlackSettings from './TeamSlackSettings'
-
-export type SettingsTabKey = 'general' | 'sidebar' | 'ai' | 'our_slack' | 'accounts' | 'maintenance'
+import { LogsObservabilityTab } from './LogsObservabilityTab'
+export type SettingsTabKey =
+  | 'general'
+  | 'sidebar'
+  | 'ai'
+  | 'accounts'
+  | 'logs'
+  | 'maintenance'
+  | 'advance'
 
 interface UnifiedSettingsModalProps {
   open: boolean
@@ -20,6 +28,7 @@ interface UnifiedSettingsModalProps {
   onImportProfiles: () => void
   onAdminLogout: () => void
   onAddGoogleAccount?: () => void
+  onDeleteProfile?: (profileId: string, deleteCards?: boolean) => void
   onSelectProfile?: (profileId: string) => void
   onOpenCustomLink?: (profileId: string, link: CustomLink) => void
 }
@@ -35,14 +44,24 @@ export function UnifiedSettingsModal({
   onImportProfiles,
   onAdminLogout,
   onAddGoogleAccount,
+  onDeleteProfile,
   onSelectProfile: _onSelectProfile,
   onOpenCustomLink: _onOpenCustomLink
 }: UnifiedSettingsModalProps): React.JSX.Element | null {
   const [activeTab, setActiveTab] = useState<SettingsTabKey>(initialTab)
   const [globalConfig, setGlobalConfig] = useState<DashboardGlobalConfig | null>(null)
+  const [isAdvanceMode, setIsAdvanceMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('orbit:settings-advance-mode') === 'true'
+    } catch {
+      return false
+    }
+  })
 
   // Accounts state
   const profiles = useProfileStore((s) => s.profiles)
+  const snapshot = useDashboardStore((s) => s.snapshot)
+  const [deleteProfileTarget, setDeleteProfileTarget] = useState<ProfileDeleteTarget | null>(null)
   const [addingLinkForProfileId, setAddingLinkForProfileId] = useState<string | null>(null)
   const [customName, setCustomName] = useState('')
   const [customUrl, setCustomUrl] = useState('')
@@ -50,6 +69,9 @@ export function UnifiedSettingsModal({
 
   useEffect(() => {
     if (open) {
+      if (initialTab !== 'general' && initialTab !== 'advance') {
+        setIsAdvanceMode(true)
+      }
       setActiveTab(initialTab)
     }
   }, [open, initialTab])
@@ -140,14 +162,19 @@ export function UnifiedSettingsModal({
         : 'Not configured'
     : 'Checking…'
 
-  const navItems = [
-    { key: 'general' as const, label: 'Preferences & Appearance', icon: '🎨' },
-    { key: 'sidebar' as const, label: 'Sidebar & Navigation', icon: '📑' },
-    { key: 'ai' as const, label: 'Global AI & NVIDIA NIM', icon: '🤖' },
-    { key: 'our_slack' as const, label: 'Team Slack (Our Slack)', icon: '🏢' },
-    { key: 'accounts' as const, label: 'Accounts & Workspaces', icon: '👥' },
-    { key: 'maintenance' as const, label: 'System & Maintenance', icon: '🛡️' }
+  const allNavItems: Array<{ key: SettingsTabKey; label: string; icon: string }> = [
+    { key: 'general', label: 'Preferences & Appearance', icon: '🎨' },
+    { key: 'advance', label: 'Advance Control', icon: '🎛️' },
+    { key: 'sidebar', label: 'Sidebar & Navigation', icon: '📑' },
+    { key: 'ai', label: 'Global AI & NVIDIA NIM', icon: '🤖' },
+    { key: 'accounts', label: 'Accounts & Workspaces', icon: '👥' },
+    { key: 'logs', label: 'Logs & Observability', icon: '📜' },
+    { key: 'maintenance', label: 'System & Maintenance', icon: '🛡️' }
   ]
+
+  const visibleNavItems = isAdvanceMode
+    ? allNavItems
+    : allNavItems.filter((item) => item.key === 'general' || item.key === 'advance')
 
   return (
     <div
@@ -164,12 +191,12 @@ export function UnifiedSettingsModal({
         aria-modal="true"
         aria-label="Global Settings Hub"
         style={{
-          width: '94vw',
-          maxWidth: '1240px',
-          height: '86vh',
+          width: 'min(1440px, 98vw)',
+          height: 'min(92vh, 920px)',
+          maxHeight: 'min(92vh, 920px)',
           display: 'flex',
           flexDirection: 'column',
-          backgroundColor: '#090d16',
+          backgroundColor: 'var(--surface-2)',
           borderRadius: '14px',
           border: '1px solid rgba(255, 255, 255, 0.1)',
           boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.85)',
@@ -222,13 +249,91 @@ export function UnifiedSettingsModal({
               gap: '6px'
             }}
           >
-            {navItems.map((item) => {
+            {/* Advance Settings Mode Switch at top of sidebar */}
+            <div
+              style={{
+                padding: '10px 12px',
+                marginBottom: '8px',
+                borderRadius: '8px',
+                background: isAdvanceMode ? 'rgba(59, 130, 246, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+                border: isAdvanceMode ? '1px solid rgba(59, 130, 246, 0.35)' : '1px solid rgba(255, 255, 255, 0.08)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '8px'
+              }}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#f1f5f9' }}>
+                  ⚡ Advanced Settings
+                </span>
+                <span style={{ fontSize: '10.5px', color: '#64748b' }}>
+                  {isAdvanceMode ? 'All 7 tabs visible' : 'Basic view (2 tabs)'}
+                </span>
+              </div>
+              <label
+                style={{
+                  position: 'relative',
+                  display: 'inline-block',
+                  width: '34px',
+                  height: '18px',
+                  cursor: 'pointer',
+                  margin: 0
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={isAdvanceMode}
+                  onChange={(e) => {
+                    const next = e.target.checked
+                    setIsAdvanceMode(next)
+                    try {
+                      localStorage.setItem('orbit:settings-advance-mode', String(next))
+                    } catch {
+                      // ignore localStorage errors
+                    }
+                    if (!next && activeTab !== 'general' && activeTab !== 'advance') {
+                      setActiveTab('general')
+                    }
+                  }}
+                  style={{ opacity: 0, width: 0, height: 0 }}
+                />
+                <span
+                  style={{
+                    position: 'absolute',
+                    cursor: 'pointer',
+                    inset: 0,
+                    backgroundColor: isAdvanceMode ? '#3b82f6' : 'rgba(255, 255, 255, 0.2)',
+                    transition: '0.2s',
+                    borderRadius: '18px'
+                  }}
+                >
+                  <span
+                    style={{
+                      position: 'absolute',
+                      height: '14px',
+                      width: '14px',
+                      left: isAdvanceMode ? '18px' : '2px',
+                      bottom: '2px',
+                      backgroundColor: 'white',
+                      transition: '0.2s',
+                      borderRadius: '50%'
+                    }}
+                  />
+                </span>
+              </label>
+            </div>
+
+            {visibleNavItems.map((item) => {
               const active = activeTab === item.key
               return (
                 <button
                   key={item.key}
                   type="button"
-                  onClick={() => setActiveTab(item.key)}
+                  onClick={() => {
+                    setActiveTab(item.key)
+                    void window.api?.logs?.logAction('nav', 'info', `Switched settings tab to ${item.label}`)
+                  }}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -258,7 +363,7 @@ export function UnifiedSettingsModal({
               flex: 1,
               overflowY: 'auto',
               padding: '24px 32px',
-              background: '#090d16'
+              background: 'var(--bg-page)'
             }}
           >
             {/* TAB: GENERAL / PREFERENCES */}
@@ -266,128 +371,425 @@ export function UnifiedSettingsModal({
               <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                 <header>
                   <h3 style={{ margin: 0, fontSize: '16px', color: '#f8fafc' }}>
-                    Preferences & Appearance
+                    Preferences &amp; Appearance
                   </h3>
                   <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#94a3b8' }}>
-                    Control application theme, layout density, and notification behaviors.
+                    Configure visual appearance, notifications, workspace layout, and system idle behaviors.
                   </p>
                 </header>
 
-                <div
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '16px',
-                    background: 'rgba(15, 23, 42, 0.4)',
-                    padding: '20px',
-                    borderRadius: '10px',
-                    border: '1px solid rgba(255, 255, 255, 0.06)'
-                  }}
-                >
-                  <label className="settings-row">
-                    <span>Theme</span>
-                    <select
-                      value={settings.theme}
-                      onChange={(e) => onChangeSettings({ theme: e.target.value as AppSettings['theme'] })}
-                    >
-                      <option value="dark">Dark</option>
-                      <option value="light">Light</option>
-                      <option value="system">System</option>
-                    </select>
-                  </label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {/* Card 1: Application Appearance & Theme */}
+                  <div
+                    style={{
+                      background: 'rgba(15, 23, 42, 0.4)',
+                      padding: '18px 20px',
+                      borderRadius: '10px',
+                      border: '1px solid rgba(255, 255, 255, 0.07)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <h4 style={{ margin: 0, fontSize: '14px', color: '#e2e8f0', fontWeight: 600 }}>
+                          🎨 Application Appearance &amp; Theme
+                        </h4>
+                        <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginTop: '2px' }}>
+                          Visual styling and spacing applied across all views
+                        </span>
+                      </div>
+                      <span
+                        style={{
+                          fontSize: '10.5px',
+                          fontWeight: 600,
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          background: 'rgba(99, 102, 241, 0.15)',
+                          color: '#c7d2fe',
+                          border: '1px solid rgba(99, 102, 241, 0.3)'
+                        }}
+                      >
+                        Entire App
+                      </span>
+                    </div>
 
-                  <label className="settings-row">
-                    <span>Sidebar density</span>
-                    <select
-                      value={settings.sidebarDensity}
-                      onChange={(e) =>
-                        onChangeSettings({
-                          sidebarDensity: e.target.value as AppSettings['sidebarDensity']
-                        })
-                      }
-                    >
-                      <option value="comfortable">Comfortable</option>
-                      <option value="compact">Compact</option>
-                    </select>
-                  </label>
+                    <label className="settings-row">
+                      <span>Theme</span>
+                      <select
+                        value={settings.theme}
+                        onChange={(e) => onChangeSettings({ theme: e.target.value as AppSettings['theme'] })}
+                      >
+                        <option value="dark">Dark</option>
+                        <option value="light">Light</option>
+                        <option value="system">System</option>
+                      </select>
+                    </label>
 
-                  <label className="settings-row">
-                    <span>Desktop notifications</span>
-                    <input
-                      type="checkbox"
-                      checked={settings.notificationsEnabled}
-                      onChange={(e) => onChangeSettings({ notificationsEnabled: e.target.checked })}
-                    />
-                  </label>
-
-                  <label className="settings-row">
-                    <span>Notification sound (beep on new unread)</span>
-                    <input
-                      type="checkbox"
-                      checked={settings.notificationSound}
-                      onChange={(e) => onChangeSettings({ notificationSound: e.target.checked })}
-                    />
-                  </label>
-
-                  <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: '4px' }}>
-                    <button
-                      type="button"
-                      className="btn secondary"
-                      onClick={() => {
-                        void window.api.app.testNotification().then((r) => {
-                          window.alert(r.message)
-                        })
-                      }}
-                      style={{ fontSize: '12px', padding: '6px 12px' }}
-                    >
-                      🔔 Send test notification
-                    </button>
+                    <label className="settings-row">
+                      <span>Sidebar density</span>
+                      <select
+                        value={settings.sidebarDensity}
+                        onChange={(e) =>
+                          onChangeSettings({
+                            sidebarDensity: e.target.value as AppSettings['sidebarDensity']
+                          })
+                        }
+                      >
+                        <option value="comfortable">Comfortable</option>
+                        <option value="compact">Compact</option>
+                      </select>
+                    </label>
                   </div>
 
-                  <label className="settings-row">
-                    <span>Lock after idle (minutes)</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={240}
-                      value={settings.idleLockMinutes}
-                      onChange={(e) => onChangeSettings({ idleLockMinutes: Number(e.target.value) || 15 })}
-                    />
-                  </label>
-
-                  <label className="settings-row">
-                    <span>Sleep inactive embeds (minutes, 0=off)</span>
-                    <input
-                      type="number"
-                      min={0}
-                      max={240}
-                      value={settings.idleSleepMinutes}
-                      onChange={(e) => onChangeSettings({ idleSleepMinutes: Number(e.target.value) || 0 })}
-                    />
-                  </label>
-
-                  <label className="settings-row">
-                    <span>Split view enabled</span>
-                    <input
-                      type="checkbox"
-                      checked={settings.splitViewEnabled}
-                      onChange={(e) => onChangeSettings({ splitViewEnabled: e.target.checked })}
-                    />
-                  </label>
-
-                  <label className="settings-row">
-                    <span>
-                      Show scraping progress line in cards
-                      <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
-                        Displays real-time channel &amp; message reader progress above embedded workspace views
+                  {/* Card 2: Workspace & Project Cards View */}
+                  <div
+                    style={{
+                      background: 'rgba(15, 23, 42, 0.4)',
+                      padding: '18px 20px',
+                      borderRadius: '10px',
+                      border: '1px solid rgba(255, 255, 255, 0.07)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <h4 style={{ margin: 0, fontSize: '14px', color: '#e2e8f0', fontWeight: 600 }}>
+                          🗂️ Workspace &amp; Project Cards View
+                        </h4>
+                        <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginTop: '2px' }}>
+                          Layout and progress monitoring within main project views
+                        </span>
+                      </div>
+                      <span
+                        style={{
+                          fontSize: '10.5px',
+                          fontWeight: 600,
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          background: 'rgba(56, 189, 248, 0.15)',
+                          color: '#bae6fd',
+                          border: '1px solid rgba(56, 189, 248, 0.3)'
+                        }}
+                      >
+                        Main View &amp; Cards
                       </span>
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={settings.showScrapeProgressLine ?? true}
-                      onChange={(e) => onChangeSettings({ showScrapeProgressLine: e.target.checked })}
-                    />
-                  </label>
+                    </div>
+
+                    <label className="settings-row">
+                      <span>
+                        Split view enabled
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Side-by-side workspace split viewing
+                        </span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={settings.splitViewEnabled}
+                        onChange={(e) => onChangeSettings({ splitViewEnabled: e.target.checked })}
+                      />
+                    </label>
+
+                    <label className="settings-row">
+                      <span>
+                        Show scraping progress line in cards
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Displays real-time channel &amp; message reader progress above embedded workspace views
+                        </span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={settings.showScrapeProgressLine ?? true}
+                        onChange={(e) => onChangeSettings({ showScrapeProgressLine: e.target.checked })}
+                      />
+                    </label>
+                  </div>
+
+                  {/* Card 3: Desktop Notifications & Alerts */}
+                  <div
+                    style={{
+                      background: 'rgba(15, 23, 42, 0.4)',
+                      padding: '18px 20px',
+                      borderRadius: '10px',
+                      border: '1px solid rgba(255, 255, 255, 0.07)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <h4 style={{ margin: 0, fontSize: '14px', color: '#e2e8f0', fontWeight: 600 }}>
+                          🔔 Desktop Notifications &amp; Alerts
+                        </h4>
+                        <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginTop: '2px' }}>
+                          System banners and audio chimes for unread messages
+                        </span>
+                      </div>
+                      <span
+                        style={{
+                          fontSize: '10.5px',
+                          fontWeight: 600,
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          background: 'rgba(251, 191, 36, 0.15)',
+                          color: '#fde68a',
+                          border: '1px solid rgba(251, 191, 36, 0.3)'
+                        }}
+                      >
+                        System Alerts
+                      </span>
+                    </div>
+
+                    <label className="settings-row">
+                      <span>Desktop notifications</span>
+                      <input
+                        type="checkbox"
+                        checked={settings.notificationsEnabled}
+                        onChange={(e) => onChangeSettings({ notificationsEnabled: e.target.checked })}
+                      />
+                    </label>
+
+                    <label className="settings-row">
+                      <span>Notification sound (beep on new unread)</span>
+                      <input
+                        type="checkbox"
+                        checked={settings.notificationSound}
+                        onChange={(e) => onChangeSettings({ notificationSound: e.target.checked })}
+                      />
+                    </label>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: '2px' }}>
+                      <button
+                        type="button"
+                        className="btn secondary"
+                        onClick={() => {
+                          void window.api.app.testNotification().then((r) => {
+                            window.alert(r.message)
+                          })
+                        }}
+                        style={{ fontSize: '12px', padding: '6px 12px' }}
+                      >
+                        🔔 Send test notification
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Card 4: Power & Idle Security */}
+                  <div
+                    style={{
+                      background: 'rgba(15, 23, 42, 0.4)',
+                      padding: '18px 20px',
+                      borderRadius: '10px',
+                      border: '1px solid rgba(255, 255, 255, 0.07)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <h4 style={{ margin: 0, fontSize: '14px', color: '#e2e8f0', fontWeight: 600 }}>
+                          🔒 Power &amp; Idle Security
+                        </h4>
+                        <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginTop: '2px' }}>
+                          Automatic inactivity locking and background resource preservation
+                        </span>
+                      </div>
+                      <span
+                        style={{
+                          fontSize: '10.5px',
+                          fontWeight: 600,
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          background: 'rgba(168, 85, 247, 0.15)',
+                          color: '#e9d5ff',
+                          border: '1px solid rgba(168, 85, 247, 0.3)'
+                        }}
+                      >
+                        Background &amp; Idle
+                      </span>
+                    </div>
+
+                    <label className="settings-row">
+                      <span>Lock after idle (minutes)</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={240}
+                        value={settings.idleLockMinutes}
+                        onChange={(e) => onChangeSettings({ idleLockMinutes: Number(e.target.value) || 15 })}
+                      />
+                    </label>
+
+                    <label className="settings-row">
+                      <span>Sleep inactive embeds (minutes, 0=off)</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={240}
+                        value={settings.idleSleepMinutes}
+                        onChange={(e) => onChangeSettings({ idleSleepMinutes: Number(e.target.value) || 0 })}
+                      />
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB: ADVANCE CONTROL */}
+            {activeTab === 'advance' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                <header>
+                  <h3 style={{ margin: 0, fontSize: '16px', color: '#f8fafc' }}>
+                    🎛️ Advance Control
+                  </h3>
+                  <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#94a3b8' }}>
+                    Fine-grained appearance look and profile default app preset configurations.
+                  </p>
+                </header>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {/* Card 1: Appearance Look & Header */}
+                  <div
+                    style={{
+                      background: 'rgba(15, 23, 42, 0.4)',
+                      padding: '18px 20px',
+                      borderRadius: '10px',
+                      border: '1px solid rgba(255, 255, 255, 0.07)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <h4 style={{ margin: 0, fontSize: '14px', color: '#e2e8f0', fontWeight: 600 }}>
+                          👁️ Appearance Look &amp; Header
+                        </h4>
+                        <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginTop: '2px' }}>
+                          Theme mode and header appearance controls at the top of the sidebar
+                        </span>
+                      </div>
+                      <span
+                        style={{
+                          fontSize: '10.5px',
+                          fontWeight: 600,
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          background: 'rgba(99, 102, 241, 0.15)',
+                          color: '#c7d2fe',
+                          border: '1px solid rgba(99, 102, 241, 0.3)'
+                        }}
+                      >
+                        Sidebar Header
+                      </span>
+                    </div>
+
+                    <label className="settings-row">
+                      <span>Default Appearance Look</span>
+                      <select
+                        value={settings.sidebarLook ?? 'ancient'}
+                        onChange={(e) =>
+                          onChangeSettings({
+                            sidebarLook: e.target.value as 'minimal' | 'ancient' | 'new-cosmic' | 'basic'
+                          })
+                        }
+                      >
+                        <option value="basic">Basic Look (Simple foundation)</option>
+                        <option value="minimal">Minimal Look (Clean &amp; compact)</option>
+                        <option value="new-cosmic">New Cosmic (Futuristic exploration)</option>
+                        <option value="ancient">Ancient Look (Default established theme)</option>
+                      </select>
+                    </label>
+
+                    <label className="settings-row">
+                      <span>
+                        Show Look Switcher in Sidebar Header
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Displays the [ Basic ] [ Minimal ] [ Cosmic ] [ Ancient ] toggle row at the top of the sidebar
+                        </span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={settings.showLookSwitcher ?? true}
+                        onChange={(e) =>
+                          onChangeSettings({ showLookSwitcher: e.target.checked })
+                        }
+                      />
+                    </label>
+                  </div>
+
+                  {/* Card 2: Default App Presets */}
+                  <div
+                    style={{
+                      background: 'rgba(15, 23, 42, 0.4)',
+                      padding: '18px 20px',
+                      borderRadius: '10px',
+                      border: '1px solid rgba(255, 255, 255, 0.07)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <h4 style={{ margin: 0, fontSize: '14px', color: '#e2e8f0', fontWeight: 600 }}>
+                          🧩 Default App Presets
+                        </h4>
+                        <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginTop: '2px' }}>
+                          Initial apps and web platforms preloaded into new profiles
+                        </span>
+                      </div>
+                      <span
+                        style={{
+                          fontSize: '10.5px',
+                          fontWeight: 600,
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          background: 'rgba(20, 184, 166, 0.15)',
+                          color: '#99f6e4',
+                          border: '1px solid rgba(20, 184, 166, 0.3)'
+                        }}
+                      >
+                        Profile Presets
+                      </span>
+                    </div>
+
+                    <div className="settings-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <span>Base Default Apps Layout</span>
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Choose the default messaging apps and tools shown when creating accounts
+                        </span>
+                      </div>
+                      <select
+                        value={settings.baseAppLayout ?? 'standard'}
+                        onChange={(e) =>
+                          onChangeSettings({
+                            baseAppLayout: e.target.value as 'none' | 'standard' | 'extended' | 'full'
+                          })
+                        }
+                        style={{
+                          background: '#0f172a',
+                          color: '#f8fafc',
+                          border: '1px solid rgba(255,255,255,0.15)',
+                          borderRadius: '6px',
+                          padding: '6px 12px',
+                          fontSize: '12px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <option value="none">Option 0: Minimal (No default apps — show only added websites)</option>
+                        <option value="standard">Option 1 (Default): Standard 3 apps (Slack, Teams, WhatsApp)</option>
+                        <option value="extended">Option 2: Extended (Slack, Teams, WhatsApp + Claude, ChatGPT)</option>
+                        <option value="full">Option 3: All-in-One (Slack, Teams, WhatsApp + 6 top tools)</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -397,252 +799,279 @@ export function UnifiedSettingsModal({
               <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                 <header>
                   <h3 style={{ margin: 0, fontSize: '16px', color: '#f8fafc' }}>
-                    Sidebar & Navigation
+                    Sidebar &amp; Navigation
                   </h3>
                   <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#94a3b8' }}>
                     Customize which sections, looks, and buttons appear in the sidebar navigation rail.
                   </p>
                 </header>
 
-                <div
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '20px',
-                    background: 'rgba(15, 23, 42, 0.4)',
-                    padding: '20px',
-                    borderRadius: '10px',
-                    border: '1px solid rgba(255, 255, 255, 0.06)'
-                  }}
-                >
-                  {/* Subsection 1: Appearance Look */}
-                  <div>
-                    <h4 style={{ margin: '0 0 10px', fontSize: '14px', color: '#e2e8f0', fontWeight: 600 }}>
-                      Appearance Look &amp; Header
-                    </h4>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      <label className="settings-row">
-                        <span>Default Appearance Look</span>
-                        <select
-                          value={settings.sidebarLook ?? 'ancient'}
-                          onChange={(e) =>
-                            onChangeSettings({
-                              sidebarLook: e.target.value as 'minimal' | 'ancient' | 'new-cosmic'
-                            })
-                          }
-                        >
-                          <option value="minimal">Minimal Look (Clean &amp; compact)</option>
-                          <option value="ancient">Ancient Look (Default established theme)</option>
-                          <option value="new-cosmic">New Cosmic (Futuristic exploration)</option>
-                        </select>
-                      </label>
-
-                      <label className="settings-row">
-                        <span>Show Look Switcher in Sidebar Header</span>
-                        <input
-                          type="checkbox"
-                          checked={settings.showLookSwitcher ?? true}
-                          onChange={(e) =>
-                            onChangeSettings({ showLookSwitcher: e.target.checked })
-                          }
-                        />
-                      </label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {/* Card 1: Left Sidebar Navigation Rail */}
+                  <div
+                    style={{
+                      background: 'rgba(15, 23, 42, 0.4)',
+                      padding: '18px 20px',
+                      borderRadius: '10px',
+                      border: '1px solid rgba(255, 255, 255, 0.07)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <h4 style={{ margin: 0, fontSize: '14px', color: '#e2e8f0', fontWeight: 600 }}>
+                          📑 Left Sidebar Navigation Rail
+                        </h4>
+                        <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginTop: '2px' }}>
+                          Items, shortcuts, and inputs rendered inside the left sidebar body
+                        </span>
+                      </div>
+                      <span
+                        style={{
+                          fontSize: '10.5px',
+                          fontWeight: 600,
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          background: 'rgba(56, 189, 248, 0.15)',
+                          color: '#bae6fd',
+                          border: '1px solid rgba(56, 189, 248, 0.3)'
+                        }}
+                      >
+                        Left Sidebar
+                      </span>
                     </div>
+
+                    <div className="settings-row" style={{ opacity: 0.9 }}>
+                      <span>
+                        Dashboard &amp; Projects
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Permanent anchor — always visible
+                        </span>
+                      </span>
+                      <span style={{ fontSize: '11px', color: '#4ade80', fontWeight: 600 }}>Permanent</span>
+                    </div>
+
+                    <label className="settings-row">
+                      <span>
+                        Show Recent Workspaces
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Quick access strip showing recently active workspaces below Dashboard
+                        </span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={settings.showRecentSection ?? true}
+                        onChange={(e) =>
+                          onChangeSettings({ showRecentSection: e.target.checked })
+                        }
+                      />
+                    </label>
+
+                    <label className="settings-row">
+                      <span>
+                        Show Google Email Sign-In in Sidebar
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Display Google email input and Continue with Google button in the left sidebar
+                        </span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={settings.showGoogleEmailInputInSidebar ?? true}
+                        onChange={(e) =>
+                          onChangeSettings({ showGoogleEmailInputInSidebar: e.target.checked })
+                        }
+                      />
+                    </label>
+
+                    <label className="settings-row">
+                      <span>
+                        Show &quot;Observer View&quot; Header in Sidebar
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Display a subtle &quot;OBSERVER VIEW&quot; divider label above the bottom 6 sidebar action buttons
+                        </span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={settings.showObserverViewHeader ?? false}
+                        onChange={(e) =>
+                          onChangeSettings({ showObserverViewHeader: e.target.checked })
+                        }
+                      />
+                    </label>
+
+                    <label className="settings-row">
+                      <span>
+                        Show &quot;Profile&quot; Navigation Button
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Show the &quot;All Profiles&quot; (or &quot;Profile&quot;) quick navigation button in the sidebar
+                        </span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={settings.showSidebarProfileNavButton ?? settings.showCosmicProfileNavButtons ?? true}
+                        onChange={(e) =>
+                          onChangeSettings({
+                            showSidebarProfileNavButton: e.target.checked
+                          })
+                        }
+                      />
+                    </label>
+
+                    <label className="settings-row">
+                      <span>
+                        Show &quot;Dashboard&quot; Navigation Button
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Show the &quot;Full Dashboard&quot; (or &quot;Dashboard&quot;) quick navigation button in the sidebar
+                        </span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={settings.showSidebarDashboardNavButton ?? settings.showCosmicProfileNavButtons ?? true}
+                        onChange={(e) =>
+                          onChangeSettings({
+                            showSidebarDashboardNavButton: e.target.checked
+                          })
+                        }
+                      />
+                    </label>
+
+                    <label className="settings-row">
+                      <span>
+                        Show Quick Actions on Sidebar Items
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Show hide (👁) and remove (×) action buttons when hovering over custom links in the sidebar
+                        </span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={settings.showSidebarItemActions ?? true}
+                        onChange={(e) =>
+                          onChangeSettings({ showSidebarItemActions: e.target.checked })
+                        }
+                      />
+                    </label>
+
+                    <label className="settings-row">
+                      <span>
+                        Show &quot;Hide&quot; Button on Profile Headers in Sidebar
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Display the eye hide button (👁) next to profile names in the main sidebar. Disabled by default to prevent accidental profile hiding.
+                        </span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={settings.showSidebarProfileHideButton ?? false}
+                        onChange={(e) =>
+                          onChangeSettings({ showSidebarProfileHideButton: e.target.checked })
+                        }
+                      />
+                    </label>
                   </div>
 
-                  <hr style={{ border: 'none', borderTop: '1px solid rgba(255, 255, 255, 0.08)', margin: 0 }} />
-
-                  {/* Subsection 2: Content Sections */}
-                  <div>
-                    <h4 style={{ margin: '0 0 10px', fontSize: '14px', color: '#e2e8f0', fontWeight: 600 }}>
-                      Navigation Sections
-                    </h4>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      <div className="settings-row" style={{ opacity: 0.9 }}>
-                        <span>
-                          Dashboard &amp; Projects
-                          <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
-                            Permanent anchor — always visible
-                          </span>
+                  {/* Card 2: Modals & Creation Dialogs */}
+                  <div
+                    style={{
+                      background: 'rgba(15, 23, 42, 0.4)',
+                      padding: '18px 20px',
+                      borderRadius: '10px',
+                      border: '1px solid rgba(255, 255, 255, 0.07)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <h4 style={{ margin: 0, fontSize: '14px', color: '#e2e8f0', fontWeight: 600 }}>
+                          🪟 Modals &amp; Creation Dialogs
+                        </h4>
+                        <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginTop: '2px' }}>
+                          Options shown inside popup creation dialogs for projects and profiles
                         </span>
-                        <span style={{ fontSize: '11px', color: '#4ade80', fontWeight: 600 }}>Permanent</span>
                       </div>
-
-                      <label className="settings-row">
-                        <span>
-                          Show Recent Workspaces
-                          <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
-                            Quick access strip showing recently active workspaces below Dashboard
-                          </span>
-                        </span>
-                        <input
-                          type="checkbox"
-                          checked={settings.showRecentSection ?? true}
-                          onChange={(e) =>
-                            onChangeSettings({ showRecentSection: e.target.checked })
-                          }
-                        />
-                      </label>
-
-                      <label className="settings-row">
-                        <span>
-                          Show Google Email Sign-In in Sidebar
-                          <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
-                            Display Google email input and Continue with Google button in the left sidebar
-                          </span>
-                        </span>
-                        <input
-                          type="checkbox"
-                          checked={settings.showGoogleEmailInputInSidebar ?? true}
-                          onChange={(e) =>
-                            onChangeSettings({ showGoogleEmailInputInSidebar: e.target.checked })
-                          }
-                        />
-                      </label>
-
-                      <label className="settings-row">
-                        <span>
-                          Show Account Scope Selector in Profile Modal
-                          <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
-                            Display Both / Global / Individual scope chips in the Add Profile dialog (defaults to Both when off)
-                          </span>
-                        </span>
-                        <input
-                          type="checkbox"
-                          checked={settings.showProfileScopeSelector ?? false}
-                          onChange={(e) =>
-                            onChangeSettings({ showProfileScopeSelector: e.target.checked })
-                          }
-                        />
-                      </label>
-
-                      <label className="settings-row">
-                        <span>
-                          Show "Observer View" Header in Sidebar
-                          <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
-                            Display a subtle "OBSERVER VIEW" divider label above the bottom 6 sidebar action buttons
-                          </span>
-                        </span>
-                        <input
-                          type="checkbox"
-                          checked={settings.showObserverViewHeader ?? false}
-                          onChange={(e) =>
-                            onChangeSettings({ showObserverViewHeader: e.target.checked })
-                          }
-                        />
-                      </label>
-
-                      <label className="settings-row">
-                        <span>
-                          Show &quot;Profile&quot; Navigation Button
-                          <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
-                            Show the &quot;All Profiles&quot; (or &quot;Profile&quot;) quick navigation button in the sidebar
-                          </span>
-                        </span>
-                        <input
-                          type="checkbox"
-                          checked={settings.showSidebarProfileNavButton ?? settings.showCosmicProfileNavButtons ?? true}
-                          onChange={(e) =>
-                            onChangeSettings({
-                              showSidebarProfileNavButton: e.target.checked
-                            })
-                          }
-                        />
-                      </label>
-
-                      <label className="settings-row">
-                        <span>
-                          Show &quot;Dashboard&quot; Navigation Button
-                          <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
-                            Show the &quot;Full Dashboard&quot; (or &quot;Dashboard&quot;) quick navigation button in the sidebar
-                          </span>
-                        </span>
-                        <input
-                          type="checkbox"
-                          checked={settings.showSidebarDashboardNavButton ?? settings.showCosmicProfileNavButtons ?? true}
-                          onChange={(e) =>
-                            onChangeSettings({
-                              showSidebarDashboardNavButton: e.target.checked
-                            })
-                          }
-                        />
-                      </label>
-
-                      <label className="settings-row">
-                        <span>
-                          Show Quick Actions on Sidebar Items
-                          <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
-                            Show hide (👁) and remove (×) action buttons when hovering over custom links in the sidebar
-                          </span>
-                        </span>
-                        <input
-                          type="checkbox"
-                          checked={settings.showSidebarItemActions ?? true}
-                          onChange={(e) =>
-                            onChangeSettings({ showSidebarItemActions: e.target.checked })
-                          }
-                        />
-                      </label>
-
-                      <label className="settings-row">
-                        <span>
-                          Show "Hide" Button on Profile Headers in Sidebar
-                          <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
-                            Display the eye hide button (👁) next to profile names in the main sidebar. Disabled by default to prevent accidental profile hiding.
-                          </span>
-                        </span>
-                        <input
-                          type="checkbox"
-                          checked={settings.showSidebarProfileHideButton ?? false}
-                          onChange={(e) =>
-                            onChangeSettings({ showSidebarProfileHideButton: e.target.checked })
-                          }
-                        />
-                      </label>
-
-                      <div className="settings-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div>
-                          <span>Base Default Apps Layout</span>
-                          <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
-                            Choose the default messaging apps and tools shown when creating accounts
-                          </span>
-                        </div>
-                        <select
-                          value={settings.baseAppLayout ?? 'standard'}
-                          onChange={(e) =>
-                            onChangeSettings({
-                              baseAppLayout: e.target.value as 'none' | 'standard' | 'extended' | 'full'
-                            })
-                          }
-                          style={{
-                            background: '#0f172a',
-                            color: '#f8fafc',
-                            border: '1px solid rgba(255,255,255,0.15)',
-                            borderRadius: '6px',
-                            padding: '6px 12px',
-                            fontSize: '12px',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          <option value="none">Option 0: Minimal (No default apps — show only added websites)</option>
-                          <option value="standard">Option 1 (Default): Standard 3 apps (Slack, Teams, WhatsApp)</option>
-                          <option value="extended">Option 2: Extended (Slack, Teams, WhatsApp + Claude, ChatGPT)</option>
-                          <option value="full">Option 3: All-in-One (Slack, Teams, WhatsApp + 6 top tools)</option>
-                        </select>
-                      </div>
+                      <span
+                        style={{
+                          fontSize: '10.5px',
+                          fontWeight: 600,
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          background: 'rgba(234, 179, 8, 0.15)',
+                          color: '#fef08a',
+                          border: '1px solid rgba(234, 179, 8, 0.3)'
+                        }}
+                      >
+                        Popups &amp; Dialogs
+                      </span>
                     </div>
+
+                    <label className="settings-row">
+                      <span>
+                        Show &quot;Linked Accounts &amp; Workspaces&quot; in New Project Modal
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Display the &quot;+ Add Accounts&quot; linking section when creating a new project card
+                        </span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={settings.showNewProjectLinkedAccounts ?? true}
+                        onChange={(e) =>
+                          onChangeSettings({ showNewProjectLinkedAccounts: e.target.checked })
+                        }
+                      />
+                    </label>
+
+                    <label className="settings-row">
+                      <span>
+                        Show Account Scope Selector in Profile Modal
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Display Both / Global / Individual scope chips in the Add Profile dialog (defaults to Both when off)
+                        </span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={settings.showProfileScopeSelector ?? false}
+                        onChange={(e) =>
+                          onChangeSettings({ showProfileScopeSelector: e.target.checked })
+                        }
+                      />
+                    </label>
                   </div>
 
-                  <hr style={{ border: 'none', borderTop: '1px solid rgba(255, 255, 255, 0.08)', margin: 0 }} />
-
-                  {/* Subsection 3: Bottom Action Buttons */}
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                      <h4 style={{ margin: 0, fontSize: '14px', color: '#e2e8f0', fontWeight: 600 }}>
-                        Sidebar Bottom Action Buttons
-                      </h4>
-                      <span style={{ fontSize: '11px', color: '#94a3b8' }}>
-                        Grid automatically adjusts layout based on active buttons
+                  {/* Card 3: Sidebar Bottom Action Buttons */}
+                  <div
+                    style={{
+                      background: 'rgba(15, 23, 42, 0.4)',
+                      padding: '18px 20px',
+                      borderRadius: '10px',
+                      border: '1px solid rgba(255, 255, 255, 0.07)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <h4 style={{ margin: 0, fontSize: '14px', color: '#e2e8f0', fontWeight: 600 }}>
+                          ⚡ Sidebar Bottom Action Buttons
+                        </h4>
+                        <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginTop: '2px' }}>
+                          Grid automatically adjusts layout based on active buttons
+                        </span>
+                      </div>
+                      <span
+                        style={{
+                          fontSize: '10.5px',
+                          fontWeight: 600,
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          background: 'rgba(236, 72, 153, 0.15)',
+                          color: '#fbcfe8',
+                          border: '1px solid rgba(236, 72, 153, 0.3)'
+                        }}
+                      >
+                        Sidebar Footer Grid
                       </span>
                     </div>
 
@@ -819,30 +1248,6 @@ export function UnifiedSettingsModal({
               </div>
             )}
 
-            {/* TAB: OUR SLACK */}
-            {activeTab === 'our_slack' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                <header>
-                  <h3 style={{ margin: 0, fontSize: '16px', color: '#f8fafc' }}>
-                    Team Slack (Our Slack)
-                  </h3>
-                  <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#94a3b8' }}>
-                    Your central agency workspace connected once across all project cards.
-                  </p>
-                </header>
-
-                <div
-                  style={{
-                    background: 'rgba(15, 23, 42, 0.4)',
-                    padding: '20px',
-                    borderRadius: '10px',
-                    border: '1px solid rgba(255, 255, 255, 0.06)'
-                  }}
-                >
-                  <TeamSlackSettings />
-                </div>
-              </div>
-            )}
 
             {/* TAB: ACCOUNTS & WORKSPACES */}
             {activeTab === 'accounts' && (
@@ -885,21 +1290,70 @@ export function UnifiedSettingsModal({
                         border: '1px solid rgba(255, 255, 255, 0.08)'
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                           <span style={{ fontSize: '16px' }}>👤</span>
                           <span style={{ fontWeight: 600, color: '#f8fafc', fontSize: '14px' }}>
                             {profile.displayName || profile.id}
                           </span>
+                          {profile.customName && profile.customName !== profile.displayName && (
+                            <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+                              ({profile.customName})
+                            </span>
+                          )}
+                          <span
+                            style={{
+                              fontSize: '11px',
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              backgroundColor:
+                                profile.googleAuthStatus === 'signed-in'
+                                  ? 'rgba(34, 197, 94, 0.15)'
+                                  : 'rgba(239, 68, 68, 0.15)',
+                              color:
+                                profile.googleAuthStatus === 'signed-in'
+                                  ? '#4ade80'
+                                  : '#f87171',
+                              fontWeight: 500
+                            }}
+                          >
+                            {profile.googleAuthStatus === 'signed-in' ? '● Verified' : '○ Not Signed In'}
+                          </span>
                         </div>
-                        <button
-                          type="button"
-                          className="btn ghost"
-                          onClick={() => void handleToggleSidebarVisibility(profile)}
-                          style={{ fontSize: '12px', padding: '4px 10px', color: profile.hiddenInSidebar ? '#94a3b8' : '#60a5fa' }}
-                        >
-                          {profile.hiddenInSidebar ? '👁️ Show in Sidebar' : '👁️‍🗨️ Hide from Sidebar'}
-                        </button>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <button
+                            type="button"
+                            className="btn ghost"
+                            onClick={() => void handleToggleSidebarVisibility(profile)}
+                            style={{ fontSize: '12px', padding: '4px 10px', color: profile.hiddenInSidebar ? '#94a3b8' : '#60a5fa' }}
+                          >
+                            {profile.hiddenInSidebar ? '👁️ Show in Sidebar' : '👁️‍🗨️ Hide from Sidebar'}
+                          </button>
+                          {onDeleteProfile && (
+                            <button
+                              type="button"
+                              className="btn ghost"
+                              onClick={() => {
+                                const linked = (snapshot?.projects ?? [])
+                                  .filter((p) => p.project.profileId === profile.id)
+                                  .map((p) => ({
+                                    id: p.project.id,
+                                    name: p.project.name || p.project.teamName || 'Card'
+                                  }))
+                                setDeleteProfileTarget({
+                                  id: profile.id,
+                                  name: profile.customName || profile.displayName,
+                                  email: profile.displayName,
+                                  cards: linked
+                                })
+                              }}
+                              style={{ fontSize: '12px', padding: '4px 10px', color: '#f87171' }}
+                              title="Permanently remove account"
+                            >
+                              🗑️ Delete
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       {/* Custom Links for this profile */}
@@ -1070,9 +1524,23 @@ export function UnifiedSettingsModal({
                 </div>
               </div>
             )}
+
+            {activeTab === 'logs' && <LogsObservabilityTab />}
           </main>
         </div>
       </div>
+
+      <DeleteConfirmNoticeModal
+        open={Boolean(deleteProfileTarget)}
+        onClose={() => setDeleteProfileTarget(null)}
+        target={deleteProfileTarget ? { type: 'profile', profile: deleteProfileTarget } : null}
+        onConfirmProfileDelete={async (profileId, deleteCards) => {
+          if (onDeleteProfile) {
+            onDeleteProfile(profileId, deleteCards)
+          }
+          setDeleteProfileTarget(null)
+        }}
+      />
     </div>
   )
 }

@@ -105,4 +105,16 @@ describe('AdminAuthController remembered session', () => {
     await again.ready()
     expect(again.isAuthenticated()).toBe(false)
   })
+
+  it('auto-authenticates and provides default credentials when running in zero-.env mode', async () => {
+    delete process.env.ADMIN_USERNAME
+    delete process.env.ADMIN_PASSWORD
+    delete process.env.ADMIN_EMAIL
+
+    const sessionPath = defaultAdminSessionPath(dir)
+    const auth = new AdminAuthController({ sessionPath })
+    await auth.ready()
+    expect(auth.isAuthenticated()).toBe(true)
+    expect(auth.status().configured).toBe(true)
+  })
 })

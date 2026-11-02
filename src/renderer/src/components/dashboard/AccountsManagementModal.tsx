@@ -9,6 +9,11 @@ import {
 } from '../../../../shared/types'
 import { useDashboardStore } from '../../hooks/useDashboard'
 import { useProfileStore } from '../../hooks/useProfiles'
+import {
+  DeleteConfirmNoticeModal,
+  CardDeleteTarget,
+  ProfileDeleteTarget
+} from './DeleteConfirmNoticeModal'
 
 export type HubNavSection = 'observer' | 'global' | 'individual'
 
@@ -21,6 +26,7 @@ interface AccountsManagementModalProps {
   onAddGoogleAccount?: () => void
   onSelectProfile?: (profileId: string) => void
   onOpenCustomLink?: (profileId: string, link: CustomLink) => void
+  onOpenObserver?: () => void
 }
 
 export function AccountsManagementModal({
@@ -31,7 +37,8 @@ export function AccountsManagementModal({
   onNewProfile,
   onAddGoogleAccount,
   onSelectProfile: _onSelectProfile,
-  onOpenCustomLink: _onOpenCustomLink
+  onOpenCustomLink: _onOpenCustomLink,
+  onOpenObserver
 }: AccountsManagementModalProps): React.JSX.Element | null {
   const profiles = useProfileStore((s) => s.profiles)
   const activeProfileId = useProfileStore((s) => s.activeProfileId)
@@ -53,6 +60,27 @@ export function AccountsManagementModal({
   // Project Filter State: 'all' | 'active' | 'stopped' | 'archived'
   const [projectStatusFilter, setProjectStatusFilter] = useState<'all' | 'active' | 'stopped' | 'archived'>('all')
   const [errorMsg] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<
+    | { type: 'card'; card: CardDeleteTarget }
+    | { type: 'profile'; profile: ProfileDeleteTarget }
+    | null
+  >(null)
+
+  const handleConfirmCardDelete = async (cardId: string): Promise<void> => {
+    await useDashboardStore.getState().deleteProject(cardId)
+    await loadSnapshot()
+  }
+
+  const handleConfirmProfileDelete = async (profileId: string, deleteCards: boolean): Promise<void> => {
+    await useProfileStore.getState().deleteProfile(profileId, deleteCards)
+    await loadSnapshot()
+    const remaining = individualProfiles.filter((p) => p.id !== profileId)
+    if (remaining.length > 0) {
+      setSelectedProfileId(remaining[0]!.id)
+    } else {
+      setActiveSection('global')
+    }
+  }
 
   // Ensure snapshot is loaded when hub opens
   useEffect(() => {
@@ -168,8 +196,8 @@ export function AccountsManagementModal({
             alignItems: 'center',
             justifyContent: 'space-between',
             padding: '16px 24px',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-            background: 'rgba(12, 17, 33, 0.98)'
+            borderBottom: '1px solid var(--border)',
+            background: 'var(--surface-2)'
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
@@ -269,8 +297,8 @@ export function AccountsManagementModal({
           <aside
             style={{
               width: '280px',
-              borderRight: '1px solid rgba(255, 255, 255, 0.08)',
-              background: 'rgba(10, 15, 29, 0.96)',
+              borderRight: '1px solid var(--border)',
+              background: 'var(--surface)',
               padding: '16px 12px',
               display: 'flex',
               flexDirection: 'column',
@@ -437,7 +465,7 @@ export function AccountsManagementModal({
               flex: 1,
               overflowY: 'auto',
               padding: '24px 32px',
-              background: '#090d16',
+              background: 'var(--bg-page)',
               display: 'flex',
               flexDirection: 'column',
               gap: '24px'
@@ -454,6 +482,19 @@ export function AccountsManagementModal({
                   <p style={{ margin: '6px 0 0', fontSize: '13px', color: '#94a3b8', maxWidth: '420px' }}>
                     Observer streams are kept clean and active in the background. Live activity feeds and surveillance channels will populate here.
                   </p>
+                  {onOpenObserver && (
+                    <button
+                      type="button"
+                      className="btn primary"
+                      onClick={() => {
+                        onClose()
+                        onOpenObserver()
+                      }}
+                      style={{ marginTop: '16px', fontSize: '13px', padding: '8px 18px' }}
+                    >
+                      🔭 Open Dedicated Observer Canvas
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -626,6 +667,35 @@ export function AccountsManagementModal({
                     >
                       {currentProfile.hiddenInSidebar ? '🚫 Hidden in sidebar' : '👁 Shown in sidebar'}
                     </button>
+                    <button
+                      type="button"
+                      className="btn ghost btn-sm"
+                      style={{
+                        fontSize: '12px',
+                        padding: '6px 12px',
+                        color: '#f87171',
+                        border: '1px solid rgba(239, 68, 68, 0.3)',
+                        background: 'rgba(239, 68, 68, 0.08)',
+                        cursor: 'pointer'
+                      }}
+                      onClick={() => {
+                        const linkedCards = allProjects
+                          .filter((p) => p.profileId === currentProfile.id)
+                          .map((p) => ({ id: p.id, name: p.name || p.teamName || 'Card' }))
+                        setDeleteTarget({
+                          type: 'profile',
+                          profile: {
+                            id: currentProfile.id,
+                            name: profileDisplayLabel(currentProfile),
+                            email: currentProfile.displayName,
+                            cards: linkedCards
+                          }
+                        })
+                      }}
+                      title="Permanently delete this profile"
+                    >
+                      🗑️ Delete Profile
+                    </button>
                   </div>
                 </div>
 
@@ -739,49 +809,83 @@ export function AccountsManagementModal({
                                 </div>
                               </div>
 
-                              {/* Interactive Workflow Status Selector */}
-                              <select
-                                value={status}
-                                onChange={(e) =>
-                                  void handleUpdateProjectStatus(project, e.target.value as ProjectWorkflowStatus)
-                                }
-                                style={{
-                                  fontSize: '11px',
-                                  fontWeight: 650,
-                                  padding: '4px 8px',
-                                  borderRadius: '6px',
-                                  cursor: 'pointer',
-                                  border:
-                                    status === 'active'
-                                      ? '1px solid #10b981'
-                                      : status === 'stopped'
-                                        ? '1px solid #f59e0b'
-                                        : status === 'removed'
-                                          ? '1px solid #ef4444'
-                                          : '1px solid #8b5cf6',
-                                  background:
-                                    status === 'active'
-                                      ? 'rgba(16, 185, 129, 0.12)'
-                                      : status === 'stopped'
-                                        ? 'rgba(245, 158, 11, 0.12)'
-                                        : status === 'removed'
-                                          ? 'rgba(239, 68, 68, 0.12)'
-                                          : 'rgba(139, 92, 246, 0.12)',
-                                  color:
-                                    status === 'active'
-                                      ? '#34d399'
-                                      : status === 'stopped'
-                                        ? '#fbbf24'
-                                        : status === 'removed'
-                                          ? '#f87171'
-                                          : '#a78bfa'
-                                }}
-                              >
-                                <option value="active" style={{ background: '#0f172a', color: '#fff' }}>🟢 Active</option>
-                                <option value="stopped" style={{ background: '#0f172a', color: '#fff' }}>⏸️ Stopped</option>
-                                <option value="removed" style={{ background: '#0f172a', color: '#fff' }}>🚫 Removed (Client Stop)</option>
-                                <option value="completed" style={{ background: '#0f172a', color: '#fff' }}>✅ Completed</option>
-                              </select>
+                              {/* Interactive Workflow Status Selector & Delete */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <select
+                                  value={status}
+                                  onChange={(e) =>
+                                    void handleUpdateProjectStatus(project, e.target.value as ProjectWorkflowStatus)
+                                  }
+                                  style={{
+                                    fontSize: '11px',
+                                    fontWeight: 650,
+                                    padding: '4px 8px',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    border:
+                                      status === 'active'
+                                        ? '1px solid #10b981'
+                                        : status === 'stopped'
+                                          ? '1px solid #f59e0b'
+                                          : status === 'removed'
+                                            ? '1px solid #ef4444'
+                                            : '1px solid #8b5cf6',
+                                    background:
+                                      status === 'active'
+                                        ? 'rgba(16, 185, 129, 0.12)'
+                                        : status === 'stopped'
+                                          ? 'rgba(245, 158, 11, 0.12)'
+                                          : status === 'removed'
+                                            ? 'rgba(239, 68, 68, 0.12)'
+                                            : 'rgba(139, 92, 246, 0.12)',
+                                    color:
+                                      status === 'active'
+                                        ? '#34d399'
+                                        : status === 'stopped'
+                                          ? '#fbbf24'
+                                          : status === 'removed'
+                                            ? '#f87171'
+                                            : '#a78bfa'
+                                  }}
+                                >
+                                  <option value="active" style={{ background: '#0f172a', color: '#fff' }}>🟢 Active</option>
+                                  <option value="stopped" style={{ background: '#0f172a', color: '#fff' }}>⏸️ Stopped</option>
+                                  <option value="removed" style={{ background: '#0f172a', color: '#fff' }}>🚫 Removed (Client Stop)</option>
+                                  <option value="completed" style={{ background: '#0f172a', color: '#fff' }}>✅ Completed</option>
+                                </select>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setDeleteTarget({
+                                      type: 'card',
+                                      card: {
+                                        id: project.id,
+                                        name: project.name || project.teamName || 'Card',
+                                        clientName: project.clientName,
+                                        teamName: project.teamName,
+                                        channelCount: project.monitors?.length ?? 0
+                                      }
+                                    })
+                                  }}
+                                  title={`Delete card "${project.name}"`}
+                                  style={{
+                                    background: 'rgba(239, 68, 68, 0.08)',
+                                    border: '1px solid rgba(239, 68, 68, 0.25)',
+                                    color: '#f87171',
+                                    padding: '4px 8px',
+                                    borderRadius: '6px',
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '3px',
+                                    transition: 'all 0.12s ease'
+                                  }}
+                                >
+                                  🗑️ Delete
+                                </button>
+                              </div>
                             </div>
 
                             {/* Monitors / Channels list */}
@@ -812,6 +916,14 @@ export function AccountsManagementModal({
           </main>
         </div>
       </div>
+
+      <DeleteConfirmNoticeModal
+        open={Boolean(deleteTarget)}
+        onClose={() => setDeleteTarget(null)}
+        target={deleteTarget}
+        onConfirmCardDelete={handleConfirmCardDelete}
+        onConfirmProfileDelete={handleConfirmProfileDelete}
+      />
     </div>
   )
 }

@@ -44,7 +44,8 @@ const api: IpcApi = {
   profiles: {
     list: () => ipcRenderer.invoke(IpcChannels.ProfileList),
     create: (displayName: string) => ipcRenderer.invoke(IpcChannels.ProfileCreate, { displayName }),
-    delete: (profileId: string) => ipcRenderer.invoke(IpcChannels.ProfileDelete, { profileId }),
+    delete: (profileId: string, deleteCards?: boolean) =>
+      ipcRenderer.invoke(IpcChannels.ProfileDelete, { profileId, deleteCards }),
     deleteUnsignedDuplicates: () => ipcRenderer.invoke(IpcChannels.ProfileDeleteUnsignedDuplicates),
     clearStuckAuth: () => ipcRenderer.invoke(IpcChannels.ProfileClearStuckAuth),
     cancelAuthBusy: (profileId?: string) =>
@@ -87,8 +88,10 @@ const api: IpcApi = {
       ipcRenderer.invoke(IpcChannels.ProfileUpdateBounds, bounds),
     setEmbedVisible: (visible: boolean) =>
       ipcRenderer.invoke(IpcChannels.ProfileSetEmbedVisible, { visible }),
-    activateCardSlackEmbed: (payload: { profileId: string; teamId: string; bounds: ViewportBounds }) =>
+    activateCardSlackEmbed: (payload: { projectId?: string; profileId: string; teamId?: string; appId?: AppId; bounds: ViewportBounds }) =>
       ipcRenderer.invoke(IpcChannels.ProfileActivateCardSlackEmbed, payload),
+    startCardAppLogin: (payload: { projectId: string; profileId: string; appId: AppId; bounds?: ViewportBounds }) =>
+      ipcRenderer.invoke(IpcChannels.ProfileStartCardAppLogin, payload),
     updateCardSlackEmbedBounds: (bounds: ViewportBounds) =>
       ipcRenderer.invoke(IpcChannels.ProfileUpdateCardSlackEmbedBounds, { bounds }),
     clearCardSlackEmbed: () => ipcRenderer.invoke(IpcChannels.ProfileClearCardSlackEmbed),
@@ -407,6 +410,8 @@ const api: IpcApi = {
         teamId: string
         profileId: string
       }>>,
+    checkCardAuth: (payload: { projectId: string; appId?: AppId }) =>
+      ipcRenderer.invoke(IpcChannels.DashboardCardCheckAuth, payload) as Promise<boolean>,
     syncSource: (payload: { projectId: string; sourceId?: string }) =>
       ipcRenderer.invoke(IpcChannels.DashboardSyncSource, payload) as Promise<{
         channelsRead: number
@@ -426,6 +431,19 @@ const api: IpcApi = {
       ipcRenderer.on(IpcChannels.DashboardScrapeEvent, listener)
       return () => ipcRenderer.removeListener(IpcChannels.DashboardScrapeEvent, listener)
     },
+  },
+  logs: {
+    getRecent: (filter) => ipcRenderer.invoke(IpcChannels.LogsGetRecent, { filter }),
+    setRetention: (minutes) => ipcRenderer.invoke(IpcChannels.LogsSetRetention, { minutes }),
+    clear: () => ipcRenderer.invoke(IpcChannels.LogsClear),
+    export: () => ipcRenderer.invoke(IpcChannels.LogsExport),
+    logAction: (category, level, message, meta) =>
+      ipcRenderer.invoke(IpcChannels.LogsLogAction, { category, level, message, meta }),
+    onLogEntry: (callback) => {
+      const listener = (_: unknown, entry: any) => callback(entry)
+      ipcRenderer.on(IpcChannels.LogsOnEntry, listener)
+      return () => ipcRenderer.removeListener(IpcChannels.LogsOnEntry, listener)
+    }
   }
 }
 

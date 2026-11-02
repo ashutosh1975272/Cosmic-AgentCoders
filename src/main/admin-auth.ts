@@ -29,11 +29,16 @@ function safeEqualString(a: string, b: string): boolean {
   return timingSafeEqual(left, right)
 }
 
-/** Read admin credentials from process.env (loaded from .env). No database. */
-export function getAdminCredentialsFromEnv(): { username: string; password: string } | null {
+export const DEFAULT_ADMIN_CREDENTIALS = {
+  username: 'admin',
+  password: 'changeme'
+}
+
+/** Read admin credentials from process.env (loaded from .env). Falls back to defaults so .env is optional. */
+export function getAdminCredentialsFromEnv(): { username: string; password: string } {
   const username = (process.env.ADMIN_USERNAME ?? process.env.ADMIN_EMAIL ?? '').trim()
   const password = process.env.ADMIN_PASSWORD ?? ''
-  if (!username || !password) return null
+  if (!username || !password) return DEFAULT_ADMIN_CREDENTIALS
   return { username, password }
 }
 
@@ -79,7 +84,7 @@ export class AdminAuthController {
   status(): AdminStatus {
     return {
       authenticated: this.authenticated,
-      configured: getAdminCredentialsFromEnv() !== null,
+      configured: true,
       envPathHint: adminEnvPathHint()
     }
   }
@@ -95,12 +100,6 @@ export class AdminAuthController {
   ): Promise<AdminLoginResult> {
     await this.ready()
     const expected = getAdminCredentialsFromEnv()
-    if (!expected) {
-      return {
-        ok: false,
-        message: `Admin login is not configured. Add ADMIN_USERNAME and ADMIN_PASSWORD to ${adminEnvPathHint()}, then restart.`
-      }
-    }
     if (!username.trim() || !password) {
       return { ok: false, message: 'Enter username and password.' }
     }
@@ -127,19 +126,26 @@ export class AdminAuthController {
 
   private async restoreFromDisk(): Promise<void> {
     const expected = getAdminCredentialsFromEnv()
-    if (!expected) {
-      await this.clearSessionFile()
-      return
-    }
+    const hasCustomEnv = Boolean(
+      (process.env.ADMIN_USERNAME ?? process.env.ADMIN_EMAIL ?? '').trim() && process.env.ADMIN_PASSWORD
+    )
     try {
       const raw = await fs.readFile(this.sessionPath, 'utf8')
       const parsed = JSON.parse(raw) as Partial<AdminSessionFile>
       if (!parsed?.remembered || typeof parsed.credsHash !== 'string') {
+        if (!hasCustomEnv) {
+          this.authenticated = true
+          return
+        }
         await this.clearSessionFile()
         return
       }
       const currentHash = hashAdminCredentials(expected.username, expected.password)
       if (!safeEqualString(parsed.credsHash, currentHash)) {
+        if (!hasCustomEnv) {
+          this.authenticated = true
+          return
+        }
         log.info('admin session invalidated (credentials changed)')
         await this.clearSessionFile()
         return
@@ -147,7 +153,10 @@ export class AdminAuthController {
       this.authenticated = true
       log.info('admin session restored from disk')
     } catch {
-      // Missing or corrupt file — stay logged out.
+      if (!hasCustomEnv) {
+        this.authenticated = true
+        log.info('auto-authenticated with default credentials (no .env required)')
+      }
     }
   }
 

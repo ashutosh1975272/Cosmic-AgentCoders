@@ -8,6 +8,7 @@ import WorkspaceContent from './WorkspaceContent'
 import CardHead, { type CardHeadFlag } from './CardHead'
 import { CardAddModal } from './CardAddModal'
 import { RunLogsModal } from './RunLogsModal'
+import { DeleteConfirmNoticeModal } from './DeleteConfirmNoticeModal'
 import { buildCardView, buildCardSummary } from './card-view'
 import { buildConnectorChannelLists } from './workspace-nav'
 import type { DashboardTeamWorkspace } from '../../../../shared/dashboard-contract'
@@ -21,8 +22,15 @@ const STATUS_FLAGS: Record<string, CardHeadFlag> = {
   'waiting-on-client': { label: 'Waiting on client', tone: 'warn' }
 }
 
-export function CosmicWorkspaceView(): React.JSX.Element | null {
+interface CosmicWorkspaceViewProps {
+  sidebarLook?: 'minimal' | 'ancient' | 'new-cosmic' | 'basic'
+}
+
+export function CosmicWorkspaceView({
+  sidebarLook
+}: CosmicWorkspaceViewProps = {}): React.JSX.Element | null {
   const cosmicSelectedCardId = useDashboardStore((s) => s.cosmicSelectedCardId)
+  const basicActiveTab = useDashboardStore((s) => s.basicActiveTab)
   const snapshot = useDashboardStore((s) => s.snapshot)
   const loadSnapshot = useDashboardStore((s) => s.loadSnapshot)
   const syncNow = useDashboardStore((s) => s.syncNow)
@@ -32,9 +40,17 @@ export function CosmicWorkspaceView(): React.JSX.Element | null {
 
   const [cardAddOpen, setCardAddOpen] = useState(false)
   const [logsOpen, setLogsOpen] = useState(false)
+  const [deleteCardOpen, setDeleteCardOpen] = useState(false)
   const [teamWorkspace, setTeamWorkspace] = useState<DashboardTeamWorkspace | null>(null)
   const [teamLoading, setTeamLoading] = useState(true)
   const [scraping, setScraping] = useState(false)
+
+  const handleConfirmDeleteCard = async (cardId: string): Promise<void> => {
+    await useDashboardStore.getState().deleteProject(cardId)
+    const currentLevel1 = useDashboardStore.getState().cosmicLevel1
+    useDashboardStore.getState().setCosmicNavigation(currentLevel1, null)
+    useDashboardStore.getState().openDashboard()
+  }
 
   // Ensure snapshot is loaded
   useEffect(() => {
@@ -149,8 +165,81 @@ export function CosmicWorkspaceView(): React.JSX.Element | null {
     }
   }
 
+  const effectiveNav = useMemo(() => {
+    if (sidebarLook !== 'basic') return nav
+    if (!basicActiveTab || basicActiveTab === 'dashboard') {
+      return {
+        ...nav,
+        openGroup: 'dash' as const,
+        selection: null
+      }
+    }
+    if (basicActiveTab === 'slack') {
+      return {
+        ...nav,
+        openGroup: 'slack' as const,
+        selection: 's:team' as const
+      }
+    }
+    if (basicActiveTab === 'teams') {
+      return {
+        ...nav,
+        openGroup: 'slack' as const,
+        selection: 'c:teams' as const
+      }
+    }
+    if (basicActiveTab === 'whatsapp') {
+      return {
+        ...nav,
+        openGroup: 'slack' as const,
+        selection: 'c:whatsapp' as const
+      }
+    }
+    if (basicActiveTab.startsWith('c:preset:')) {
+      return {
+        ...nav,
+        openGroup: 'slack' as const,
+        selection: basicActiveTab as any
+      }
+    }
+    return nav
+  }, [sidebarLook, basicActiveTab, nav])
+
   if (!activeProjectSnapshot || !cardView || !cardSummary || !project) {
     return null
+  }
+
+  // In Basic look: full-screen end-to-end view without card chrome or duplicate sidebar
+  if (sidebarLook === 'basic') {
+    return (
+      <ErrorBoundary label="cosmic-workspace-view-basic">
+        <div
+          className="cosmic-full-workspace basic-mode-workspace"
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            flex: 1,
+            width: '100%',
+            height: '100%',
+            background: 'var(--bg-page)',
+            overflow: 'hidden'
+          }}
+        >
+          <WorkspaceContent
+            view={cardView}
+            summary={cardSummary}
+            project={project}
+            snapshot={activeProjectSnapshot}
+            nav={effectiveNav}
+            channels={channelLists}
+            syncing={activeProjectSnapshot.syncState === 'syncing'}
+            onSync={() => void syncNow(project.id)}
+            onOpenSettings={() => openGroup('settings')}
+            onSelect={select}
+          />
+        </div>
+      </ErrorBoundary>
+    )
   }
 
   const { identity } = cardView
@@ -174,7 +263,7 @@ export function CosmicWorkspaceView(): React.JSX.Element | null {
           flex: 1,
           width: '100%',
           height: '100%',
-          background: 'var(--surface-sunken, #090d16)',
+          background: 'var(--bg-page)',
           overflow: 'hidden'
         }}
       >
@@ -206,7 +295,7 @@ export function CosmicWorkspaceView(): React.JSX.Element | null {
             onLogs={() => setLogsOpen(true)}
             onSettings={() => openGroup('settings')}
             onEdit={() => openWizard(project.id)}
-            onRemove={() => undefined}
+            onRemove={() => setDeleteCardOpen(true)}
             onToggle={() => undefined}
             pinned={false}
           />
@@ -215,7 +304,9 @@ export function CosmicWorkspaceView(): React.JSX.Element | null {
             className={`ws-body${nav.collapsed ? ' is-collapsed' : ''}`}
             style={{
               '--ws-nav-w': `${nav.width}px`,
-              flex: 1,
+              flex: '1 1 0%',
+              height: '100%',
+              minHeight: 0,
               overflow: 'hidden'
             } as React.CSSProperties}
           >
@@ -256,6 +347,21 @@ export function CosmicWorkspaceView(): React.JSX.Element | null {
               projectId={project.id}
               projectName={project.name}
               onClose={() => setLogsOpen(false)}
+            />
+            <DeleteConfirmNoticeModal
+              open={deleteCardOpen}
+              onClose={() => setDeleteCardOpen(false)}
+              target={{
+                type: 'card',
+                card: {
+                  id: project.id,
+                  name: project.name || project.teamName || 'Card',
+                  clientName: project.clientName,
+                  teamName: project.teamName,
+                  channelCount: project.monitors?.length ?? 0
+                }
+              }}
+              onConfirmCardDelete={handleConfirmDeleteCard}
             />
           </div>
         </article>

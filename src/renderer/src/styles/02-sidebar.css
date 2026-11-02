@@ -810,13 +810,20 @@
 }
 
 .empty-main-icon {
-  width: 80px;
-  height: 80px;
-  margin-bottom: 10px;
-  border-radius: 20px;
-  object-fit: cover;
+  width: 96px;
+  height: 96px;
+  margin-bottom: 12px;
+  border-radius: 0;
+  object-fit: contain;
   display: block;
-  box-shadow: 0 12px 32px rgba(100, 70, 150, 0.28);
+  box-shadow: none;
+  filter: drop-shadow(0 10px 28px rgba(147, 51, 234, 0.45));
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), filter 0.25s ease;
+}
+
+.empty-main-icon:hover {
+  transform: scale(1.06);
+  filter: drop-shadow(0 12px 36px rgba(168, 85, 247, 0.65));
 }
 
 .empty-main h1 {
@@ -853,4 +860,133 @@
   text-align: center;
   color: var(--muted);
   gap: 6px;
+}
+
+/* ——— Basic Look Sidebar Project Tree (matches global sidebar flat look) ——— */
+.basic-sidebar-project-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.basic-project-node {
+  margin-bottom: 2px;
+  background: transparent;
+  border: none;
+}
+
+.basic-project-row {
+  display: flex;
+  align-items: center;
+  position: relative;
+  width: 100%;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+
+.basic-project-row:hover {
+  background: var(--surface-2);
+}
+
+.basic-project-row .basic-project-header-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: transparent;
+}
+
+.basic-project-row .basic-project-header-btn:hover {
+  background: transparent;
+}
+
+.basic-project-pin {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+  margin-right: 4px;
+}
+
+.basic-project-row:hover .basic-project-pin,
+.basic-project-pin.is-pinned,
+.basic-project-pin:focus-visible {
+  opacity: 1;
+}
+
+.basic-project-pin:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.basic-project-pin.is-pinned {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.basic-project-header-btn {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 8px;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  border-radius: 6px;
+  font-size: 0.88rem;
+  font-weight: 550;
+  transition: background 0.15s ease, color 0.15s ease;
+  min-width: 0;
+}
+
+.basic-project-header-btn:hover {
+  background: var(--surface-2);
+}
+
+.basic-project-children {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0 4px 18px;
+}
+
+.basic-project-tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.82rem;
+  text-align: left;
+  transition: background 0.15s ease, color 0.15s ease;
+  min-width: 0;
+}
+
+.basic-project-tab-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.basic-project-tab-btn.is-active {
+  background: var(--surface-2);
+  color: var(--text);
+  font-weight: 600;
 }

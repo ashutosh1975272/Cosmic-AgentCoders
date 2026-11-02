@@ -13,6 +13,7 @@ import GlobalSettingsPanel from './GlobalSettingsPanel'
 import ErrorBoundary from './ErrorBoundary'
 import RecentStrip from './RecentStrip'
 import { NewProfileModal } from './NewProfileModal'
+import { DeleteConfirmNoticeModal, type CardDeleteTarget } from './DeleteConfirmNoticeModal'
 import { useProfileStore } from '../../hooks/useProfiles'
 import { isIndividualProfile } from '../../../../shared/types'
 import {
@@ -72,6 +73,7 @@ export default function DashboardView(): React.ReactElement | null {
   const loadRecent = useDashboardStore((s) => s.loadRecent)
   const wizardOpenFor = useDashboardStore((s) => s.wizardOpenFor)
   const [renderError, setRenderError] = useState<Error | null>(null)
+  const [deleteCardTarget, setDeleteCardTarget] = useState<CardDeleteTarget | null>(null)
   const [viewMode, setViewMode] = useState<'compact' | 'expanded' | 'mixed'>(() => {
     try {
       const saved = localStorage.getItem('orbit.view') as 'compact' | 'expanded' | 'mixed' | null
@@ -510,7 +512,16 @@ export default function DashboardView(): React.ReactElement | null {
           initialDetailKey={focusDetailKey[id]}
           onOpenSettings={openProjectSettings}
           onToggle={() => toggleCard(id)}
-          onDelete={(projectId) => void deleteProject(projectId)}
+          onDelete={(projectId) => {
+            const p = projectSnapshot.project
+            setDeleteCardTarget({
+              id: projectId,
+              name: p.name || p.teamName || 'Card',
+              clientName: p.clientName,
+              teamName: p.teamName,
+              channelCount: p.monitors?.length ?? 0
+            })
+          }}
           onExpandSection={(section) => {
             setSettingsTarget((prev) => (prev?.projectId === id ? null : prev))
             if (section === 101) {
@@ -791,7 +802,7 @@ export default function DashboardView(): React.ReactElement | null {
         <NewProfileModal
           open={newProfileModalOpen}
           onClose={() => setNewProfileModalOpen(false)}
-          onCreate={async (name, email, mode) => {
+          onCreate={async (name, email, mode, forceReauth) => {
             const profile = await useProfileStore.getState().createProfile(email.trim())
             const targetProfileId = profile.id
             const finalDisplayName = name.trim() || email.trim()
@@ -800,6 +811,11 @@ export default function DashboardView(): React.ReactElement | null {
             const scope = mode === 'under_global' ? 'global' : mode === 'both' ? 'both' : 'individual'
             await window.api.profiles.setAccountScope(targetProfileId, scope)
             await useProfileStore.getState().loadProfiles()
+
+            const latest = useProfileStore.getState().profiles.find((p) => p.id === targetProfileId)
+            if (latest?.googleAuthStatus === 'signed-in' && !forceReauth) {
+              return
+            }
 
             // Initiate Google Authentication in Chrome
             try {
@@ -818,6 +834,15 @@ export default function DashboardView(): React.ReactElement | null {
         <GlobalSettingsPanel
           open={globalSettingsOpen}
           onClose={() => setGlobalSettingsOpen(false)}
+        />
+        <DeleteConfirmNoticeModal
+          open={Boolean(deleteCardTarget)}
+          onClose={() => setDeleteCardTarget(null)}
+          target={deleteCardTarget ? { type: 'card', card: deleteCardTarget } : null}
+          onConfirmCardDelete={async (cardId) => {
+            await deleteProject(cardId)
+            setDeleteCardTarget(null)
+          }}
         />
       </section>
     </ErrorBoundary>

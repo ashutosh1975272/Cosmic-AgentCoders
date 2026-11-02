@@ -19,6 +19,7 @@ import { registerOauthIpc } from './ipc/oauth.ipc'
 import { registerProfileIpc } from './ipc/profiles.ipc'
 import { registerSlackDataIpc } from './ipc/slack-data.ipc'
 import { registerDashboardIpc } from './ipc/dashboard.ipc'
+import { registerLogsIpc } from './ipc/logs.ipc'
 import { DashboardDeltaStore } from './dashboard/delta-store'
 import { MonitorStore } from './dashboard/monitor-store'
 import { WorkspaceMappingStore } from './dashboard/workspace-mapping-store'
@@ -59,7 +60,7 @@ if (loadedEnvPath) {
   // Logging module is safe here; avoids printing secret values.
   log.info('loaded env file', { path: loadedEnvPath })
 } else {
-  log.warn('no .env found — admin login will be unconfigured until you add one')
+  log.info('running in zero-.env mode — using in-app settings & default admin credentials')
 }
 
 /** One process / one tray — second launches focus the existing window. */
@@ -572,6 +573,23 @@ if (!gotSingleInstanceLock) {
       browserViewManager,
       tokenStore,
       getMainWindow: () => mainWindow,
+      monitorStore: dashboardMonitorStore,
+      aiSettings,
+      broadcastSnapshot: async () => {
+        const win = mainWindow
+        if (win && !win.isDestroyed()) {
+          const projects = await dashboardEngine.buildSnapshot()
+          const manualTokens = (await dashboardMonitorStore.listManualTokens()).map((t) => ({
+            key: t.key,
+            validated: t.persisted
+          }))
+          win.webContents.send(IpcChannels.DashboardSnapshotChanged, {
+            projects,
+            manualTokens,
+            globalConfig: await configService.publicGlobalConfig()
+          })
+        }
+      },
       onProfilesRemoved: async (ids) => {
         await settingsStore.removeRecentsForProfiles(ids)
         const win = mainWindow
@@ -648,11 +666,13 @@ if (!gotSingleInstanceLock) {
       }
     })()
     dashboardScheduler.start()
+    registerLogsIpc()
     registerAppIpc({
       settingsStore,
       lock,
       adminAuth,
       profileStore,
+      getMainWindow: () => mainWindow,
       onUserActivity: () => {
         lastEmbedActivity = Date.now()
       },

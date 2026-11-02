@@ -21,7 +21,7 @@ interface ProfileState {
   error: string | null
   loadProfiles: () => Promise<void>
   createProfile: (displayName: string) => Promise<Profile>
-  deleteProfile: (profileId: string) => Promise<void>
+  deleteProfile: (profileId: string, deleteCards?: boolean) => Promise<void>
   deleteUnsignedDuplicates: () => Promise<void>
   clearStuckAuth: () => Promise<void>
   activateProfile: (profileId: string, bounds: ViewportBounds) => Promise<void>
@@ -182,10 +182,10 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     set({ profiles })
   },
 
-  deleteProfile: async (profileId: string) => {
+  deleteProfile: async (profileId: string, deleteCards?: boolean) => {
     set({ error: null })
     try {
-      await window.api.profiles.delete(profileId)
+      await window.api.profiles.delete(profileId, deleteCards)
       const profiles = get().profiles.filter((p) => p.id !== profileId)
       const workspacesByProfileId = { ...get().workspacesByProfileId }
       delete workspacesByProfileId[profileId]

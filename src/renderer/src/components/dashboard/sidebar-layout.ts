@@ -52,7 +52,7 @@ export const DEFAULT_LAYOUT: SidebarLayout = {
     hiddenItems: {},
     activeGlobalItems: undefined,
     allowedGlobalLinks: undefined,
-    hideAddButton: false
+    hideAddButton: true
   }
 }
 
@@ -228,7 +228,8 @@ export function normalizeLayout(raw: Partial<SidebarLayout>): SidebarLayout {
         sectionOrder: [],
         hiddenSections: [],
         itemOrder: {},
-        hiddenItems: {}
+        hiddenItems: {},
+        hideAddButton: typeof raw.custom?.hideAddButton === 'boolean' ? raw.custom.hideAddButton : true
       }
     }
   }
@@ -240,7 +241,10 @@ export function normalizeLayout(raw: Partial<SidebarLayout>): SidebarLayout {
         sectionOrder: allSectionKeys.filter((k) => k !== 'dashboard' && k !== 'settings'),
         hiddenSections: [],
         itemOrder: {},
-        hiddenItems: {}
+        hiddenItems: {},
+        activeGlobalItems: raw.custom?.activeGlobalItems,
+        allowedGlobalLinks: raw.custom?.allowedGlobalLinks,
+        hideAddButton: typeof raw.custom?.hideAddButton === 'boolean' ? raw.custom.hideAddButton : true
       }
     }
   }
@@ -250,6 +254,9 @@ export function normalizeLayout(raw: Partial<SidebarLayout>): SidebarLayout {
     hiddenSections?: unknown
     itemOrder?: unknown
     hiddenItems?: unknown
+    activeGlobalItems?: unknown
+    allowedGlobalLinks?: unknown
+    hideAddButton?: unknown
   }
   let sectionOrder = ((rawCustom.sectionOrder ?? []) as unknown[]).filter((k) =>
     typeof k === 'string' && allSectionKeys.includes(k) && k !== 'dashboard' && k !== 'settings'
@@ -306,7 +313,10 @@ export function normalizeLayout(raw: Partial<SidebarLayout>): SidebarLayout {
       sectionOrder: sectionOrder as string[],
       hiddenSections: [...hiddenSections] as string[],
       itemOrder,
-      hiddenItems
+      hiddenItems,
+      activeGlobalItems: rawCustom.activeGlobalItems as string[] | undefined,
+      allowedGlobalLinks: rawCustom.allowedGlobalLinks as string[] | undefined,
+      hideAddButton: typeof rawCustom.hideAddButton === 'boolean' ? rawCustom.hideAddButton : true
     }
   }
 }
@@ -318,7 +328,8 @@ export function seedCustomFromFull(): SidebarLayout {
       sectionOrder: sectionKeys().filter((k) => k !== 'dashboard' && k !== 'settings'),
       hiddenSections: [],
       itemOrder: {},
-      hiddenItems: {}
+      hiddenItems: {},
+      hideAddButton: true
     }
   }
 }

@@ -5,6 +5,7 @@
  */
 import type { BrowserWindow } from 'electron'
 import { app, screen } from 'electron'
+import { existsSync, cpSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { log } from '../logging'
 import { chromeProfileHasGoogleSession, chromeProfileHasSlackSession } from './chrome-cookie-probe'
@@ -27,6 +28,8 @@ export interface ChromeBrowserAuthOptions {
   loginHint?: string
   /** Renderer dock rect relative to the window content area. */
   contentBounds?: { x: number; y: number; width: number; height: number }
+  targetPartition?: string
+  chromeKey?: string
 }
 
 type PendingController = {
@@ -294,6 +297,25 @@ function chromeLoginProfileDir(profileId: string): string {
   )
 }
 
+/**
+ * Copies the profile's Chrome directory (which contains the authenticated Google session)
+ * into a card-specific Chrome directory so that when Chrome launches for the card,
+ * Google already has the profile's Google account pre-logged-in for OAuth.
+ */
+export function seedChromeCardProfile(profileId: string, cardChromeKey: string): void {
+  try {
+    const src = chromeLoginProfileDir(profileId)
+    const dst = chromeLoginProfileDir(cardChromeKey)
+    if (src === dst || !existsSync(src) || existsSync(dst)) return
+
+    mkdirSync(dst, { recursive: true })
+    cpSync(src, dst, { recursive: true })
+    log.info('seeded Chrome profile from profileId to cardKey', { profileId, cardChromeKey })
+  } catch (err) {
+    log.warn('seedChromeCardProfile failed', { profileId, cardChromeKey, err: String(err) })
+  }
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -370,8 +392,13 @@ async function runChromeBrowserPhase(
 
   const contentBounds = pending.contentBounds ?? options.contentBounds
   const screenAnchor = toScreenAnchor(parent, contentBounds)
-  const partition = partitionForProfile(profileId, 'slack')
-  const profileDir = chromeLoginProfileDir(profileId)
+  const partition = options.targetPartition || partitionForProfile(profileId, 'slack')
+
+  if (options.chromeKey && options.chromeKey !== profileId) {
+    seedChromeCardProfile(profileId, options.chromeKey)
+  }
+
+  const profileDir = chromeLoginProfileDir(options.chromeKey || profileId)
 
   // Google: continue=https://www.google.com/ (NOT 127.0.0.1 — that causes Error 400).
   // Auto-close is driven by Cookies DB poll (SID/HSID), not loopback.
@@ -401,7 +428,7 @@ async function runChromeBrowserPhase(
   try {
     const result = await runChromeSystemLogin({
       partition,
-      chromeProfileKey: profileId,
+      chromeProfileKey: options.chromeKey || profileId,
       startUrl,
       loginHint: options.loginHint,
       abortPromise,

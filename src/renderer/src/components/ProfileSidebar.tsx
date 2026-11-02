@@ -17,6 +17,8 @@ import appIcon from '../assets/app-icon.png'
 import { AppIcon } from './AppIcon'
 import { SidebarPanelIcon } from './SidebarPanelIcon'
 import { CosmicSidebarContent } from './dashboard/CosmicSidebarNav'
+import { BasicSidebarProjectTree } from './dashboard/BasicSidebarProjectTree'
+import { getBaseLayoutItems } from '../../../shared/base-app-presets'
 
 interface RecentWorkspace {
   profileId: string
@@ -74,7 +76,7 @@ interface ProfileSidebarProps {
   /** Optional slot rendered after the Recents strip (dashboard entry point). */
   dashboardSlot?: React.ReactNode
   /** Customization settings for the sidebar */
-  sidebarLook?: 'minimal' | 'ancient' | 'new-cosmic'
+  sidebarLook?: 'minimal' | 'ancient' | 'new-cosmic' | 'basic'
   showLookSwitcher?: boolean
   showRecentSection?: boolean
   showGoogleEmailInputInSidebar?: boolean
@@ -92,7 +94,7 @@ interface ProfileSidebarProps {
     observer?: boolean
     profilesHub?: boolean
   }
-  onLookChange?: (look: 'minimal' | 'ancient' | 'new-cosmic') => void
+  onLookChange?: (look: 'minimal' | 'ancient' | 'new-cosmic' | 'basic') => void
 }
 
 function platformStatusDot(sessionStatus: AppSessionStatus): {
@@ -379,6 +381,7 @@ export const ProfileSidebar = memo(function ProfileSidebar({
   const cosmicLevel1 = useDashboardStore((s) => s.cosmicLevel1)
   const isCosmicManagedMiddle =
     activeLook === 'minimal' ||
+    activeLook === 'basic' ||
     (activeLook === 'new-cosmic' && cosmicLevel1 !== 'global')
   const [profileExpanded, setProfileExpanded] = useState<Record<string, boolean>>({})
   const [appExpanded, setAppExpanded] = useState<Record<string, boolean>>({})
@@ -386,9 +389,13 @@ export const ProfileSidebar = memo(function ProfileSidebar({
   const [renameValue, setRenameValue] = useState('')
   const [dragId, setDragId] = useState<string | null>(null)
 
-  const handleSetLook = (look: 'minimal' | 'ancient' | 'new-cosmic'): void => {
+  const handleSetLook = (look: 'minimal' | 'ancient' | 'new-cosmic' | 'basic'): void => {
     onLookChange?.(look)
   }
+  const presetToolLinks = useMemo(
+    () => getBaseLayoutItems(baseAppLayout).filter((item) => item.type === 'link'),
+    [baseAppLayout]
+  )
   const profileIdSet = useMemo(() => new Set(profiles.map((p) => p.id)), [profiles])
   const visibleRecents = useMemo(() => {
     const fromHistory = recentWorkspaces.filter((r) => profileIdSet.has(r.profileId))
@@ -479,7 +486,7 @@ export const ProfileSidebar = memo(function ProfileSidebar({
           </div>
         </div>
 
-        {/* View Looks Switcher: Minimal vs Ancient vs Cosmic (Fluid Auto-Responsive Grid) */}
+        {/* View Looks Switcher: Basic vs Minimal vs Cosmic vs Ancient (Fluid Auto-Responsive Grid) */}
         {showLookSwitcher ? (
           <div
             className="sidebar-looks-switcher"
@@ -487,7 +494,7 @@ export const ProfileSidebar = memo(function ProfileSidebar({
             aria-label="Sidebar Appearance Look"
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+              gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
               gap: '3px',
               marginTop: '10px',
               background: 'rgba(0, 0, 0, 0.28)',
@@ -498,6 +505,30 @@ export const ProfileSidebar = memo(function ProfileSidebar({
               boxSizing: 'border-box'
             }}
           >
+            <button
+              type="button"
+              onClick={() => handleSetLook('basic')}
+              aria-pressed={activeLook === 'basic'}
+              style={{
+                padding: '5px 2px',
+                fontSize: '11px',
+                fontWeight: 600,
+                borderRadius: '6px',
+                border: activeLook === 'basic' ? '1px solid var(--accent)' : '1px solid transparent',
+                background: activeLook === 'basic' ? 'color-mix(in srgb, var(--accent) 22%, transparent)' : 'transparent',
+                color: activeLook === 'basic' ? '#fff' : 'var(--text-faint)',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                textAlign: 'center',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                minWidth: 0
+              }}
+              title="Basic"
+            >
+              Basic
+            </button>
             <button
               type="button"
               onClick={() => handleSetLook('minimal')}
@@ -524,30 +555,6 @@ export const ProfileSidebar = memo(function ProfileSidebar({
             </button>
             <button
               type="button"
-              onClick={() => handleSetLook('ancient')}
-              aria-pressed={activeLook === 'ancient'}
-              style={{
-                padding: '5px 2px',
-                fontSize: '11px',
-                fontWeight: 600,
-                borderRadius: '6px',
-                border: activeLook === 'ancient' ? '1px solid var(--accent)' : '1px solid transparent',
-                background: activeLook === 'ancient' ? 'color-mix(in srgb, var(--accent) 22%, transparent)' : 'transparent',
-                color: activeLook === 'ancient' ? '#fff' : 'var(--text-faint)',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                textAlign: 'center',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                minWidth: 0
-              }}
-              title="Ancient"
-            >
-              Ancient
-            </button>
-            <button
-              type="button"
               onClick={() => handleSetLook('new-cosmic')}
               aria-pressed={activeLook === 'new-cosmic'}
               style={{
@@ -570,9 +577,68 @@ export const ProfileSidebar = memo(function ProfileSidebar({
             >
               Cosmic
             </button>
+            <button
+              type="button"
+              onClick={() => handleSetLook('ancient')}
+              aria-pressed={activeLook === 'ancient'}
+              style={{
+                padding: '5px 2px',
+                fontSize: '11px',
+                fontWeight: 600,
+                borderRadius: '6px',
+                border: activeLook === 'ancient' ? '1px solid var(--accent)' : '1px solid transparent',
+                background: activeLook === 'ancient' ? 'color-mix(in srgb, var(--accent) 22%, transparent)' : 'transparent',
+                color: activeLook === 'ancient' ? '#fff' : 'var(--text-faint)',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                textAlign: 'center',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                minWidth: 0
+              }}
+              title="Ancient"
+            >
+              Ancient
+            </button>
           </div>
         ) : null}
       </div>
+
+      {/* Google Email Input (when enabled in settings, available across all looks) */}
+      {showGoogleEmailInputInSidebar ? (
+        <div style={{ padding: '6px 10px 4px' }}>
+          <label className="field-label" htmlFor="google-email">
+            Google email
+          </label>
+          <input
+            id="google-email"
+            className="field-input"
+            type="email"
+            placeholder="name@gmail.com"
+            value={email}
+            disabled={googleBusy}
+            onChange={(e) => onEmailChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') onAddGoogle()
+            }}
+          />
+          <button
+            type="button"
+            className="btn primary block btn-apply"
+            disabled={googleBusy}
+            onClick={onAddGoogle}
+            aria-label="Continue with Google"
+          >
+            {googleBusy ? 'Signing in…' : 'Continue with Google'}
+          </button>
+          {googleBusy ? (
+            <button type="button" className="btn secondary block" onClick={onCancelGoogle}>
+              Cancel sign-in
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       {activeLook === 'new-cosmic' ? (
         <CosmicSidebarContent
@@ -593,6 +659,71 @@ export const ProfileSidebar = memo(function ProfileSidebar({
           onOpenProfilesHub={onOpenProfilesHub}
           onNewProject={onNewProject}
         />
+      ) : activeLook === 'basic' ? (
+        <>
+          {showRecentSection && visibleRecents.length > 0 ? (
+            <div className="recent-strip" aria-label="Recent workspaces">
+              <div className="recent-strip-head">
+                <p className="recent-label">Recent</p>
+              </div>
+              <ul className="recent-list">
+                {visibleRecents.map((r) => {
+                  const profile = profiles.find((p) => p.id === r.profileId)
+                  const profileName = profile ? profileDisplayLabel(profile) : 'Profile'
+                  const app = APP_IDS.includes(r.appId as AppId) ? (r.appId as AppId) : null
+                  const live =
+                    app && profile
+                      ? profile.apps[app].availableWorkspaces.find((w) => w.teamId === r.teamId)
+                      : undefined
+                  const pinned =
+                    app && profile
+                      ? profile.apps[app].pinnedWorkspaces.find((w) => w.teamId === r.teamId)
+                      : undefined
+                  const title =
+                    live?.lastChannelName?.trim() ||
+                    (live ? displayWorkspaceName(live) : null) ||
+                    (pinned ? displayWorkspaceName(pinned) : null) ||
+                    r.label?.trim() ||
+                    'Workspace'
+                  return (
+                    <li key={`basic-recent:${r.profileId}:${r.appId}:${r.teamId}:${r.at}`}>
+                      <button
+                        type="button"
+                        className="recent-item"
+                        onClick={() => {
+                          if (app) {
+                            onOpenWorkspace(r.profileId, app, r.teamId)
+                          }
+                        }}
+                      >
+                        {app ? (
+                          <span className="recent-app-chip" aria-hidden>
+                            <AppIcon appId={app} className="recent-app-icon" size={11} />
+                          </span>
+                        ) : (
+                          <span className="ws-avatar recent-avatar" aria-hidden>
+                            {monogramFromLabel(title)}
+                          </span>
+                        )}
+                        <span className="ws-copy">
+                          <span className="ws-title">{title}</span>
+                          <span className="ws-sub">
+                            {profileName}
+                            {app ? ` · ${sidebarAppLabel(app)}` : ''}
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          ) : null}
+          <BasicSidebarProjectTree
+            baseAppLayout={baseAppLayout}
+            onNewProject={onNewProject}
+          />
+        </>
       ) : (
         dashboardSlot
       )}
@@ -661,39 +792,6 @@ export const ProfileSidebar = memo(function ProfileSidebar({
         </div>
       ) : null}
 
-      {showGoogleEmailInputInSidebar ? (
-        <>
-          <label className="field-label" htmlFor="google-email">
-            Google email
-          </label>
-          <input
-            id="google-email"
-            className="field-input"
-            type="email"
-            placeholder="name@gmail.com"
-            value={email}
-            disabled={googleBusy}
-            onChange={(e) => onEmailChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') onAddGoogle()
-            }}
-          />
-          <button
-            type="button"
-            className="btn primary block btn-apply"
-            disabled={googleBusy}
-            onClick={onAddGoogle}
-            aria-label="Continue with Google"
-          >
-            {googleBusy ? 'Signing in…' : 'Continue with Google'}
-          </button>
-          {googleBusy ? (
-            <button type="button" className="btn secondary block" onClick={onCancelGoogle}>
-              Cancel sign-in
-            </button>
-          ) : null}
-        </>
-      ) : null}
 
       <ul className="nav-tree">
         {profiles.length === 0 ? (
@@ -910,6 +1008,56 @@ export const ProfileSidebar = memo(function ProfileSidebar({
                               onUnpin={onUnpin}
                             />
                           ) : null}
+                        </li>
+                      )
+                    })}
+
+                    {/* Dynamic Base Preset Tools (e.g. Claude, ChatGPT) when extended/full layout is active */}
+                    {presetToolLinks.map((preset) => {
+                      const isLinkActive =
+                        profileActive && activeCustomLinkId === `preset:${preset.id}`
+
+                      return (
+                        <li
+                          key={`preset:${preset.id}`}
+                          className={`nav-app${isLinkActive ? ' is-active' : ''}`}
+                          style={{ position: 'relative' }}
+                        >
+                          <div className="nav-app-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: '4px' }}>
+                            <button
+                              type="button"
+                              className="nav-app-select"
+                              onClick={() => {
+                                onSelect(profile.id)
+                                onSelectCustomLink?.(profile.id, {
+                                  id: `preset:${preset.id}`,
+                                  name: preset.name,
+                                  url: preset.url!,
+                                  order: 0,
+                                  partition: `persist:profile-${profile.id}-link-preset-${preset.id}`,
+                                  createdAt: ''
+                                })
+                              }}
+                              title={`Open ${preset.name} (${preset.url})`}
+                              style={{ flex: 1, minWidth: 0 }}
+                            >
+                              <span
+                                style={{
+                                  fontSize: '0.82rem',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  width: '16px',
+                                  marginRight: '2px'
+                                }}
+                              >
+                                {preset.icon || '🌐'}
+                              </span>
+                              <span className="nav-app-label" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {preset.name}
+                              </span>
+                            </button>
+                          </div>
                         </li>
                       )
                     })}
