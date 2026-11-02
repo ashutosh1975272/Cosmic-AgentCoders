@@ -1,5 +1,6 @@
-import { WebContentsView, session, type BrowserWindow, type Rectangle } from 'electron'
+import { WebContentsView, app, session, type BrowserWindow, type Rectangle } from 'electron'
 import { join } from 'node:path'
+import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import type { AppId, AvailableWorkspace, DiscoveredWorkspace } from '../../shared/types'
 import {
   isSlackPlaceholderName,
@@ -840,12 +841,58 @@ export class BrowserViewManager {
     })
   }
 
+  /** Inspects a card's partition storage to find any actively authenticated Slack team ID and name */
+  detectCardPartitionSlackTeam(projectId: string): { teamId: string; teamName: string } | null {
+    try {
+      const partDir = join(app.getPath('userData'), 'Partitions', `card-${projectId}-slack`, 'Local Storage', 'leveldb')
+      if (!existsSync(partDir)) return null
+      const files = readdirSync(partDir)
+      for (const f of files) {
+        if (!f.endsWith('.ldb') && !f.endsWith('.log')) continue
+        try {
+          const content = readFileSync(join(partDir, f), 'latin1')
+          // Pattern 1: {"T0...":{"name":"..."
+          const match = /"(T0[A-Z0-9]+)":\{[^}]*"name":"([^"]+)"/.exec(content)
+          if (match && match[1] && match[2]) {
+            return { teamId: match[1], teamName: match[2] }
+          }
+          // Pattern 2: direct team id find
+          const idMatch = /(T0[A-Z0-9]{7,})/.exec(content)
+          if (idMatch && idMatch[1]) {
+            return { teamId: idMatch[1], teamName: 'Slack Workspace' }
+          }
+        } catch {
+          /* ignore file read error */
+        }
+      }
+    } catch (err) {
+      log.debug('detectCardPartitionSlackTeam error', { projectId, err: String(err) })
+    }
+    return null
+  }
+
   private wireEmbedNavigation(profileId: string, appId: AppId, view: WebContentsView): void {
     view.webContents.setWindowOpenHandler(({ url }) => {
       if (url.startsWith('msteams:')) {
         log.info('embed blocked msteams protocol; using Teams web', { profileId, appId })
         void view.webContents.loadURL(TEAMS_HOME_URL)
         return { action: 'deny' }
+      }
+
+      if (url.startsWith('slack://')) {
+        // Parse slack://open?team=T... or slack://channel?team=T...
+        try {
+          const parsed = new URL(url)
+          const teamParam = parsed.searchParams.get('team') || parsed.hostname
+          if (teamParam && /^T[A-Z0-9]+$/i.test(teamParam)) {
+            const dest = `https://app.slack.com/client/${teamParam}`
+            log.info('embed converted slack protocol to in-place web client', { profileId, appId, dest })
+            void view.webContents.loadURL(dest)
+            return { action: 'deny' }
+          }
+        } catch {
+          /* ignore */
+        }
       }
 
       const host = safeHostname(url)
@@ -863,7 +910,14 @@ export class BrowserViewManager {
         /(?:^|\.)facebook\.com$/i.test(host)
 
       if (keepInEmbed) {
-        const target = appId === 'teams' ? normalizeTeamsOpenUrl(url) : url
+        // If it's a Slack SSB redirect URL (e.g. from clicking [Open]), route directly to client
+        let target = appId === 'teams' ? normalizeTeamsOpenUrl(url) : url
+        if (target.includes('slack.com/ssb/redirect') || target.includes('slack.com/signin/workspaces')) {
+          const teamMatch = /[?&]team=(T[A-Z0-9]+)/i.exec(target)
+          if (teamMatch && teamMatch[1]) {
+            target = `https://app.slack.com/client/${teamMatch[1]}`
+          }
+        }
         log.info('embed popup redirected in-place', { profileId, appId, url: target })
         void view.webContents.loadURL(target)
       } else {
@@ -1142,17 +1196,26 @@ export class BrowserViewManager {
 
     // Ensure we are navigated appropriately
     if (appId === 'slack') {
-      const isRealTeamId = Boolean(teamId && /^T[A-Z0-9]+$/i.test(teamId))
+      // If a card has an authenticated partition, resolve its real team ID dynamically
+      let effectiveTeam = teamId
+      if (projectId) {
+        const detected = this.detectCardPartitionSlackTeam(projectId)
+        if (detected?.teamId) {
+          effectiveTeam = detected.teamId
+        }
+      }
+
+      const isRealTeamId = Boolean(effectiveTeam && /^T[A-Z0-9]+$/i.test(effectiveTeam))
       const currentUrl = view.webContents.getURL()
       if (isRealTeamId) {
-        if (!currentUrl || !currentUrl.includes(teamId)) {
+        if (!currentUrl || !currentUrl.includes(effectiveTeam)) {
           if (projectId) {
-            void view.webContents.loadURL(`https://app.slack.com/client/${teamId}`)
+            void view.webContents.loadURL(`https://app.slack.com/client/${effectiveTeam}`)
           } else {
             try {
-              await this.navigateToWorkspace(profileId, 'slack', { teamId })
+              await this.navigateToWorkspace(profileId, 'slack', { teamId: effectiveTeam })
             } catch (err) {
-              log.warn('Card live slack navigate failed or partially loaded', { profileId, teamId, err: String(err) })
+              log.warn('Card live slack navigate failed or partially loaded', { profileId, teamId: effectiveTeam, err: String(err) })
             }
           }
         }

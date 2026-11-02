@@ -645,44 +645,59 @@ if (!gotSingleInstanceLock) {
               const cookies = await sess.cookies.get({ domain: '.slack.com' })
               const dCookie = cookies.find((c) => (c.name === 'd' || c.name === 'd-s') && Boolean(c.value))
               if (dCookie) {
-                const existingSources = proj.sources ?? []
-                if (existingSources.length === 0) {
-                  const hasTeam = Boolean(proj.teamId && !proj.teamId.startsWith('pending-'))
-                  const detectedTeamId: string = (hasTeam ? proj.teamId : null) || 'T0C6YS80MPZ'
-                  const detectedTeamName: string = (hasTeam && proj.teamName !== proj.name ? proj.teamName : null) || 'AgentWork'
+                // Read genuine team details directly from partition storage
+                const detected = browserViewManager.detectCardPartitionSlackTeam(proj.id)
+                const realTeamId = detected?.teamId || (proj.teamId && !proj.teamId.startsWith('pending-') ? proj.teamId : null)
+                const realTeamName = detected?.teamName || (proj.teamName && proj.teamName !== proj.name ? proj.teamName : null)
 
-                  const now = new Date().toISOString()
-                  const autoSource: import('../shared/dashboard-contract').ProjectSource = {
-                    id: `src-card-${Date.now().toString(36)}`,
-                    kind: 'browser',
-                    platform: 'slack',
-                    profileId: proj.profileId,
-                    workspaceId: detectedTeamId,
-                    workspaceName: detectedTeamName,
-                    channels: (proj.monitors ?? []).map((m: { channelId: string; channelName?: string }) => ({
-                      id: m.channelId,
-                      name: m.channelName || m.channelId
-                    })),
-                    role: 'ours',
-                    backfillDays: 7,
-                    enabled: true,
-                    status: 'connected',
-                    createdAt: now,
-                    updatedAt: now
+                if (realTeamId) {
+                  const existingSources = proj.sources ?? []
+                  const existingIdx = existingSources.findIndex((s) => s.workspaceId === realTeamId)
+                  let updatedSources = [...existingSources]
+
+                  if (existingIdx >= 0) {
+                    updatedSources[existingIdx] = {
+                      ...updatedSources[existingIdx],
+                      workspaceName: realTeamName || updatedSources[existingIdx].workspaceName,
+                      status: 'connected',
+                      updatedAt: new Date().toISOString()
+                    }
+                  } else {
+                    const now = new Date().toISOString()
+                    const autoSource: import('../shared/dashboard-contract').ProjectSource = {
+                      id: `src-card-${Date.now().toString(36)}`,
+                      kind: 'browser',
+                      platform: 'slack',
+                      profileId: proj.profileId,
+                      workspaceId: realTeamId,
+                      workspaceName: realTeamName || 'Slack Workspace',
+                      channels: (proj.monitors ?? []).map((m: { channelId: string; channelName?: string }) => ({
+                        id: m.channelId,
+                        name: m.channelName || m.channelId
+                      })),
+                      role: 'ours',
+                      backfillDays: 7,
+                      enabled: true,
+                      status: 'connected',
+                      createdAt: now,
+                      updatedAt: now
+                    }
+                    // Filter out any stale sources from other workspaces if we now have the real team
+                    updatedSources = [autoSource]
                   }
+
                   await dashboardMonitorStore.upsertProject({
                     project: {
                       ...proj,
-                      teamId: detectedTeamId,
-                      teamName: detectedTeamName,
-                      sources: [autoSource]
+                      teamId: realTeamId,
+                      teamName: realTeamName || proj.teamName || 'Slack Workspace',
+                      sources: updatedSources
                     }
                   })
-                  // Strictly card-scoped: do not leak card workspace into profileStore availableWorkspaces
                   log.info('[profiles] auto-detected and attached card session workspace', {
                     projectId: proj.id,
-                    teamId: detectedTeamId,
-                    teamName: detectedTeamName
+                    teamId: realTeamId,
+                    teamName: realTeamName
                   })
                 }
               }

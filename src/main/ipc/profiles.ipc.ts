@@ -513,12 +513,11 @@ export function registerProfileIpc(deps: ProfileIpcDeps): void {
         updatedSources.push(newSource)
       }
 
-      const teamPending = !project.teamId || project.teamId.startsWith('pending-')
       const updatedProject = {
         ...project,
         sources: updatedSources,
-        teamId: teamPending ? workspace.teamId : project.teamId,
-        teamName: teamPending || project.teamName === project.name ? workspace.teamName : project.teamName
+        teamId: workspace.teamId,
+        teamName: workspace.teamName || project.teamName || 'Slack Workspace'
       }
 
       await deps.monitorStore.upsertProject({ project: updatedProject })
