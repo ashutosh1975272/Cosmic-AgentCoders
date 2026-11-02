@@ -461,6 +461,82 @@ export function registerProfileIpc(deps: ProfileIpcDeps): void {
     }
   })
 
+  deps.browserViewManager.setCardWorkspaceSeenHandler(async (projectId, appId, workspace) => {
+    try {
+      log.info('card workspace seen', { projectId, appId, workspace })
+      if (!deps.monitorStore) return
+
+      const projects = await deps.monitorStore.listProjects()
+      const project = projects.find((p) => p.id === projectId)
+      if (!project) return
+
+      // Also register this workspace in the project's profile if known
+      if (project.profileId) {
+        try {
+          const updatedProf = await deps.profileStore.upsertAvailable(project.profileId, appId, workspace)
+          notifyProfileUpdated(deps.getMainWindow, updatedProf)
+        } catch (pErr) {
+          log.warn('card workspace profile sync warning', { projectId, pErr: String(pErr) })
+        }
+      }
+
+      // Auto-attach as an active source to this project card
+      const existingSources: import('../../shared/dashboard-contract').ProjectSource[] = project.sources ?? []
+      const existingIndex = existingSources.findIndex(
+        (s: import('../../shared/dashboard-contract').ProjectSource) =>
+          s.workspaceId === workspace.teamId && (s.profileId === project.profileId || !s.profileId)
+      )
+
+      let updatedSources = [...existingSources]
+      if (existingIndex >= 0) {
+        // Update workspace name / url if improved
+        const current = existingSources[existingIndex]
+        updatedSources[existingIndex] = {
+          ...current,
+          workspaceName: workspace.teamName || current.workspaceName,
+          status: 'connected',
+          updatedAt: new Date().toISOString()
+        }
+      } else {
+        const now = new Date().toISOString()
+        const newSource: import('../../shared/dashboard-contract').ProjectSource = {
+          id: `src-card-${Date.now().toString(36)}`,
+          kind: 'browser',
+          platform: 'slack',
+          profileId: project.profileId,
+          workspaceId: workspace.teamId,
+          workspaceName: workspace.teamName,
+          channels: (project.monitors ?? []).map((m: { channelId: string; channelName?: string }) => ({
+            id: m.channelId,
+            name: m.channelName || m.channelId
+          })),
+          role: 'ours',
+          backfillDays: 7,
+          enabled: true,
+          status: 'connected',
+          createdAt: now,
+          updatedAt: now
+        }
+        updatedSources.push(newSource)
+      }
+
+      const teamPending = !project.teamId || project.teamId.startsWith('pending-')
+      const updatedProject = {
+        ...project,
+        sources: updatedSources,
+        teamId: teamPending ? workspace.teamId : project.teamId,
+        teamName: teamPending || project.teamName === project.name ? workspace.teamName : project.teamName
+      }
+
+      await deps.monitorStore.upsertProject({ project: updatedProject })
+      if (deps.broadcastSnapshot) {
+        await deps.broadcastSnapshot()
+      }
+    } catch (err) {
+      log.warn('card passive workspace capture failed', { projectId, appId, err: String(err) })
+    }
+  })
+
   deps.browserViewManager.setThemeHandler((payload) => {
     const win = deps.getMainWindow()
     if (win && !win.isDestroyed()) {

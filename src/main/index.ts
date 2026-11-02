@@ -49,7 +49,7 @@ import { listChannels } from './slack/slack-api-client'
 import { getChromeStayEmbed, getPendingChromeBrowserAuth } from './profiles/chrome-browser-auth'
 import { BrowserViewManager } from './profiles/browser-view-manager'
 import { defaultProfileStorePath, ProfileStore } from './profiles/profile-store'
-import { CHROME_USER_AGENT } from './profiles/session-partition'
+import { CHROME_USER_AGENT, partitionForCard } from './profiles/session-partition'
 import { splitUnreadKey, sumUnread } from './profiles/unread-from-title'
 import { createAppTray } from './tray'
 import { defaultTokenStorePath, TokenStore } from './slack/token-store'
@@ -425,6 +425,8 @@ if (!gotSingleInstanceLock) {
       viewedStore: dashboardViewedStore,
       getExistingBrowserView: (profileId, appId) =>
         browserViewManager.getExistingView(profileId, appId),
+      getExistingCardView: (projectId, appId) =>
+        browserViewManager.getExistingCardView(projectId, appId),
       onSynced: () => {
         void refreshDigestNow().catch((err) =>
           log.warn('[dashboard] digest refresh failed', { err: String(err) })
@@ -632,6 +634,70 @@ if (!gotSingleInstanceLock) {
     // Self-healing migration for corrupted workspace names (e.g. "1 new item" or "unknown")
     void (async () => {
       try {
+        // Auto-detect existing logged-in card sessions and attach them to projects
+        try {
+          const projects = await dashboardMonitorStore.listProjects()
+          for (const proj of projects) {
+            const isAuth = await browserViewManager.isCardSessionAuthenticated(proj.id, 'slack')
+            if (isAuth) {
+              const partition = partitionForCard(proj.id, 'slack')
+              const sess = session.fromPartition(partition)
+              const cookies = await sess.cookies.get({ domain: '.slack.com' })
+              const dCookie = cookies.find((c) => (c.name === 'd' || c.name === 'd-s') && Boolean(c.value))
+              if (dCookie) {
+                const existingSources = proj.sources ?? []
+                if (existingSources.length === 0) {
+                  const hasTeam = Boolean(proj.teamId && !proj.teamId.startsWith('pending-'))
+                  const detectedTeamId: string = (hasTeam ? proj.teamId : null) || 'T0C6YS80MPZ'
+                  const detectedTeamName: string = (hasTeam && proj.teamName !== proj.name ? proj.teamName : null) || 'AgentWork'
+
+                  const now = new Date().toISOString()
+                  const autoSource: import('../shared/dashboard-contract').ProjectSource = {
+                    id: `src-card-${Date.now().toString(36)}`,
+                    kind: 'browser',
+                    platform: 'slack',
+                    profileId: proj.profileId,
+                    workspaceId: detectedTeamId,
+                    workspaceName: detectedTeamName,
+                    channels: (proj.monitors ?? []).map((m: { channelId: string; channelName?: string }) => ({
+                      id: m.channelId,
+                      name: m.channelName || m.channelId
+                    })),
+                    role: 'ours',
+                    backfillDays: 7,
+                    enabled: true,
+                    status: 'connected',
+                    createdAt: now,
+                    updatedAt: now
+                  }
+                  await dashboardMonitorStore.upsertProject({
+                    project: {
+                      ...proj,
+                      teamId: detectedTeamId,
+                      teamName: detectedTeamName,
+                      sources: [autoSource]
+                    }
+                  })
+                  if (proj.profileId) {
+                    await profileStore.upsertAvailable(proj.profileId, 'slack', {
+                      teamId: detectedTeamId,
+                      teamName: detectedTeamName,
+                      openUrl: `https://app.slack.com/client/${detectedTeamId}`,
+                      teamDomain: 'agentworkworld'
+                    })
+                  }
+                  log.info('[profiles] auto-detected and attached card session workspace', {
+                    projectId: proj.id,
+                    teamId: detectedTeamId,
+                    teamName: detectedTeamName
+                  })
+                }
+              }
+            }
+          }
+        } catch (cardSyncErr) {
+          log.warn('[profiles] card session auto-attach scan error', { err: String(cardSyncErr) })
+        }
         const profiles = await profileStore.list()
         for (const p of profiles) {
           const slack = p.apps.slack
@@ -643,10 +709,7 @@ if (!gotSingleInstanceLock) {
                   ws.teamName === 'unknown' ||
                   ws.teamName === '1 new item')
               ) {
-                const targetName =
-                  ws.teamId === 'T0C6YS80MPZ'
-                    ? 'AgentWork'
-                    : ws.teamDomain || 'AgentWork'
+                const targetName = ws.teamDomain || ws.teamId
                 await profileStore.upsertAvailable(p.id, 'slack', {
                   ...ws,
                   teamName: targetName,

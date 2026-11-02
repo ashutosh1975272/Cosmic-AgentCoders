@@ -105,6 +105,7 @@ export interface DashboardSyncEngineDeps {
   /** v2.3 — called after a background sync (e.g. to refresh the digest) */
   onSynced?: (snapshots: DashboardProjectSnapshot[]) => void
   getExistingBrowserView?: (profileId: string, appId: 'slack') => any
+  getExistingCardView?: (projectId: string, appId: 'slack') => any
 }
 
 export class DashboardSyncEngine {
@@ -123,6 +124,7 @@ export class DashboardSyncEngine {
   private readonly metricsCache: Map<string, { key: string; value: DashboardMetrics }> = new Map()
   private readonly onSynced: ((snapshots: DashboardProjectSnapshot[]) => void) | undefined
   private readonly getExistingBrowserView?: (profileId: string, appId: 'slack') => any
+  private readonly getExistingCardView?: (projectId: string, appId: 'slack') => any
   private scrapeEventListener: ((event: ScrapeStepEvent) => void) | null = null
   private activeWatchReader: SlackReaderView | null = null
   private scrapeQueuePromise: Promise<any> = Promise.resolve()
@@ -153,6 +155,7 @@ export class DashboardSyncEngine {
     this.viewedStore = deps.viewedStore
     this.onSynced = deps.onSynced
     this.getExistingBrowserView = deps.getExistingBrowserView
+    this.getExistingCardView = deps.getExistingCardView
     if (deps.onProgress) this.progressCallbacks.push(deps.onProgress)
   }
 
@@ -433,17 +436,15 @@ export class DashboardSyncEngine {
           let channelsRead = 0
           let newMessagesCount = 0
           const snippets: { channelId: string; channelName?: string; sender: string; ts: string; snippet: string }[] = []
-          const effectiveWorkspaceName =
-            bSrc.workspaceName === 'T0FJQUFLJ'
-              ? 'excellencetech'
-              : bSrc.workspaceName === 'T0C6YS80MPZ'
-                ? 'AgentWork'
-                : bSrc.workspaceName || bSrc.workspaceId
+          const effectiveWorkspaceName = bSrc.workspaceName || bSrc.workspaceId
 
           try {
-            const existingView = this.getExistingBrowserView?.(bSrc.profileId, 'slack')
+            const existingView =
+              this.getExistingCardView?.(project.id, 'slack') ??
+              this.getExistingBrowserView?.(bSrc.profileId, 'slack')
             const reader = new SlackReaderView({
               profileId: bSrc.profileId,
+              projectId: project.id,
               workspaceId: bSrc.workspaceId,
               existingView: existingView ?? null,
               onEvent: (ev) => this.scrapeEventListener?.({ ...ev, workspaceName: effectiveWorkspaceName })
@@ -675,17 +676,15 @@ export class DashboardSyncEngine {
       let runStatus: 'connected' | 'challenge' | 'needs-login' | 'adapter-broken' | 'error' = 'connected'
       let runError: string | undefined = undefined
 
-      const effectiveWorkspaceName =
-        bSrc.workspaceName === 'T0FJQUFLJ'
-          ? 'excellencetech'
-          : bSrc.workspaceName === 'T0C6YS80MPZ'
-            ? 'AgentWork'
-            : bSrc.workspaceName || bSrc.workspaceId
+      const effectiveWorkspaceName = bSrc.workspaceName || bSrc.workspaceId
 
       try {
-        const existingView = this.getExistingBrowserView?.(bSrc.profileId, 'slack')
+        const existingView =
+          this.getExistingCardView?.(project.id, 'slack') ??
+          this.getExistingBrowserView?.(bSrc.profileId, 'slack')
         const reader = new SlackReaderView({
           profileId: bSrc.profileId,
+          projectId: project.id,
           workspaceId: bSrc.workspaceId,
           existingView: existingView ?? null,
           onEvent: (ev) => this.scrapeEventListener?.({ ...ev, workspaceName: effectiveWorkspaceName })

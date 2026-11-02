@@ -182,7 +182,7 @@ export function RunLogsModal({ open, projectId, projectName, onClose }: RunLogsM
               onClick={() => setSelectedWorkspace(ws)}
               style={{ fontSize: '12px', padding: '3px 10px' }}
             >
-              {ws === 'T0FJQUFLJ' ? 'excellencetech' : ws === 'T0C6YS80MPZ' ? 'AgentWork' : ws} ({logs.filter((l) => l.workspaceId === ws).length})
+              {ws} ({logs.filter((l) => l.workspaceId === ws).length})
             </button>
           ))}
         </div>
@@ -246,7 +246,7 @@ export function RunLogsModal({ open, projectId, projectName, onClose }: RunLogsM
                   </div>
 
                   <div style={{ fontSize: '12px', fontWeight: 500, color: '#f8fafc', marginTop: '2px' }}>
-                    {log.workspaceId === 'T0FJQUFLJ' ? 'excellencetech' : log.workspaceId === 'T0C6YS80MPZ' ? 'AgentWork' : log.workspaceId}
+                    {log.workspaceId}
                   </div>
 
                   <div style={{ fontSize: '11px', display: 'flex', justifyContent: 'space-between', color: '#64748b' }}>

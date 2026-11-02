@@ -80,6 +80,18 @@ export type WorkspaceSeenHandler = (
   }
 ) => void | Promise<void>
 
+export type CardWorkspaceSeenHandler = (
+  projectId: string,
+  appId: AppId,
+  workspace: {
+    teamId: string
+    teamName: string
+    openUrl: string
+    teamDomain?: string
+    lastChannelName?: string
+  }
+) => void | Promise<void>
+
 /**
  * One WebContentsView per profile+app. Switching attaches/detaches — never reloads.
  */
@@ -93,6 +105,7 @@ export class BrowserViewManager {
   private secondaryBounds: Rectangle | null = null
   private embedHidden = false
   private workspaceSeenHandler: WorkspaceSeenHandler | null = null
+  private cardWorkspaceSeenHandler: CardWorkspaceSeenHandler | null = null
   private themeHandler: ((payload: WorkspaceThemePayload) => void) | null = null
   private unreadHandler: ((counts: Record<string, number>) => void) | null = null
   private readonly unreadCounts = new Map<string, number>()
@@ -113,12 +126,20 @@ export class BrowserViewManager {
     return this.views.get(viewKey(profileId, appId)) ?? null
   }
 
+  getExistingCardView(projectId: string, appId: AppId): WebContentsView | null {
+    return this.views.get(cardViewKey(projectId, appId)) ?? null
+  }
+
   noteActivity(): void {
     this.activityHandler?.()
   }
 
   setWorkspaceSeenHandler(handler: WorkspaceSeenHandler | null): void {
     this.workspaceSeenHandler = handler
+  }
+
+  setCardWorkspaceSeenHandler(handler: CardWorkspaceSeenHandler | null): void {
+    this.cardWorkspaceSeenHandler = handler
   }
 
   setThemeHandler(handler: ((payload: WorkspaceThemePayload) => void) | null): void {
@@ -425,7 +446,7 @@ export class BrowserViewManager {
       applySlackWebContentsTweaks(view.webContents)
     }
 
-    this.wireEmbedNavigation(projectId, appId, view)
+    this.wireCardPassiveCapture(projectId, appId, view)
 
     view.webContents.on('dom-ready', () => {
       if (appId === 'slack') {
@@ -658,9 +679,11 @@ export class BrowserViewManager {
   }
 
   async readSlackContext(
-    profileId: string
+    profileId: string,
+    projectId?: string
   ): Promise<{ workspaceName: string | null; channelName: string | null }> {
-    const view = this.views.get(viewKey(profileId, 'slack'))
+    const key = projectId ? cardViewKey(projectId, 'slack') : viewKey(profileId, 'slack')
+    const view = this.views.get(key)
     if (!view || view.webContents.isDestroyed()) {
       return { workspaceName: null, channelName: null }
     }
@@ -683,8 +706,9 @@ export class BrowserViewManager {
     }
   }
 
-  async readPageTitle(profileId: string, appId: AppId): Promise<string | null> {
-    const view = this.views.get(viewKey(profileId, appId))
+  async readPageTitle(profileId: string, appId: AppId, projectId?: string): Promise<string | null> {
+    const key = projectId ? cardViewKey(projectId, appId) : viewKey(profileId, appId)
+    const view = this.views.get(key)
     if (!view || view.webContents.isDestroyed()) {
       return null
     }
@@ -703,6 +727,14 @@ export class BrowserViewManager {
     } catch {
       return null
     }
+  }
+
+  getCurrentCardUrl(projectId: string, appId: AppId): string | null {
+    const view = this.views.get(cardViewKey(projectId, appId))
+    if (!view || view.webContents.isDestroyed()) {
+      return null
+    }
+    return view.webContents.getURL()
   }
 
   getCurrentTeamId(profileId: string, appId: AppId): string | null {
@@ -839,6 +871,86 @@ export class BrowserViewManager {
       }
       return { action: 'deny' }
     })
+  }
+
+  private async emitCardWorkspaceSeen(projectId: string, appId: AppId): Promise<void> {
+    if (!this.cardWorkspaceSeenHandler) {
+      return
+    }
+    if (appId === 'whatsapp') {
+      return
+    }
+    const url = this.getCurrentCardUrl(projectId, appId)
+    if (!url) {
+      return
+    }
+
+    if (appId === 'slack') {
+      const loc = parseSlackClientPath(url)
+      const teamId = loc?.teamId
+      if (!teamId) {
+        return
+      }
+      const context = await this.readSlackContext('', projectId)
+      const title = context.workspaceName || (await this.readPageTitle('', appId, projectId))
+      const teamDomain = parseSlackTeamDomain(url) ?? undefined
+      const looksLikeId = isSlackPlaceholderName(title)
+      const teamName =
+        (title && !looksLikeId ? title : null) || teamDomain || context.workspaceName || teamId
+      const openUrl = slackClientUrlForConversation(teamId, loc.conversationId)
+      await this.cardWorkspaceSeenHandler(projectId, appId, {
+        teamId,
+        teamName,
+        openUrl,
+        teamDomain,
+        ...(context.channelName ? { lastChannelName: context.channelName } : {})
+      })
+      return
+    }
+
+    if (!isTeamsSignedInUrl(url)) {
+      return
+    }
+    const title = await this.readPageTitle('', appId, projectId)
+    const rawTeamId = parseTeamIdFromSlackClientUrl(url) || 'teams-home'
+    const teamId = canonicalizeTeamsWorkspaceId(rawTeamId)
+    const genericTitle =
+      !title || /^(microsoft teams|teams|chat|teams org|organization|personal)$/i.test(title)
+    const teamName =
+      teamId === 'teams-home'
+        ? 'Personal'
+        : !genericTitle
+          ? title
+          : `Org ${teamId.replace(/^tenant-/i, '').slice(0, 8)}`
+    await this.cardWorkspaceSeenHandler(projectId, appId, {
+      teamId,
+      teamName,
+      openUrl: teamId === 'teams-home' ? TEAMS_HOME_URL : url.split('#')[0] || TEAMS_HOME_URL
+    })
+  }
+
+  private wireCardPassiveCapture(projectId: string, appId: AppId, view: WebContentsView): void {
+    const key = cardViewKey(projectId, appId)
+    if (this.captureWired.has(key)) {
+      return
+    }
+    this.captureWired.add(key)
+    this.wireEmbedNavigation(projectId, appId, view)
+
+    const maybeCapture = (): void => {
+      const prev = this.captureDebounce.get(key)
+      if (prev) clearTimeout(prev)
+      this.captureDebounce.set(
+        key,
+        setTimeout(() => {
+          this.captureDebounce.delete(key)
+          void this.emitCardWorkspaceSeen(projectId, appId)
+        }, 900)
+      )
+    }
+    view.webContents.on('did-navigate', maybeCapture)
+    view.webContents.on('did-navigate-in-page', maybeCapture)
+    view.webContents.on('did-finish-load', maybeCapture)
   }
 
   private wirePassiveCapture(profileId: string, appId: AppId, view: WebContentsView): void {

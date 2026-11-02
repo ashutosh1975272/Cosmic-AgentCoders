@@ -1,5 +1,5 @@
 import { WebContentsView } from 'electron'
-import { partitionForProfile } from '../profiles/session-partition'
+import { partitionForProfile, partitionForCard } from '../profiles/session-partition'
 import { log } from '../logging'
 import { SlackAdapter, type SlackSessionState, type ScrapedChannelItem } from './slack-adapter'
 import { deduplicateMessages, normalizeScrapedMessage } from './normalizer'
@@ -23,6 +23,7 @@ export interface ScrapeStepEvent {
 export interface SlackReaderOptions {
   profileId: string
   workspaceId: string
+  projectId?: string
   existingView?: WebContentsView | null
   onEvent?: (event: ScrapeStepEvent) => void
 }
@@ -33,11 +34,13 @@ export class SlackReaderView {
   private readonly adapter = new SlackAdapter()
   private readonly profileId: string
   private readonly workspaceId: string
+  private readonly projectId?: string
   private readonly onEvent?: (event: ScrapeStepEvent) => void
 
   constructor(options: SlackReaderOptions) {
     this.profileId = options.profileId
     this.workspaceId = options.workspaceId
+    this.projectId = options.projectId
     this.onEvent = options.onEvent
     if (options.existingView && !options.existingView.webContents.isDestroyed()) {
       this.view = options.existingView
@@ -47,12 +50,14 @@ export class SlackReaderView {
 
   /**
    * Initializes the view. If an active session view is provided, reuses it.
-   * Otherwise initializes the background view using the profile's dedicated session partition.
+   * Otherwise initializes the background view using the card or profile's dedicated session partition.
    */
   async initialize(): Promise<void> {
     if (this.view && !this.view.webContents.isDestroyed()) return
 
-    const partition = partitionForProfile(this.profileId, 'slack')
+    const partition = this.projectId
+      ? partitionForCard(this.projectId, 'slack')
+      : partitionForProfile(this.profileId, 'slack')
 
     this.view = new WebContentsView({
       webPreferences: {

@@ -710,7 +710,7 @@ export default function ProjectSettingsTab({
                             <div>
                               <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6 }}>
                                 <span>{src.role === 'ours' ? '👤 [My Account]' : '💼 [Client Account]'}</span>
-                                <span>{src.workspaceName === 'T0FJQUFLJ' ? 'excellencetech' : src.workspaceName === 'T0C6YS80MPZ' ? 'AgentWork' : (src.workspaceName || src.workspaceId)}</span>
+                                <span>{src.workspaceName || src.workspaceId}</span>
                               </div>
                               <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                                 {src.kind === 'browser' ? 'Browser session' : 'Token'} · {src.channels.length} channels monitored
