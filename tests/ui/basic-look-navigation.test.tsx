@@ -89,7 +89,9 @@ describe('BasicSidebarProjectTree & Basic Look Navigation', () => {
         onScrapeEvent: vi.fn().mockReturnValue(() => undefined),
         checkCardAuth: vi.fn().mockResolvedValue(true),
         getTeamWorkspace: vi.fn().mockResolvedValue(null),
-        listChannels: vi.fn().mockResolvedValue({ ok: true, channels: [] })
+        listChannels: vi.fn().mockResolvedValue({ ok: true, channels: [] }),
+        discoverSourceChannels: vi.fn().mockResolvedValue({ channels: [] }),
+        updateSource: vi.fn().mockResolvedValue({})
       },
       profiles: {
         activateCardSlackEmbed: vi.fn().mockResolvedValue(undefined),
@@ -309,5 +311,54 @@ describe('BasicSidebarProjectTree & Basic Look Navigation', () => {
         projectId: 'proj-1'
       })
     )
+  })
+
+  it('when slack source is connected, renders Choose channels and Channels buttons in header bar without yellow banner', async () => {
+    const sampleSources = [
+      {
+        id: 'src-1',
+        kind: 'browser' as const,
+        platform: 'slack' as const,
+        profileId: 'prof-1',
+        workspaceId: 'T123',
+        workspaceName: 'Acme',
+        channels: [{ id: 'C1', name: 'general', enabled: true }],
+        role: 'client' as const,
+        enabled: true,
+        backfillDays: 7,
+        status: 'connected' as const,
+        createdAt: '2026-11-02T10:00:00.000Z',
+        updatedAt: '2026-11-02T10:00:00.000Z'
+      }
+    ]
+    const projectWithSource = {
+      ...mockSnapshot.projects[0],
+      project: {
+        ...mockSnapshot.projects[0].project,
+        sources: sampleSources
+      },
+      sources: sampleSources
+    }
+
+    useDashboardStore.setState({
+      snapshot: {
+        ...mockSnapshot,
+        projects: [projectWithSource, mockSnapshot.projects[1]]
+      } as any,
+      cosmicSelectedCardId: 'proj-1',
+      basicActiveTab: 'slack'
+    })
+
+    const { getByText, queryByText } = render(
+      <CosmicWorkspaceView sidebarLook="basic" />
+    )
+
+    // Should render Choose channels and Channels in header
+    expect(getByText('Choose channels')).not.toBeNull()
+    expect(getByText(/☑ Channels \(1\)/i)).not.toBeNull()
+    expect(getByText('Re-authenticate')).not.toBeNull()
+
+    // Must NOT render yellow banner
+    expect(queryByText(/Choose the 2–3 channels this card should scrape/i)).toBeNull()
   })
 })

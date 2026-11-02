@@ -791,23 +791,48 @@ export default function WorkspaceContent({
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 {slackBrowserSource ? (
-                  <button
-                    type="button"
-                    onClick={() => setChannelPickerSourceId(slackBrowserSource.id)}
-                    style={{
-                      background: 'rgba(255, 255, 255, 0.08)',
-                      border: '1px solid rgba(255, 255, 255, 0.16)',
-                      color: '#cbd5e1',
-                      fontSize: 11,
-                      borderRadius: 6,
-                      padding: '3px 9px',
-                      cursor: 'pointer',
-                      fontWeight: 600
-                    }}
-                    title="Choose channels to scrape or exclude"
-                  >
-                    ☑ Channels ({slackBrowserSource.channels.filter((c) => c.enabled !== false).length})
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setChannelPickerSourceId(slackBrowserSource.id)}
+                      style={{
+                        background: unreviewedSource
+                          ? 'rgba(99, 102, 241, 0.2)'
+                          : 'rgba(255, 255, 255, 0.08)',
+                        border: `1px solid ${
+                          unreviewedSource
+                            ? 'rgba(99, 102, 241, 0.45)'
+                            : 'rgba(255, 255, 255, 0.16)'
+                        }`,
+                        color: unreviewedSource ? '#a5b4fc' : '#cbd5e1',
+                        fontSize: 11,
+                        borderRadius: 6,
+                        padding: '3px 9px',
+                        cursor: 'pointer',
+                        fontWeight: 600
+                      }}
+                      title="Choose channels to scrape or exclude"
+                    >
+                      Choose channels
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setChannelPickerSourceId(slackBrowserSource.id)}
+                      style={{
+                        background: 'rgba(255, 255, 255, 0.08)',
+                        border: '1px solid rgba(255, 255, 255, 0.16)',
+                        color: '#cbd5e1',
+                        fontSize: 11,
+                        borderRadius: 6,
+                        padding: '3px 9px',
+                        cursor: 'pointer',
+                        fontWeight: 600
+                      }}
+                      title="View or modify channel selection"
+                    >
+                      ☑ Channels ({slackBrowserSource.channels.filter((c) => c.enabled !== false).length})
+                    </button>
+                  </>
                 ) : null}
                 <button
                   type="button"
@@ -827,34 +852,6 @@ export default function WorkspaceContent({
                 </button>
               </div>
             </div>
-            {unreviewedSource ? (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                  padding: '9px 14px',
-                  background: 'rgba(251, 191, 36, 0.1)',
-                  borderBottom: '1px solid rgba(251, 191, 36, 0.25)',
-                  fontSize: 12,
-                  color: '#fcd34d'
-                }}
-              >
-                <span>
-                  Slack is connected. Choose the 2–3 channels this card should scrape — nothing is
-                  read until you pick.
-                </span>
-                <button
-                  type="button"
-                  className="dash-subtle"
-                  style={{ fontSize: 12, whiteSpace: 'nowrap' }}
-                  onClick={() => setChannelPickerSourceId(unreviewedSource.id)}
-                >
-                  Choose channels
-                </button>
-              </div>
-            ) : null}
             <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
               <CardLiveSlackEmbed
                 projectId={project.id}
