@@ -81,27 +81,36 @@ export async function syncGoogleSessionFromProfileToCard(
       const scheme = cookie.secure ? 'https' : 'http'
       const url = `${scheme}://${host}${cookie.path || '/'}`
 
+      const baseDetails = {
+        url,
+        name: cookie.name,
+        value: cookie.value,
+        path: cookie.path || '/',
+        secure: Boolean(cookie.secure),
+        httpOnly: Boolean(cookie.httpOnly),
+        expirationDate: !cookie.session && (cookie.expirationDate ?? 0) > 0
+          ? cookie.expirationDate
+          : undefined,
+        sameSite: (cookie.sameSite as 'no_restriction' | 'lax' | 'strict' | 'unspecified') ?? 'no_restriction'
+      }
+
       try {
         await dstSession.cookies.set({
-          url,
-          name: cookie.name,
-          value: cookie.value,
-          domain: cookie.domain,
-          path: cookie.path || '/',
-          secure: Boolean(cookie.secure),
-          httpOnly: Boolean(cookie.httpOnly),
-          expirationDate: !cookie.session && (cookie.expirationDate ?? 0) > 0
-            ? cookie.expirationDate
-            : undefined,
-          sameSite: (cookie.sameSite as 'no_restriction' | 'lax' | 'strict' | 'unspecified') ?? 'no_restriction'
+          ...baseDetails,
+          domain: cookie.domain?.startsWith('.') ? cookie.domain : undefined
         })
         synced += 1
-      } catch (err) {
-        log.warn('google-session-sync: skipped cookie', {
-          name: cookie.name,
-          domain: cookie.domain,
-          err: String(err)
-        })
+      } catch {
+        try {
+          await dstSession.cookies.set(baseDetails)
+          synced += 1
+        } catch (err) {
+          log.warn('google-session-sync: skipped cookie', {
+            name: cookie.name,
+            domain: cookie.domain,
+            err: String(err)
+          })
+        }
       }
     }
 

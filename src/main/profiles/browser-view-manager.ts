@@ -362,7 +362,7 @@ export class BrowserViewManager {
     const view = new WebContentsView({
       webPreferences: profileSessionWebPreferences(profileId, appId)
     })
-    view.setBackgroundColor('#0C0D11')
+    view.setBackgroundColor(appId === 'whatsapp' ? '#111B21' : '#0C0D11')
 
     view.webContents.setZoomFactor(1)
 
@@ -415,7 +415,7 @@ export class BrowserViewManager {
         preload: join(__dirname, '../preload/index.js')
       }
     })
-    view.setBackgroundColor('#0C0D11')
+    view.setBackgroundColor(appId === 'whatsapp' ? '#111B21' : '#0C0D11')
 
     if (appId === 'teams') {
       applyTeamsWebContentsTweaks(view.webContents)
@@ -424,6 +424,8 @@ export class BrowserViewManager {
     } else {
       applySlackWebContentsTweaks(view.webContents)
     }
+
+    this.wireEmbedNavigation(projectId, appId, view)
 
     view.webContents.on('dom-ready', () => {
       if (appId === 'slack') {

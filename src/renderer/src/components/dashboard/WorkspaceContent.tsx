@@ -509,7 +509,7 @@ export default function WorkspaceContent({
       const whatsappStatus = targetProfile?.apps?.whatsapp?.sessionStatus ?? 'not-signed-in'
       if (whatsappStatus === 'signed-in') {
         body = (
-          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: 'var(--bg-page)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: '#111b21' }}>
             <div style={{
               display: 'flex',
               alignItems: 'center',
@@ -565,7 +565,7 @@ export default function WorkspaceContent({
         )
       } else {
         body = (
-          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: 'var(--bg-page)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: '#111b21' }}>
             <div style={{
               display: 'flex',
               alignItems: 'center',

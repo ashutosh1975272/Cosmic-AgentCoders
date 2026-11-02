@@ -12,6 +12,9 @@ describe('BasicSidebarProjectTree & Basic Look Navigation', () => {
   })
   const mockSnapshot = {
     teamWorkspace: null,
+    manualTokens: [],
+    syncIntervalSeconds: 60,
+    pinnedOrder: [],
     projects: [
       {
         project: {
@@ -23,7 +26,8 @@ describe('BasicSidebarProjectTree & Basic Look Navigation', () => {
           appId: 'slack',
           tokenSource: 'oauth',
           monitors: [],
-          workflowStatus: 'active'
+          workflowStatus: 'active',
+          createdAt: new Date().toISOString()
         },
         sources: [],
         syncState: 'idle'
@@ -38,7 +42,8 @@ describe('BasicSidebarProjectTree & Basic Look Navigation', () => {
           appId: 'slack',
           tokenSource: 'oauth',
           monitors: [],
-          workflowStatus: 'active'
+          workflowStatus: 'active',
+          createdAt: new Date().toISOString()
         },
         sources: [],
         syncState: 'idle'
@@ -190,5 +195,54 @@ describe('BasicSidebarProjectTree & Basic Look Navigation', () => {
     expect(embedDiv.style.minHeight).toBe('0px')
     expect(embedDiv.style.borderRadius).toBe('0px')
     expect(embedDiv.style.background).toBe('var(--bg-page)')
+  })
+
+  it('renders pin button on project rows and sorts pinned projects to the top', () => {
+    // proj-2 is pinned, proj-1 is unpinned
+    useDashboardStore.setState({
+      snapshot: {
+        ...mockSnapshot,
+        pinnedOrder: ['proj-2']
+      } as any
+    })
+
+    const { container } = render(<BasicSidebarProjectTree />)
+
+    // Project rows in DOM order
+    const projectNames = Array.from(container.querySelectorAll('.basic-project-header-btn')).map(
+      (btn) => btn.textContent
+    )
+
+    // Pinned proj-2 ('Ashutosh-Test-01') should appear before unpinned proj-1 ('Rajesh-test-03')
+    expect(projectNames[0]).toContain('Ashutosh-Test-01')
+    expect(projectNames[1]).toContain('Rajesh-test-03')
+
+    // Pin buttons should be rendered
+    const pinButtons = container.querySelectorAll('.basic-project-pin')
+    expect(pinButtons.length).toBe(2)
+    // First project is pinned
+    expect(pinButtons[0].classList.contains('is-pinned')).toBe(true)
+    expect(pinButtons[1].classList.contains('is-pinned')).toBe(false)
+  })
+
+  it('clicking pin button calls setPinnedOrder without collapsing project', () => {
+    const setPinnedOrderSpy = vi.fn().mockResolvedValue(undefined)
+    useDashboardStore.setState({
+      snapshot: {
+        ...mockSnapshot,
+        pinnedOrder: []
+      } as any,
+      setPinnedOrder: setPinnedOrderSpy
+    })
+
+    const { container } = render(<BasicSidebarProjectTree />)
+
+    const pinButtons = container.querySelectorAll('.basic-project-pin')
+    expect(pinButtons.length).toBe(2)
+
+    // Click pin on first project (proj-1)
+    fireEvent.click(pinButtons[0])
+
+    expect(setPinnedOrderSpy).toHaveBeenCalledWith(['proj-1'])
   })
 })

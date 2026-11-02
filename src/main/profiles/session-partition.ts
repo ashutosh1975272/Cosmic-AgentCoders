@@ -332,20 +332,53 @@ export function applySlackWebContentsTweaks(contents: WebContents): void {
   contents.setUserAgent(BRAVE_USER_AGENT)
 }
 
+export const WHATSAPP_DARK_CSS = `
+  html, body, #app, .landing-wrapper, [data-testid="landing-wrapper"], [data-asset-chat-background-dark] {
+    height: 100% !important;
+    min-height: 100vh !important;
+    background-color: #111b21 !important;
+    color: #e9edef !important;
+  }
+  .landing-window, [data-testid="landing-window"], [data-testid="qrcode-container"], [data-testid="qrcode-wrapper"] {
+    background-color: #222e35 !important;
+    color: #e9edef !important;
+    border-radius: 16px !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45) !important;
+  }
+  .landing-title, .landing-header, .landing-wrapper span, .landing-wrapper div, .landing-wrapper ol, .landing-wrapper li, [data-testid="landing-window"] * {
+    color: #e9edef !important;
+  }
+  .landing-wrapper a, [data-testid="landing-window"] a {
+    color: #25d366 !important;
+  }
+`
+
 /** WhatsApp Web: Chrome UA so WA treats us like a normal desktop browser + official dark theme injection */
 export function applyWhatsAppWebContentsTweaks(contents: WebContents): void {
   contents.setUserAgent(CHROME_USER_AGENT)
 
   const injectDarkTheme = (): void => {
+    contents.insertCSS(WHATSAPP_DARK_CSS).catch(() => undefined)
     void contents
       .executeJavaScript(
         `(() => {
           try {
-            if (document.body && !document.body.classList.contains('dark')) {
-              document.body.classList.add('dark');
-            }
-            if (window.localStorage && window.localStorage.getItem('theme') !== '"dark"') {
-              window.localStorage.setItem('theme', '"dark"');
+            const applyDark = () => {
+              if (document.documentElement && !document.documentElement.classList.contains('dark')) {
+                document.documentElement.classList.add('dark');
+              }
+              if (document.body && !document.body.classList.contains('dark')) {
+                document.body.classList.add('dark');
+              }
+              if (window.localStorage && window.localStorage.getItem('theme') !== '"dark"') {
+                window.localStorage.setItem('theme', '"dark"');
+              }
+            };
+            applyDark();
+            const obs = new MutationObserver(applyDark);
+            if (document.documentElement) {
+              obs.observe(document.documentElement, { attributes: true, subtree: true, attributeFilter: ['class'] });
             }
           } catch (_) {}
         })()`,

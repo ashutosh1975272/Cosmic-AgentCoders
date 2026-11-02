@@ -878,6 +878,63 @@
   border: none;
 }
 
+.basic-project-row {
+  display: flex;
+  align-items: center;
+  position: relative;
+  width: 100%;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+
+.basic-project-row:hover {
+  background: var(--surface-2);
+}
+
+.basic-project-row .basic-project-header-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: transparent;
+}
+
+.basic-project-row .basic-project-header-btn:hover {
+  background: transparent;
+}
+
+.basic-project-pin {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+  margin-right: 4px;
+}
+
+.basic-project-row:hover .basic-project-pin,
+.basic-project-pin.is-pinned,
+.basic-project-pin:focus-visible {
+  opacity: 1;
+}
+
+.basic-project-pin:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.basic-project-pin.is-pinned {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .basic-project-header-btn {
   display: flex;
   align-items: center;

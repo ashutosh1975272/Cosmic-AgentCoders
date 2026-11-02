@@ -30,7 +30,10 @@ import {
   runSlackChromeBrowserLogin,
   syncChromeBrowserBounds
 } from '../profiles/chrome-browser-auth'
-import { syncGoogleSessionToProfileCards } from '../profiles/google-session-sync'
+import {
+  syncGoogleSessionToProfileCards,
+  syncGoogleSessionFromProfileToCard
+} from '../profiles/google-session-sync'
 import { runTeamsLoginForProfile } from '../profiles/teams-first-login-flow'
 import { waitForWhatsAppSignedIn } from '../profiles/whatsapp-login-flow'
 import type { TokenStore } from '../slack/token-store'
@@ -665,14 +668,21 @@ export function registerProfileIpc(deps: ProfileIpcDeps): void {
     IpcChannels.ProfileStartCardAppLogin,
     async (payload: { projectId: string; profileId: string; appId: AppId; bounds?: ViewportBounds }) => {
       notifyAuthProgress(deps.getMainWindow, 'Waiting for Slack sign-in for card…')
+      const profile = await deps.profileStore.get(payload.profileId)
+      const emailHint = profile?.displayName || undefined
+
+      // Pre-seed Google session cookies into card partition
+      await syncGoogleSessionFromProfileToCard(payload.profileId, payload.projectId, payload.appId).catch(() => undefined)
+
       await runSlackChromeBrowserLogin(payload.profileId, {
         parentWindow: deps.getMainWindow(),
         contentBounds: payload.bounds,
         targetPartition: partitionForCard(payload.projectId, payload.appId),
-        chromeKey: `card-${payload.projectId}`
+        chromeKey: `card-${payload.projectId}`,
+        loginHint: emailHint
       })
-      const profile = await deps.profileStore.get(payload.profileId)
-      return profile || ({} as Profile)
+      const updated = await deps.profileStore.get(payload.profileId)
+      return updated || ({} as Profile)
     }
   )
 
