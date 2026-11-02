@@ -861,3 +861,75 @@
   color: var(--muted);
   gap: 6px;
 }
+
+/* ——— Basic Look Sidebar Project Tree (matches global sidebar flat look) ——— */
+.basic-sidebar-project-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.basic-project-node {
+  margin-bottom: 2px;
+  background: transparent;
+  border: none;
+}
+
+.basic-project-header-btn {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 8px;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  border-radius: 6px;
+  font-size: 0.88rem;
+  font-weight: 550;
+  transition: background 0.15s ease, color 0.15s ease;
+  min-width: 0;
+}
+
+.basic-project-header-btn:hover {
+  background: var(--surface-2);
+}
+
+.basic-project-children {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0 4px 18px;
+}
+
+.basic-project-tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.82rem;
+  text-align: left;
+  transition: background 0.15s ease, color 0.15s ease;
+  min-width: 0;
+}
+
+.basic-project-tab-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.basic-project-tab-btn.is-active {
+  background: var(--surface-2);
+  color: var(--text);
+  font-weight: 600;
+}

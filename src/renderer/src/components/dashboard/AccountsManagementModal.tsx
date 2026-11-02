@@ -196,8 +196,8 @@ export function AccountsManagementModal({
             alignItems: 'center',
             justifyContent: 'space-between',
             padding: '16px 24px',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-            background: 'rgba(12, 17, 33, 0.98)'
+            borderBottom: '1px solid var(--border)',
+            background: 'var(--surface-2)'
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
@@ -297,8 +297,8 @@ export function AccountsManagementModal({
           <aside
             style={{
               width: '280px',
-              borderRight: '1px solid rgba(255, 255, 255, 0.08)',
-              background: 'rgba(10, 15, 29, 0.96)',
+              borderRight: '1px solid var(--border)',
+              background: 'var(--surface)',
               padding: '16px 12px',
               display: 'flex',
               flexDirection: 'column',
@@ -465,7 +465,7 @@ export function AccountsManagementModal({
               flex: 1,
               overflowY: 'auto',
               padding: '24px 32px',
-              background: '#090d16',
+              background: 'var(--bg-page)',
               display: 'flex',
               flexDirection: 'column',
               gap: '24px'

@@ -54,11 +54,17 @@ describe('BasicSidebarProjectTree & Basic Look Navigation', () => {
     })
   })
 
-  it('renders project names as collapsible tree rows', () => {
-    const { getByText } = render(<BasicSidebarProjectTree baseAppLayout="standard" />)
+  it('renders project names as collapsible tree rows without card wrapper boxes', () => {
+    const { getByText, container } = render(<BasicSidebarProjectTree baseAppLayout="standard" />)
 
     expect(getByText('Rajesh-test-03')).not.toBeNull()
     expect(getByText('Ashutosh-Test-01')).not.toBeNull()
+
+    // Verify selected project node does not have hardcoded card borders or card backgrounds
+    const selectedNode = container.querySelector('.basic-project-node.is-selected') as HTMLElement
+    expect(selectedNode).not.toBeNull()
+    expect(selectedNode.style.border).toBe('')
+    expect(selectedNode.style.background).toBe('')
   })
 
   it('renders Dashboard, Slack, Teams, WhatsApp under expanded project', () => {

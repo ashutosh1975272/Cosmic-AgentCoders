@@ -221,7 +221,7 @@ export function CosmicWorkspaceView({
             flex: 1,
             width: '100%',
             height: '100%',
-            background: 'var(--surface-sunken, #090d16)',
+            background: 'var(--bg-page)',
             overflow: 'hidden'
           }}
         >
@@ -263,7 +263,7 @@ export function CosmicWorkspaceView({
           flex: 1,
           width: '100%',
           height: '100%',
-          background: 'var(--surface-sunken, #090d16)',
+          background: 'var(--bg-page)',
           overflow: 'hidden'
         }}
       >

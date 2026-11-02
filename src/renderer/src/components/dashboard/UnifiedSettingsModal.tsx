@@ -196,7 +196,7 @@ export function UnifiedSettingsModal({
           maxHeight: 'min(92vh, 920px)',
           display: 'flex',
           flexDirection: 'column',
-          backgroundColor: '#090d16',
+          backgroundColor: 'var(--surface-2)',
           borderRadius: '14px',
           border: '1px solid rgba(255, 255, 255, 0.1)',
           boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.85)',
@@ -363,7 +363,7 @@ export function UnifiedSettingsModal({
               flex: 1,
               overflowY: 'auto',
               padding: '24px 32px',
-              background: '#090d16'
+              background: 'var(--bg-page)'
             }}
           >
             {/* TAB: GENERAL / PREFERENCES */}

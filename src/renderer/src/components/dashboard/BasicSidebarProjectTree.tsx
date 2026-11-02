@@ -147,38 +147,12 @@ export function BasicSidebarProjectTree({
             <div
               key={projectId}
               className={`basic-project-node${isSelectedProject ? ' is-selected' : ''}`}
-              style={{
-                borderRadius: '8px',
-                background: isSelectedProject
-                  ? 'rgba(255, 255, 255, 0.04)'
-                  : 'transparent',
-                border: isSelectedProject
-                  ? '1px solid rgba(255, 255, 255, 0.08)'
-                  : '1px solid transparent',
-                marginBottom: '2px'
-              }}
             >
               {/* Project Row Header (Click toggles expand/collapse only) */}
               <button
                 type="button"
                 className="basic-project-header-btn"
                 onClick={(e) => toggleProjectExpand(projectId, e)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  width: '100%',
-                  gap: '6px',
-                  padding: '6px 8px',
-                  background: 'transparent',
-                  border: 'none',
-                  color: isSelectedProject ? '#fff' : 'var(--text-bright, #e2e8f0)',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  borderRadius: '6px',
-                  fontSize: '12.5px',
-                  fontWeight: 650,
-                  transition: 'background 0.15s ease'
-                }}
                 title={`${projectName} (Click to expand/collapse)`}
               >
                 <span
@@ -234,49 +208,25 @@ export function BasicSidebarProjectTree({
 
               {/* Collapsible Dropdown Items (Dashboard, Slack, Teams, WhatsApp, etc.) */}
               {isOpen && (
-                <div
-                  className="basic-project-children"
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '2px',
-                    padding: '2px 4px 6px 20px'
-                  }}
-                >
+                <div className="basic-project-children">
                   {/* 1. Dashboard Tab */}
-                  <button
-                    type="button"
-                    onClick={() => handleSelectTab(projectId, 'dashboard')}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      padding: '5px 8px',
-                      borderRadius: '6px',
-                      border: 'none',
-                      background:
-                        isSelectedProject && basicActiveTab === 'dashboard'
-                          ? 'color-mix(in srgb, var(--accent, #6366f1) 22%, transparent)'
-                          : 'transparent',
-                      color:
-                        isSelectedProject && basicActiveTab === 'dashboard'
-                          ? '#fff'
-                          : 'var(--text-faint, #94a3b8)',
-                      cursor: 'pointer',
-                      fontSize: '12px',
-                      fontWeight:
-                        isSelectedProject && basicActiveTab === 'dashboard' ? 650 : 500,
-                      textAlign: 'left',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    <span style={{ fontSize: '12px', lineHeight: 1 }} aria-hidden>
-                      📊
-                    </span>
-                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      Dashboard
-                    </span>
-                  </button>
+                  {(() => {
+                    const isDashActive = isSelectedProject && basicActiveTab === 'dashboard'
+                    return (
+                      <button
+                        type="button"
+                        className={`basic-project-tab-btn${isDashActive ? ' is-active' : ''}`}
+                        onClick={() => handleSelectTab(projectId, 'dashboard')}
+                      >
+                        <span style={{ fontSize: '12px', lineHeight: 1 }} aria-hidden>
+                          📊
+                        </span>
+                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          Dashboard
+                        </span>
+                      </button>
+                    )
+                  })()}
 
                   {/* 2. Preset Apps/Links (Slack, Teams, WhatsApp, etc.) */}
                   {presetItems.map((preset) => {
@@ -287,24 +237,8 @@ export function BasicSidebarProjectTree({
                       <button
                         key={preset.id}
                         type="button"
+                        className={`basic-project-tab-btn${isActive ? ' is-active' : ''}`}
                         onClick={() => handleSelectTab(projectId, tabKey)}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '8px',
-                          padding: '5px 8px',
-                          borderRadius: '6px',
-                          border: 'none',
-                          background: isActive
-                            ? 'color-mix(in srgb, var(--accent, #6366f1) 22%, transparent)'
-                            : 'transparent',
-                          color: isActive ? '#fff' : 'var(--text-faint, #94a3b8)',
-                          cursor: 'pointer',
-                          fontSize: '12px',
-                          fontWeight: isActive ? 650 : 500,
-                          textAlign: 'left',
-                          transition: 'all 0.15s ease'
-                        }}
                       >
                         {preset.appId ? (
                           <AppIcon appId={preset.appId as AppId} size={13} />

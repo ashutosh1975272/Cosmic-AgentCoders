@@ -295,16 +295,16 @@ export default function WorkspaceContent({
       const icon = presetItem?.icon || '🌐'
 
       body = (
-        <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: '#111318' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: 'var(--bg-page)' }}>
           <div style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             padding: '8px 14px',
-            background: 'rgba(255, 255, 255, 0.03)',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+            background: 'var(--surface)',
+            borderBottom: '1px solid var(--border)',
             fontSize: 12,
-            color: '#cbd5e1'
+            color: 'var(--text)'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 16 }}>{icon}</span>
@@ -363,16 +363,16 @@ export default function WorkspaceContent({
       const teamsStatus = targetProfile?.apps?.teams?.sessionStatus ?? 'not-signed-in'
       if (teamsStatus === 'signed-in') {
         body = (
-          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: '#111318' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: 'var(--bg-page)' }}>
             <div style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
               padding: '8px 14px',
-              background: 'rgba(255, 255, 255, 0.03)',
-              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'var(--surface)',
+              borderBottom: '1px solid var(--border)',
               fontSize: 12,
-              color: '#cbd5e1'
+              color: 'var(--text)'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <AppIcon appId="teams" size={16} />
@@ -419,16 +419,16 @@ export default function WorkspaceContent({
         )
       } else if (teamsStatus === 'signing-in' || authBusyApp === 'teams') {
         body = (
-          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: '#111318' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: 'var(--bg-page)' }}>
             <div style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
               padding: '8px 14px',
-              background: 'rgba(99, 102, 241, 0.12)',
-              borderBottom: '1px solid rgba(99, 102, 241, 0.3)',
+              background: 'color-mix(in srgb, var(--accent) 15%, var(--surface))',
+              borderBottom: '1px solid var(--border)',
               fontSize: 12,
-              color: '#cbd5e1'
+              color: 'var(--text)'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div style={{ width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
@@ -509,16 +509,16 @@ export default function WorkspaceContent({
       const whatsappStatus = targetProfile?.apps?.whatsapp?.sessionStatus ?? 'not-signed-in'
       if (whatsappStatus === 'signed-in') {
         body = (
-          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: '#111318' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: 'var(--bg-page)' }}>
             <div style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
               padding: '8px 14px',
-              background: 'rgba(255, 255, 255, 0.03)',
-              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'var(--surface)',
+              borderBottom: '1px solid var(--border)',
               fontSize: 12,
-              color: '#cbd5e1'
+              color: 'var(--text)'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <AppIcon appId="whatsapp" size={16} />
@@ -565,16 +565,16 @@ export default function WorkspaceContent({
         )
       } else {
         body = (
-          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: '#111318' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: 'var(--bg-page)' }}>
             <div style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
               padding: '8px 14px',
-              background: 'rgba(37, 211, 102, 0.12)',
-              borderBottom: '1px solid rgba(37, 211, 102, 0.3)',
+              background: 'color-mix(in srgb, #22c55e 12%, var(--surface))',
+              borderBottom: '1px solid var(--border)',
               fontSize: 12,
-              color: '#cbd5e1'
+              color: 'var(--text)'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <AppIcon appId="whatsapp" size={16} />
@@ -669,16 +669,16 @@ export default function WorkspaceContent({
 
       if (isWholeWorkspace && slackViewMode === 'live' && (cardAuthenticated === true || effectiveSlackTeamId || project.teamId || channels.teamConnected)) {
         body = (
-          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: '#111318' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', background: 'var(--bg-page)' }}>
             <div style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
               padding: '6px 14px',
-              background: 'rgba(255, 255, 255, 0.03)',
-              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'var(--surface)',
+              borderBottom: '1px solid var(--border)',
               fontSize: 12,
-              color: '#cbd5e1'
+              color: 'var(--text)'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <AppIcon appId="slack" size={15} />
