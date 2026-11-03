@@ -459,7 +459,7 @@ describe('[L5] SlackReaderView', () => {
       return Promise.resolve()
     })
     view.webContents.executeJavaScript = vi.fn().mockImplementation((code: string) => {
-      if (code.includes('messageRow')) return Promise.resolve(true)
+      if (code.includes('hasRows')) return Promise.resolve({ hasRows: true, hasComposer: true })
       if (url.includes('slack.com')) return Promise.resolve('logged_in')
       return Promise.resolve('unknown')
     })

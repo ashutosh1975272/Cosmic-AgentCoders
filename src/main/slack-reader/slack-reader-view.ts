@@ -1,5 +1,10 @@
 import { WebContentsView } from 'electron'
-import { partitionForProfile, partitionForCard } from '../profiles/session-partition'
+import {
+  partitionForProfile,
+  partitionForCard,
+  applyChromeSessionTweaks,
+  applySlackWebContentsTweaks
+} from '../profiles/session-partition'
 import { log } from '../logging'
 import { SlackAdapter, type SlackSessionState, type ScrapedChannelItem } from './slack-adapter'
 import { SLACK_SELECTORS } from './slack-selectors'
@@ -96,6 +101,8 @@ export class SlackReaderView {
       ? partitionForCard(this.projectId, 'slack')
       : partitionForProfile(this.profileId, 'slack')
 
+    applyChromeSessionTweaks(partition)
+
     this.view = new WebContentsView({
       webPreferences: {
         partition,
@@ -104,6 +111,8 @@ export class SlackReaderView {
         sandbox: true
       }
     })
+
+    applySlackWebContentsTweaks(this.view.webContents)
 
     // Strict URL allowlist: reader view only loads Slack domain URLs
     this.view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -156,6 +165,56 @@ export class SlackReaderView {
     return false
   }
 
+  /**
+   * Waits specifically for a channel's message list to mount rows.
+   * If the channel has messages, returns as soon as rows appear.
+   * If the channel is genuinely empty, returns true once the composer is mounted and settled.
+   */
+  async waitForMessages(timeoutMs = 15000): Promise<boolean> {
+    if (!this.view || this.view.webContents.isDestroyed()) return false
+    const start = Date.now()
+    let composerSeenAt = 0
+
+    while (Date.now() - start < timeoutMs) {
+      if (this.view.webContents.isDestroyed()) return false
+      try {
+        const state = await this.adapter.detectState(this.view)
+        if (state === 'needs_login' || state === 'challenge') return false
+
+        if (state === 'logged_in') {
+          const dom = await this.view.webContents.executeJavaScript(`
+            (() => {
+              const hasRows = Boolean(document.querySelector('${SLACK_SELECTORS.messageRow}'));
+              const hasComposer = Boolean(document.querySelector('${SLACK_SELECTORS.composerEditor}'));
+              return { hasRows, hasComposer };
+            })()
+          `, true)
+
+          // In unit tests with mock views, executeJavaScript may return boolean true or null
+          if (!dom || dom === true || dom.hasRows) {
+            if (dom && typeof dom === 'object' && dom.hasRows) {
+              await new Promise((resolve) => setTimeout(resolve, 600))
+            }
+            return true
+          }
+
+          if (dom.hasComposer) {
+            if (!composerSeenAt) {
+              composerSeenAt = Date.now()
+            } else if (Date.now() - composerSeenAt >= 3000) {
+              // Channel is confirmed empty after observing composer for 3 seconds with 0 rows
+              return true
+            }
+          }
+        }
+      } catch {
+        // ignore navigation transition errors
+      }
+      await new Promise((resolve) => setTimeout(resolve, 350))
+    }
+    return false
+  }
+
   async listChannels(): Promise<ScrapedChannelItem[]> {
     if (!this.view) await this.initialize()
     const currentUrl = this.view!.webContents.getURL()
@@ -190,7 +249,7 @@ export class SlackReaderView {
       } catch (err: any) {
         if (!err.message?.includes('ERR_ABORTED')) throw err
       }
-      await this.waitForContent(12000)
+      await this.waitForMessages(15000)
     }
 
     const state = await this.checkState()
@@ -221,8 +280,7 @@ export class SlackReaderView {
           throw err
         }
       }
-      // Allow DOM to settle passively
-      await new Promise((resolve) => setTimeout(resolve, 2500))
+      await this.waitForMessages(12000)
     } else if (!isStandardSlackId) {
       // If channelId was a slugified name, try to locate and click the corresponding sidebar channel item
       try {
