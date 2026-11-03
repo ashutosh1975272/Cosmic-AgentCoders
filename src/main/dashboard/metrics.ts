@@ -61,6 +61,11 @@ function sourceOf(message: DashboardStoredMessage): 'client' | 'ours' {
 }
 
 function isSelf(message: DashboardStoredMessage, project: DashboardProject): boolean {
+  if (project.personRoles && message.user) {
+    const role = project.personRoles[message.user.toLowerCase()]
+    if (role === 'me') return true
+    if (role === 'client') return false
+  }
   return Boolean(project.selfUserId && message.user === project.selfUserId)
 }
 
@@ -111,9 +116,15 @@ export function lastClientContactAt(
   project: DashboardProject
 ): string | null {
   let newest: number | null = null
+  const personRoles = project.personRoles || {}
+  const hasDistinctClientSource = messages.some((m) => sourceOf(m) === 'client')
+
   for (const message of messages) {
-    if (sourceOf(message) !== 'client') continue
-    if (isSelf(message, project)) continue
+    const userRole = message.user ? personRoles[message.user.toLowerCase()] : undefined
+    if (userRole !== 'client' && hasDistinctClientSource && sourceOf(message) !== 'client') {
+      continue
+    }
+    if (userRole === 'me' || isSelf(message, project)) continue
     const ms = tsMs(message.ts)
     if (ms === null) continue
     if (newest === null || ms > newest) newest = ms
@@ -134,12 +145,17 @@ export function buildResponseStats(
   const windowStart = now - RESPONSE_WINDOW_DAYS * DAY_MS
   const durations: number[] = []
   let pendingClientTs: number | null = null
+  const personRoles = project.personRoles || {}
+  const hasDistinctClientSource = messages.some((m) => sourceOf(m) === 'client')
 
   for (const message of sortMessages(messages)) {
-    if (sourceOf(message) !== 'client') continue
+    const userRole = message.user ? personRoles[message.user.toLowerCase()] : undefined
+    if (userRole !== 'client' && hasDistinctClientSource && sourceOf(message) !== 'client') {
+      continue
+    }
     const ms = tsMs(message.ts)
     if (ms === null) continue
-    if (isSelf(message, project)) {
+    if (userRole === 'me' || isSelf(message, project)) {
       if (pendingClientTs !== null && ms >= pendingClientTs && ms <= now) {
         if (pendingClientTs >= windowStart) durations.push((ms - pendingClientTs) / 1000)
       }

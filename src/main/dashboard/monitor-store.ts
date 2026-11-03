@@ -170,7 +170,10 @@ export class MonitorStore {
         intervalMinutes: ([1, 5, 15, 30, 60] as number[]).includes(next.intervalMinutes)
           ? next.intervalMinutes
           : 15,
-        backfillHours: Math.min(24, Math.max(1, Number(next.backfillHours) || 6)),
+        backfillHours:
+          next.backfillHours === 0
+            ? 0
+            : Math.min(720, Math.max(1, Number(next.backfillHours) || 6)),
         catchUpCapDays: Math.min(30, Math.max(1, Number(next.catchUpCapDays) || 7))
       }
       data.dashboardDefaults = defaults

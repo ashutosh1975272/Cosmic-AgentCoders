@@ -10,6 +10,8 @@ export interface ScrapedChannelItem {
   isPrivate: boolean
   isDm?: boolean
   hasUnread: boolean
+  created?: number
+  memberCount?: number
 }
 
 /**
@@ -98,12 +100,36 @@ export const LIST_CHANNELS_SCRIPT = `
 
     const isDm = isUserItem || id.startsWith('D') || ariaLabel.toLowerCase().includes('direct message');
 
+    let memberCount = undefined;
+    let created = undefined;
+    const memberMatch = ariaLabel.match(/(\\d+)\\s+members?/i);
+    if (memberMatch) {
+      memberCount = parseInt(memberMatch[1], 10);
+    }
+    try {
+      if (window.boot_data && window.boot_data.channels) {
+        const found = window.boot_data.channels.find((c) => c.id === id);
+        if (found) {
+          if (found.num_members) memberCount = found.num_members;
+          if (found.created) created = found.created;
+        }
+      } else if (window.TS && window.TS.model && window.TS.model.channels) {
+        const found = window.TS.model.channels.get(id);
+        if (found) {
+          if (found.num_members) memberCount = found.num_members;
+          if (found.created) created = found.created;
+        }
+      }
+    } catch (_) {}
+
     channels.push({
       id,
       name,
       isPrivate,
       isDm,
-      hasUnread: Boolean(badgeEl)
+      hasUnread: Boolean(badgeEl),
+      created,
+      memberCount
     });
   });
   return channels;
@@ -180,6 +206,22 @@ export function buildReadVisibleMessagesScript(sinceTs = 0): string {
       text = text ? text + ' ' + fileText : fileText;
     }
 
+    // Extract thread replies count and threadTs if present
+    const replyBtn = row.querySelector('${SLACK_SELECTORS.threadReplyButton}');
+    let replyCount = undefined;
+    if (replyBtn) {
+      const match = (replyBtn.textContent || '').match(/(\\d+)\\s+repl/i);
+      replyCount = match ? parseInt(match[1], 10) : 1;
+    }
+
+    let threadTs = undefined;
+    if (permalink) {
+      const threadMatch = permalink.match(/[?&]thread_ts=([0-9.]+)/);
+      if (threadMatch) {
+        threadTs = threadMatch[1];
+      }
+    }
+
     if (rawTs && text) {
       const parsedNum = parseFloat(rawTs);
       if (sinceTs > 0 && !isNaN(parsedNum) && parsedNum > 1000000000 && parsedNum < sinceTs) {
@@ -190,6 +232,8 @@ export function buildReadVisibleMessagesScript(sinceTs = 0): string {
         rawTs,
         sender,
         text,
+        threadTs,
+        replyCount,
         permalink: permalink || undefined
       });
     }
@@ -201,6 +245,12 @@ export function buildReadVisibleMessagesScript(sinceTs = 0): string {
 }
 
 export const READ_VISIBLE_MESSAGES_SCRIPT = buildReadVisibleMessagesScript(0)
+
+const CHANNEL_GENESIS_SELECTORS = [
+  '[data-qa="channel_created_summary"]',
+  '.c-message_list__top_banner',
+  '[data-qa="channel_banner_header"]'
+].join(', ')
 
 export class SlackAdapter {
   async detectState(view: WebContentsView): Promise<SlackSessionState> {
@@ -237,19 +287,229 @@ export class SlackAdapter {
     }
   }
 
-  /** Scroll the message list up (older history) without clicking anything. */
-  async scrollUp(view: WebContentsView, pixels = 600): Promise<boolean> {
+  /** Scroll the message list up (older history) without clicking or synthetic input events. */
+  async scrollUp(view: WebContentsView, pixels = 800): Promise<boolean> {
     if (!view || view.webContents?.isDestroyed()) return false
     try {
       return Boolean(
         await view.webContents.executeJavaScript(
           `(function() {
             const list = document.querySelector('.c-virtual_list__scroll_container') ||
-                         document.querySelector('[data-qa="slack_kit_list"]');
+                         document.querySelector('[data-qa="slack_kit_list"]') ||
+                         document.querySelector('.c-scrollbar__hider');
             if (!list) return false;
+
+            const isAtGenesis = Boolean(
+              document.querySelector('${CHANNEL_GENESIS_SELECTORS}') ||
+              Array.from(document.querySelectorAll('.c-virtual_list__item')).some(el =>
+                /This is the start of the|This is the very beginning|created this channel on/i.test(el.innerText || '')
+              )
+            );
+
             const before = list.scrollTop;
             list.scrollTop = Math.max(0, before - ${Math.max(100, pixels)});
-            return list.scrollTop < before;
+            try { list.dispatchEvent(new Event('scroll', { bubbles: true })); } catch(e) {}
+            return list.scrollTop < before || !isAtGenesis;
+          })()`,
+          true
+        )
+      )
+    } catch {
+      return false
+    }
+  }
+
+  /** Detect if Slack is actively loading older messages (spinner / skeleton). */
+  async isPagingMessages(view: WebContentsView): Promise<boolean> {
+    if (!view || view.webContents?.isDestroyed()) return false
+    try {
+      return Boolean(
+        await view.webContents.executeJavaScript(
+          `(function() {
+            return Boolean(
+              document.querySelector('.c-message_list__loading_spinner, [data-qa="loading_spinner"], .c-loading_indicator')
+            );
+          })()`,
+          true
+        )
+      )
+    } catch {
+      return false
+    }
+  }
+
+  /** Detect if the DOM is currently showing the start/genesis of the channel. */
+  async isAtChannelGenesis(view: WebContentsView): Promise<boolean> {
+    if (!view || view.webContents?.isDestroyed()) return false
+    try {
+      return Boolean(
+        await view.webContents.executeJavaScript(
+          `(function() {
+            return Boolean(
+              document.querySelector('${CHANNEL_GENESIS_SELECTORS}') ||
+              Array.from(document.querySelectorAll('.c-virtual_list__item')).some(el =>
+                /This is the start of the|This is the very beginning|created this channel on/i.test(el.innerText || '')
+              )
+            );
+          })()`,
+          true
+        )
+      )
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * Expands the thread drawer (flexpane) for a parent message, reads all reply messages,
+   * and closes the flexpane to restore view state.
+   */
+  async expandAndReadThread(view: WebContentsView, parentTs: string): Promise<RawScrapedMessage[]> {
+    if (!view || view.webContents?.isDestroyed()) return []
+
+    // 1. Click the thread trigger on the parent message
+    const opened = Boolean(
+      await view.webContents.executeJavaScript(
+        `(function() {
+          const targetTs = ${JSON.stringify(parentTs)};
+          const rows = document.querySelectorAll('${SLACK_SELECTORS.messageRow}');
+          for (const row of rows) {
+            const tsEl = row.querySelector('${SLACK_SELECTORS.messageTimestamp}');
+            const rawTs = (tsEl ? tsEl.getAttribute('data-ts') : '') || (row.getAttribute('data-item-key') || '') || (row.getAttribute('data-ts') || '');
+            if (rawTs && (rawTs.startsWith(targetTs) || targetTs.startsWith(rawTs))) {
+              const btn = row.querySelector('${SLACK_SELECTORS.threadReplyButton}') || row;
+              if (btn) {
+                btn.click();
+                return true;
+              }
+            }
+          }
+          return false;
+        })()`,
+        true
+      ).catch(() => false)
+    )
+
+    if (!opened) return []
+
+    // 2. Wait up to 3s for flexpane to mount
+    let paneMounted = false
+    for (let i = 0; i < 6; i++) {
+      await new Promise((r) => setTimeout(r, 500))
+      paneMounted = Boolean(
+        await view.webContents.executeJavaScript(
+          `(function() {
+            const pane = document.querySelector('${SLACK_SELECTORS.threadContainer}');
+            if (!pane) return false;
+            const rows = pane.querySelectorAll('${SLACK_SELECTORS.threadMessageRow}');
+            return rows.length > 0;
+          })()`,
+          true
+        ).catch(() => false)
+      )
+      if (paneMounted) break
+    }
+
+    if (!paneMounted) {
+      await this.closeThreadPane(view)
+      return []
+    }
+
+    // 3. Extract messages from the flexpane thread container
+    const rawReplies = (await view.webContents.executeJavaScript(
+      `(function() {
+        const pane = document.querySelector('${SLACK_SELECTORS.threadContainer}');
+        if (!pane) return [];
+        const rows = pane.querySelectorAll('${SLACK_SELECTORS.threadMessageRow}');
+        const results = [];
+        let lastAuthor = null;
+        const parentTs = ${JSON.stringify(parentTs)};
+
+        rows.forEach((row) => {
+          const senderEl = row.querySelector('${SLACK_SELECTORS.messageSender}');
+          const tsEl = row.querySelector('${SLACK_SELECTORS.messageTimestamp}');
+          const bodyEl = row.querySelector('${SLACK_SELECTORS.messageBody}');
+          const permalinkEl = row.querySelector('a[href*="/archives/"]');
+          const permalink = permalinkEl ? permalinkEl.getAttribute('href') : '';
+
+          if (senderEl) {
+            const authorText = senderEl.textContent.trim();
+            if (authorText) lastAuthor = authorText;
+          }
+
+          let pTs = '';
+          if (permalink && permalink.indexOf('/p') !== -1) {
+            const pIdx = permalink.lastIndexOf('/p');
+            const pDigits = permalink.slice(pIdx + 2).replace(/[^0-9]/g, '');
+            if (pDigits.length >= 16) {
+              pTs = pDigits.slice(0, 10) + '.' + pDigits.slice(10, 16);
+            }
+          }
+
+          const rawTs =
+            (tsEl ? tsEl.getAttribute('data-ts') : '') ||
+            (row.getAttribute('data-item-key') && row.getAttribute('data-item-key').length >= 10 ? row.getAttribute('data-item-key') : '') ||
+            (row.getAttribute('data-ts') || '') ||
+            pTs ||
+            (tsEl ? (tsEl.getAttribute('datetime') || tsEl.textContent.trim()) : '');
+
+          // Skip parent message in flexpane
+          if (rawTs === parentTs) return;
+
+          const sender = lastAuthor || 'Anonymous';
+
+          const attachmentEls = row.querySelectorAll(
+            '[data-qa="file_container"], .c-file_container, .c-file__title, .p-file_title, [data-qa="file_title"], .c-message_attachment, a[href*="/files/"]'
+          );
+          const fileNames = [];
+          attachmentEls.forEach((att) => {
+            const titleEl = att.querySelector('.c-file__title, [data-qa="file_title"], .p-file_title') || att;
+            const fName = (titleEl.textContent || titleEl.innerText || '').trim();
+            if (fName && fileNames.indexOf(fName) === -1 && fName.indexOf(String.fromCharCode(10)) === -1 && fName.length < 200) {
+              fileNames.push(fName);
+            }
+          });
+
+          let text = bodyEl ? (bodyEl.innerText || bodyEl.textContent || '').trim() : '';
+          if (fileNames.length > 0) {
+            const fileText = fileNames.map((fn) => '[Document: ' + fn + ']').join(' ');
+            text = text ? text + ' ' + fileText : fileText;
+          }
+
+          if (rawTs && text) {
+            results.push({
+              rawTs,
+              sender,
+              text,
+              threadTs: parentTs,
+              permalink: permalink || undefined
+            });
+          }
+        });
+        return results;
+      })()`,
+      true
+    ).catch(() => [])) as RawScrapedMessage[]
+
+    // 4. Close the flexpane
+    await this.closeThreadPane(view)
+
+    return rawReplies ?? []
+  }
+
+  /** Closes the thread drawer/flexpane if open. */
+  async closeThreadPane(view: WebContentsView): Promise<boolean> {
+    if (!view || view.webContents?.isDestroyed()) return false
+    try {
+      return Boolean(
+        await view.webContents.executeJavaScript(
+          `(function() {
+            const btn = document.querySelector('${SLACK_SELECTORS.threadCloseButton}');
+            if (btn) {
+              btn.click();
+              return true;
+            }
+            return false;
           })()`,
           true
         )

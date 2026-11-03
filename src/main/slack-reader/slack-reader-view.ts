@@ -170,7 +170,7 @@ export class SlackReaderView {
    * If the channel has messages, returns as soon as rows appear.
    * If the channel is genuinely empty, returns true once the composer is mounted and settled.
    */
-  async waitForMessages(timeoutMs = 15000): Promise<boolean> {
+  async waitForMessages(timeoutMs = 30000): Promise<boolean> {
     if (!this.view || this.view.webContents.isDestroyed()) return false
     const start = Date.now()
     let composerSeenAt = 0
@@ -184,26 +184,25 @@ export class SlackReaderView {
         if (state === 'logged_in') {
           const dom = await this.view.webContents.executeJavaScript(`
             (() => {
-              const hasRows = Boolean(document.querySelector('${SLACK_SELECTORS.messageRow}'));
-              const hasComposer = Boolean(document.querySelector('${SLACK_SELECTORS.composerEditor}'));
-              return { hasRows, hasComposer };
+              const rows = document.querySelectorAll('${SLACK_SELECTORS.messageRow}');
+              const composer = document.querySelector('${SLACK_SELECTORS.composerEditor}');
+              return { hasRows: rows.length > 0, rowCount: rows.length, hasComposer: Boolean(composer) };
             })()
-          `, true)
+          `, true).catch(() => null)
 
-          // In unit tests with mock views, executeJavaScript may return boolean true or null
-          if (!dom || dom === true || dom.hasRows) {
-            if (dom && typeof dom === 'object' && dom.hasRows) {
-              await new Promise((resolve) => setTimeout(resolve, 600))
-            }
-            return true
-          }
-
-          if (dom.hasComposer) {
-            if (!composerSeenAt) {
-              composerSeenAt = Date.now()
-            } else if (Date.now() - composerSeenAt >= 3000) {
-              // Channel is confirmed empty after observing composer for 3 seconds with 0 rows
+          if (dom && typeof dom === 'object') {
+            if (dom.hasRows) {
+              await new Promise((resolve) => setTimeout(resolve, 800))
               return true
+            }
+
+            if (dom.hasComposer) {
+              if (!composerSeenAt) {
+                composerSeenAt = Date.now()
+              } else if (Date.now() - composerSeenAt >= 3000) {
+                // Channel is confirmed empty after observing composer for 3 seconds with 0 rows
+                return true
+              }
             }
           }
         }
@@ -249,7 +248,7 @@ export class SlackReaderView {
       } catch (err: any) {
         if (!err.message?.includes('ERR_ABORTED')) throw err
       }
-      await this.waitForMessages(15000)
+      await this.waitForMessages(25000)
     }
 
     const state = await this.checkState()
@@ -270,17 +269,38 @@ export class SlackReaderView {
     const isStandardSlackId = /^[CGD][A-Z0-9]{8,12}$/.test(channelId)
 
     if (isStandardSlackId && !currentUrl.includes(`/${this.workspaceId}/${channelId}`)) {
+      // First try switching channel instantly via sidebar link/treeitem to avoid slow full-page reload
+      let switchedViaSidebar = false
       try {
-        await this.view!.webContents.loadURL(channelUrl)
-      } catch (err: any) {
-        // Chromium throws ERR_ABORTED (-3) if Slack's SPA client redirect intervenes.
-        // If the URL actually navigated or contains the channel, this is non-fatal.
-        const finalUrl = this.view!.webContents.getURL()
-        if (!finalUrl.includes(channelId) && !err.message?.includes('ERR_ABORTED')) {
-          throw err
+        switchedViaSidebar = Boolean(
+          await this.view!.webContents.executeJavaScript(`
+            (() => {
+              const el = document.querySelector('[data-qa-channel-sidebar-channel-id="${channelId}"], a[href*="/${channelId}"]');
+              if (el) {
+                el.click();
+                return true;
+              }
+              return false;
+            })()
+          `, true)
+        )
+      } catch {
+        switchedViaSidebar = false
+      }
+
+      if (!switchedViaSidebar) {
+        try {
+          await this.view!.webContents.loadURL(channelUrl)
+        } catch (err: any) {
+          // Chromium throws ERR_ABORTED (-3) if Slack's SPA client redirect intervenes.
+          // If the URL actually navigated or contains the channel, this is non-fatal.
+          const finalUrl = this.view!.webContents.getURL()
+          if (!finalUrl.includes(channelId) && !err.message?.includes('ERR_ABORTED')) {
+            throw err
+          }
         }
       }
-      await this.waitForMessages(12000)
+      await this.waitForMessages(25000)
     } else if (!isStandardSlackId) {
       // If channelId was a slugified name, try to locate and click the corresponding sidebar channel item
       try {
@@ -392,6 +412,8 @@ export class SlackReaderView {
     let scrolls = 0
     let cancelled = signal?.aborted === true
     let canScroll = true
+    let zeroProgressRetries = 0
+
     while (
       !cancelled &&
       canScroll &&
@@ -402,6 +424,9 @@ export class SlackReaderView {
       // Visible history already reaches the requested floor.
       if (sinceTs > 0 && oldest !== null && oldest <= sinceTs) break
 
+      const atGenesis = await this.adapter.isAtChannelGenesis(this.view!)
+      if (atGenesis && oldest !== null) break
+
       this.onEvent?.({
         type: 'scroll',
         channelName: channelId,
@@ -411,9 +436,20 @@ export class SlackReaderView {
         text: `Scrolling history in ${channelId} (${collected.size} messages)…`
       })
 
-      canScroll = await this.adapter.scrollUp(this.view!, 600)
+      const prevOldest = oldest
+      canScroll = await this.adapter.scrollUp(this.view!, 800)
       if (!canScroll) break
-      await new Promise((resolve) => setTimeout(resolve, 900))
+
+      // Adaptive settling: if Slack is actively paging older messages, give it dynamic backpressure
+      let settleMs = 1100
+      const isPaging = await this.adapter.isPagingMessages(this.view!).catch(() => false)
+      if (isPaging) {
+        settleMs = 1800
+      } else if (zeroProgressRetries > 0) {
+        settleMs = Math.min(2200, 1100 + zeroProgressRetries * 250)
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, settleMs))
       if (signal?.aborted) {
         cancelled = true
         break
@@ -427,7 +463,64 @@ export class SlackReaderView {
         collected.set(msg.ts, msg)
         if (collected.size >= maxMessages) break
       }
+
+      const newOldest = oldestNumericTs(collected)
+      if (prevOldest !== null && newOldest === prevOldest) {
+        zeroProgressRetries++
+        // Check if we reached true genesis banner before declaring top
+        const reachedGenesis = await this.adapter.isAtChannelGenesis(this.view!).catch(() => false)
+        if (reachedGenesis || zeroProgressRetries >= 8) {
+          // If 8 consecutive scroll attempts yield no earlier messages or genesis reached, top reached
+          break
+        }
+      } else {
+        zeroProgressRetries = 0
+      }
       scrolls++
+    }
+
+    // Expand and harvest thread replies for every message that has replies
+    if (this.view && !cancelled && !signal?.aborted) {
+      const threadParents = [...collected.values()].filter(
+        (m) => (m.replyCount ?? 0) > 0 && !m.threadTs
+      )
+
+      if (threadParents.length > 0) {
+        this.onEvent?.({
+          type: 'status',
+          channelName: channelId,
+          text: `Found ${threadParents.length} thread(s) in ${channelId}. Expanding replies…`
+        })
+
+        for (let i = 0; i < threadParents.length; i++) {
+          if (signal?.aborted) {
+            cancelled = true
+            break
+          }
+          const parent = threadParents[i]
+          this.onEvent?.({
+            type: 'status',
+            channelName: channelId,
+            text: `Reading thread ${i + 1} of ${threadParents.length} (${parent.replyCount ?? 1} replies)…`
+          })
+
+          try {
+            const rawReplies = await this.adapter.expandAndReadThread(this.view, parent.ts)
+            for (const raw of rawReplies) {
+              const replyMsg = normalizeScrapedMessage(raw, channelId)
+              if (replyMsg) {
+                replyMsg.threadTs = parent.ts
+                collected.set(replyMsg.ts, replyMsg)
+              }
+            }
+          } catch {
+            // thread read failure must not abort channel scrape
+          }
+
+          // Adaptive thread pacing (650ms)
+          await new Promise((r) => setTimeout(r, 650))
+        }
+      }
     }
 
     const all = deduplicateMessages(this.workspaceId, channelId, [...collected.values()])

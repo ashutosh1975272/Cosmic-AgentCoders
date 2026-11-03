@@ -262,7 +262,7 @@ export default function WorkspaceContent({
               workspaceId: effectiveSlackTeamId || currentProject.teamId || 'team',
               workspaceName: currentProject.teamName || 'Slack Workspace',
               channels: [],
-              role: 'ours',
+              role: 'client',
               enabled: true,
               backfillDays: 7,
               status: 'connected',

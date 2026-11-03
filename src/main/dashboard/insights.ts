@@ -22,7 +22,8 @@ import type {
   DashboardSource,
   InsightStatus,
   InsightUrgency,
-  ProjectInsight
+  ProjectInsight,
+  PersonRole
 } from '../../shared/dashboard-contract'
 
 export { extractJsonObject } from './ai-provider'
@@ -40,7 +41,8 @@ export type {
   DashboardSource,
   InsightStatus,
   InsightUrgency,
-  ProjectInsight
+  ProjectInsight,
+  PersonRole
 }
 
 export interface InsightChatMessageInput {
@@ -48,8 +50,11 @@ export interface InsightChatMessageInput {
   who: string
   text: string
   isClient: boolean
+  role?: PersonRole
   /** Channel name (never the channel id) — gives the model context. */
   channel?: string
+  /** Parent thread timestamp if this message is a reply in a thread */
+  threadTs?: string
 }
 
 export interface InsightInput {
@@ -60,6 +65,10 @@ export interface InsightInput {
   previous: ProjectInsight | null
   newMessages: InsightChatMessageInput[]
   newCount: number
+  documents?: Array<{
+    name: string
+    parsedText?: string
+  }>
 }
 
 const STATUSES: InsightStatus[] = ['on-track', 'at-risk', 'blocked', 'waiting-on-client']
@@ -176,20 +185,31 @@ function previousBlock(prev: ProjectInsight | null): string {
 
 export function buildInsightMessages(input: InsightInput): NimChatMessage[] {
   const lines = input.newMessages
-    .slice(-120)
+    .slice(-500)
+    .filter((m) => m.role !== 'bot')
     .map((m) => {
       const channel = m.channel ? ` #${m.channel}` : ''
-      return `[${m.ts}] ${m.who}${channel}${m.isClient ? ' (CLIENT)' : ''}: ${m.text}`
+      const roleTag = m.role === 'team' ? ' (TEAM)' : m.role === 'me' ? ' (ME)' : m.isClient ? ' (CLIENT)' : ''
+      const isReply = Boolean(m.threadTs)
+      const indent = isReply ? '    ↳ ' : ''
+      const replyTag = isReply ? ' (reply)' : ''
+      return `${indent}[${m.ts}] ${m.who}${channel}${roleTag}${replyTag}: ${m.text}`
     })
     .join('\n')
+  const docLines = (input.documents || [])
+    .filter((d) => d.parsedText && d.parsedText.trim().length > 0)
+    .map((d) => `--- DOCUMENT: ${d.name} ---\n${d.parsedText?.slice(0, 8000)}`)
+    .join('\n\n')
+
   const user = [
     `Workspace: ${input.workspaceName}`,
     `Project: ${input.projectName}`,
     `Client name (use it when you name them): ${input.clientName || 'unknown'}`,
+    docLines ? `CLIENT SPECIFICATIONS & DOCUMENTS:\n${docLines}\n` : '',
     `PREVIOUS INSIGHT: ${previousBlock(input.previous)}`,
     `NEW MESSAGES (${input.newCount}):`,
     lines || '(none)'
-  ].join('\n')
+  ].filter(Boolean).join('\n')
   return [
     { role: 'system', content: SYSTEM_PROMPT },
     { role: 'user', content: user }

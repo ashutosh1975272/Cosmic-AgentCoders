@@ -18,7 +18,11 @@ export function useProjectActivity(
 
   useEffect(() => {
     let alive = true
-    dashboardApi()
+    const api = dashboardApi()
+    if (!api || typeof api.getProjectActivity !== 'function') {
+      return
+    }
+    api
       .getProjectActivity(projectId)
       .then((next) => {
         if (alive) setEntry({ projectId, activity: next })

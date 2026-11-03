@@ -12,6 +12,7 @@ interface SlackListChannelsResponse {
     id: string
     name: string
     is_private?: boolean
+    created?: number
     topic?: { value?: string }
     num_members?: number
   }>
@@ -65,6 +66,7 @@ function toChannelSummary(
     name: channel.name,
     isPrivate: Boolean(channel.is_private),
     topic: channel.topic?.value || undefined,
+    created: channel.created,
     memberCount: channel.num_members
   }
 }

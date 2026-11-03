@@ -453,11 +453,23 @@ const api: IpcApi = {
       ipcRenderer.invoke(IpcChannels.DashboardGetRunLogs, payload),
     getScrapeRuns: (payload?: { projectId?: string; limit?: number; status?: string; trigger?: string }) =>
       ipcRenderer.invoke(IpcChannels.DashboardGetScrapeRuns, payload ?? {}),
+    getChannelHistory: (payload: { projectId: string; channelId?: string }) =>
+      ipcRenderer.invoke(IpcChannels.DashboardGetChannelHistory, payload),
     startWatchLive: (payload: {
       projectId: string
       bounds: { x: number; y: number; width: number; height: number }
     }) => ipcRenderer.invoke(IpcChannels.DashboardStartWatchLive, payload),
     stopWatchLive: () => ipcRenderer.invoke(IpcChannels.DashboardStopWatchLive),
+    uploadDocument: (payload: {
+      projectId: string
+      name: string
+      mimeType: string
+      dataBase64: string
+    }) => ipcRenderer.invoke(IpcChannels.DashboardUploadDocument, payload),
+    listDocuments: (payload: { projectId: string }) =>
+      ipcRenderer.invoke(IpcChannels.DashboardListDocuments, payload),
+    deleteDocument: (payload: { projectId: string; documentId: string }) =>
+      ipcRenderer.invoke(IpcChannels.DashboardDeleteDocument, payload),
     onScrapeEvent: (callback: (event: any) => void) => {
       const listener = (_: any, event: any) => callback(event)
       ipcRenderer.on(IpcChannels.DashboardScrapeEvent, listener)

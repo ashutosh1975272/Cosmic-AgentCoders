@@ -909,10 +909,65 @@ export default function DashboardPage({
               <section className="dash-block" aria-label="Client ask">
                 <div className="dash-block-head">
                   <h5>Client ask</h5>
-                  {requirements.length > 0 ? (
-                    <span className="dash-muted">{requirements.length} total</span>
-                  ) : null}
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    {(project.documents || []).length > 0 ? (
+                      <span className="dash-muted">{(project.documents || []).length} docs</span>
+                    ) : null}
+                    {requirements.length > 0 ? (
+                      <span className="dash-muted">{requirements.length} total</span>
+                    ) : null}
+                  </div>
                 </div>
+
+                {/* Quick Document Upload / Badge */}
+                <div style={{ margin: '8px 0 12px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="dash-link"
+                    style={{ fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                    onClick={() => {
+                      const input = document.createElement('input')
+                      input.type = 'file'
+                      input.accept = '.docx,.pdf,.txt,.md,.json'
+                      input.onchange = async (e) => {
+                        const file = (e.target as HTMLInputElement).files?.[0]
+                        if (!file) return
+                        const reader = new FileReader()
+                        reader.onload = async () => {
+                          const base64 = (reader.result as string).split(',')[1]
+                          await window.api.dashboard.uploadDocument({
+                            projectId: project.id,
+                            name: file.name,
+                            mimeType: file.type || 'application/octet-stream',
+                            dataBase64: base64
+                          })
+                          await onSync()
+                        }
+                        reader.readAsDataURL(file)
+                      }
+                      input.click()
+                    }}
+                  >
+                    + Upload spec/doc
+                  </button>
+                  {(project.documents || []).map((doc) => (
+                    <span
+                      key={doc.id}
+                      style={{
+                        fontSize: '11px',
+                        background: 'rgba(255, 255, 255, 0.05)',
+                        border: '1px solid var(--border)',
+                        padding: '2px 6px',
+                        borderRadius: '4px',
+                        color: 'var(--text-muted)'
+                      }}
+                      title={`${doc.name} (${Math.round((doc.sizeBytes || 0) / 1024)} KB)`}
+                    >
+                      📄 {doc.name.length > 18 ? doc.name.slice(0, 15) + '…' : doc.name}
+                    </span>
+                  ))}
+                </div>
+
                 {latestRequirements.length === 0 ? (
                   <p className="dash-muted">No requirements stated yet.</p>
                 ) : (

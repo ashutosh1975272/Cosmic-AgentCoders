@@ -79,6 +79,9 @@ export interface ProjectSourceChannel {
   /** Explicit kind; kept optional so older stored sources stay valid. */
   kind?: ProjectSourceChannelKind
   enabled?: boolean
+  created?: number
+  memberCount?: number
+  topic?: string
 }
 
 export type ProjectSourceStatus =
@@ -102,6 +105,8 @@ export interface ProjectSource {
   role: 'client' | 'ours'
   enabled: boolean
   backfillDays: 1 | 7 | 30
+  /** Configurable historical depth in days (defaults to 30 for 1-month lookback). */
+  historyWindowDays?: number
   /** Include selected channels only, or exclude the ticked ones. */
   selectionMode?: ProjectSourceSelectionMode
   /** Set once the user has reviewed the channel picker; legacy sources are unset. */
@@ -216,6 +221,12 @@ export interface DashboardScrapeOptions {
   includeDms?: boolean
   /** Per-run override of the persisted source scope. */
   selectionMode?: ProjectSourceSelectionMode
+  /** When true, forces a full 30-day (1-month) lookback window from now. */
+  force30Days?: boolean
+  /** When true, ignores existing cursor and re-scrapes entire channel history back to genesis inception (sinceTs = 0). */
+  forceGenesis?: boolean
+  /** Time lookback window in days (e.g., 30, 90, 230). 0 indicates genesis inception. */
+  days?: number
 }
 
 export interface DashboardScrapePayload {
@@ -306,7 +317,50 @@ export interface DashboardProject {
   endDate?: string
   /** User-set completion 0–100 — wins over auto estimate. */
   manualCompletion?: number
+  /** When true, exposes advanced participant role tagging and manual target management in UI. Default false. */
+  advanceDashboardControl?: boolean
+  /** Explicit participant role mapping: 'me' | 'client' | 'team' | 'bot' */
+  personRoles?: Record<string, PersonRole>
+  /** Uploaded client requirements documents and project specifications */
+  documents?: ProjectDocument[]
   createdAt: string
+}
+
+export interface ProjectDocument {
+  id: string
+  name: string
+  mimeType: string
+  sizeBytes: number
+  uploadedAt: string
+  extractedText: string
+  summary?: string
+}
+
+export type PersonRole = 'me' | 'client' | 'team' | 'bot'
+
+export interface ScrapedChannelMessage {
+  ts: string
+  user?: string
+  text?: string
+  subtype?: string
+  permalink?: string
+  source?: DashboardSource
+  threadTs?: string
+  replyCount?: number
+  role?: PersonRole
+}
+
+export interface DashboardChannelHistoryPayload {
+  projectId: string
+  channelId?: string
+}
+
+export interface DashboardChannelHistoryResult {
+  channelId: string
+  channelName: string
+  messages: ScrapedChannelMessage[]
+  cursor?: string
+  lastSyncAt?: string
 }
 
 /** One day of message activity, split by workspace. Deterministic, main-process. */

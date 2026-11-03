@@ -35,6 +35,8 @@ import type {
   DashboardCancelScrapePayload,
   DashboardSourceSchedulePayload,
   DashboardSourceScheduleState,
+  DashboardChannelHistoryPayload,
+  DashboardChannelHistoryResult,
   ProjectSource,
   ScrapeRunQuery,
   DashboardTeamWorkspaceCandidate,
@@ -250,7 +252,9 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
               : channel.isPrivate
                 ? 'private'
                 : 'public',
-            enabled: false
+            enabled: false,
+            created: channel.created,
+            memberCount: channel.memberCount
           }))
         }
       } catch (err) {
@@ -453,6 +457,123 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
       payload
     )
   })
+
+  handleInvoke(
+    IpcChannels.DashboardGetChannelHistory,
+    async (payload: DashboardChannelHistoryPayload): Promise<DashboardChannelHistoryResult[]> => {
+      const projects = await deps.monitorStore.listProjects()
+      const project = projects.find((p) => p.id === payload.projectId)
+      if (!project || !deps.deltaStore) return []
+
+      const results: DashboardChannelHistoryResult[] = []
+      const personRoles = project.personRoles || {}
+
+      for (const source of project.sources ?? []) {
+        if (!source.profileId || !source.workspaceId) continue
+        for (const ch of source.channels ?? []) {
+          if (payload.channelId && ch.id !== payload.channelId) continue
+          const delta = await deps.deltaStore.load(source.profileId, source.workspaceId, ch.id)
+          if (!delta) continue
+
+          const messages = delta.messages.map((m) => {
+            const who = (m.user || 'unknown').trim()
+            const role =
+              personRoles[who.toLowerCase()] ||
+              (project.selfUserId && m.user === project.selfUserId
+                ? 'me'
+                : 'client')
+            return {
+              ...m,
+              role
+            }
+          })
+
+          results.push({
+            channelId: ch.id,
+            channelName: delta.channel.name || ch.name || ch.id,
+            messages,
+            cursor: delta.cursor,
+            lastSyncAt: delta.lastSyncAt
+          })
+        }
+      }
+
+      return results
+    }
+  )
+
+  handleInvoke(
+    IpcChannels.DashboardUploadDocument,
+    async (payload: {
+      projectId: string
+      name: string
+      mimeType: string
+      dataBase64: string
+    }) => {
+      try {
+        const { extractTextFromBuffer } = await import('../dashboard/document-parser')
+        const buf = Buffer.from(payload.dataBase64, 'base64')
+        const extractedText = extractTextFromBuffer(payload.name, buf)
+
+        const doc: import('../../shared/dashboard-contract').ProjectDocument = {
+          id: `doc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          name: payload.name,
+          mimeType: payload.mimeType || 'application/octet-stream',
+          sizeBytes: buf.length,
+          uploadedAt: new Date().toISOString(),
+          extractedText
+        }
+
+        const projects = await deps.monitorStore.listProjects()
+        const project = projects.find((p) => p.id === payload.projectId)
+        if (!project) return { ok: false, error: 'Project not found' }
+
+        const documents = [...(project.documents || []), doc]
+        await deps.monitorStore.upsertProject({
+          project: {
+            ...project,
+            documents
+          }
+        })
+
+        // Trigger asynchronous insight refresh with the new document context
+        void deps.engine.refreshProjectSnapshot(project.id).catch(() => undefined)
+
+        return { ok: true, document: doc }
+      } catch (err: any) {
+        return { ok: false, error: err?.message || 'Failed to upload document' }
+      }
+    }
+  )
+
+  handleInvoke(
+    IpcChannels.DashboardListDocuments,
+    async (payload: { projectId: string }) => {
+      const projects = await deps.monitorStore.listProjects()
+      const project = projects.find((p) => p.id === payload.projectId)
+      return project?.documents || []
+    }
+  )
+
+  handleInvoke(
+    IpcChannels.DashboardDeleteDocument,
+    async (payload: { projectId: string; documentId: string }) => {
+      const projects = await deps.monitorStore.listProjects()
+      const project = projects.find((p) => p.id === payload.projectId)
+      if (!project) return { ok: false, error: 'Project not found' }
+
+      const documents = (project.documents || []).filter((d) => d.id !== payload.documentId)
+      await deps.monitorStore.upsertProject({
+        project: {
+          ...project,
+          documents
+        }
+      })
+
+      void deps.engine.refreshProjectSnapshot(project.id).catch(() => undefined)
+      return { ok: true }
+    }
+  )
 
   // Wire scrape event listener to broadcast events to renderer for Watch Live overlay
   deps.engine.setScrapeEventListener((event) => {

@@ -112,22 +112,37 @@ export class InsightEngine {
     userNames: Map<string, string>,
     project: DashboardProject
   ): InsightChatMessageInput[] {
+    const personRoles = project.personRoles || {}
     const clientNames = new Set(
       [project.clientName.toLowerCase(), 'client'].filter((n) => n.length >= 3)
     )
     return raw.map(({ msg, channel }) => {
       const who = (msg.user && userNames.get(msg.user)) || msg.user || 'unknown'
-      // "the client" = anybody who is not the token owner (the freelancer)
-      const isClient = Boolean(
-        msg.user &&
-        (project.selfUserId ? msg.user !== project.selfUserId : clientNames.has(who.toLowerCase()))
-      )
+      const whoKey = who.trim().toLowerCase()
+      const userKey = (msg.user || '').trim().toLowerCase()
+
+      // Determine role from personRoles if advance dashboard control is on or roles are tagged
+      let role = personRoles[whoKey] || personRoles[userKey]
+      if (!role) {
+        if (project.selfUserId && msg.user === project.selfUserId) {
+          role = 'me'
+        } else if (clientNames.has(whoKey) || clientNames.has(userKey)) {
+          role = 'client'
+        } else {
+          // In basic mode with no tags, treat participants as client-side conversation partners
+          role = 'client'
+        }
+      }
+
+      const isClient = role === 'client'
       return {
         ts: new Date(Number(msg.ts) * 1000).toISOString(),
         who,
         text: (msg.text ?? '').slice(0, 400),
         isClient,
-        channel
+        role,
+        channel,
+        threadTs: msg.threadTs
       }
     })
   }
@@ -143,9 +158,15 @@ export class InsightEngine {
     const lastEntry = entries[0]
     const sinceTs = lastEntry?.cursorAtSummarize ?? '0'
 
-    const raw = await this.newMessagesFor(project, sinceTs)
-    const newCount = raw.length
+    let raw = await this.newMessagesFor(project, sinceTs)
     const previous = await this.existingInsight(project.id)
+
+    // When forced (e.g. user clicked Sync/Sync now) or when no previous insight exists yet,
+    // if no delta was found since cursor, fall back to analyzing all available stored messages.
+    if (raw.length === 0 && (options?.force === true || !previous)) {
+      raw = await this.newMessagesFor(project, '0')
+    }
+    const newCount = raw.length
 
     let source: 'ai' | 'heuristic' | null = null
     let modelUsed: string | null = null
@@ -175,6 +196,7 @@ export class InsightEngine {
       const due =
         newCount > 0 &&
         (options?.force === true ||
+          !previous ||
           newCount >= MIN_NEW_FOR_IMMEDIATE ||
           minutesSince >= HEARTBEAT_MINUTES)
       if (due) {
@@ -189,7 +211,11 @@ export class InsightEngine {
             clientName: project.clientName,
             previous,
             newMessages: chatInput,
-            newCount
+            newCount,
+            documents: project.documents?.map((d) => ({
+              name: d.name,
+              parsedText: d.extractedText
+            }))
           })
           const res = await provider.chatJson(messages, { temperature: 0.2 })
           // only quotes that really exist in the chat may reach the card

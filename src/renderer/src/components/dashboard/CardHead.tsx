@@ -22,6 +22,7 @@ interface CardHeadProps {
   onScrape?: () => void
   scraping?: boolean
   onLogs?: () => void
+  onHistory?: () => void
   onSettings: () => void
   onEdit: () => void
   onRemove?: () => void
@@ -52,6 +53,7 @@ export default function CardHead({
   onScrape,
   scraping = false,
   onLogs,
+  onHistory,
   onSettings,
   onEdit,
   onRemove,
@@ -131,6 +133,17 @@ export default function CardHead({
             onToggle={onTogglePin}
             className="ws-head-pin"
           />
+        ) : null}
+        {onHistory ? (
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={onHistory}
+            aria-label="Channel History"
+            title="View full scraped channel message history and attached documents"
+          >
+            📜 History
+          </button>
         ) : null}
         {onLogs ? (
           <button

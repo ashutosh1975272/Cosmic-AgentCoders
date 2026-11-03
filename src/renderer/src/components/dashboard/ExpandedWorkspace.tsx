@@ -13,6 +13,7 @@ import { useDashboardStore } from '../../hooks/useDashboard'
 import WorkspaceSidebar from './WorkspaceSidebar'
 import WorkspaceContent from './WorkspaceContent'
 import { CardAddModal } from './CardAddModal'
+import ScrapedHistoryAuditDrawer from './ScrapedHistoryAuditDrawer'
 import { buildConnectorChannelLists, type NavEntry, type WorkspaceEntryTab } from './workspace-nav'
 import type { DetailKey } from './guide-model'
 import type { BaseAppLayoutKey } from '../../../../shared/base-app-presets'
@@ -92,6 +93,7 @@ export default function ExpandedWorkspace({
   const [teamWorkspace, setTeamWorkspace] = useState<DashboardTeamWorkspace | null>(null)
   const [teamLoading, setTeamLoading] = useState(true)
   const [cardAddOpen, setCardAddOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   // "New since your last visit" is measured from the moment the reader stops
   // looking at the Dashboard (leaving the dash panel or closing the card), not
@@ -193,6 +195,7 @@ export default function ExpandedWorkspace({
         onScrape={onScrape}
         scraping={scraping}
         onLogs={onLogs}
+        onHistory={() => setHistoryOpen(true)}
         onSettings={onSettings}
         onEdit={onEdit}
         onRemove={onRemove}
@@ -237,6 +240,12 @@ export default function ExpandedWorkspace({
           open={cardAddOpen}
           project={project}
           onClose={() => setCardAddOpen(false)}
+        />
+        <ScrapedHistoryAuditDrawer
+          open={historyOpen}
+          onClose={() => setHistoryOpen(false)}
+          projectId={project.id}
+          projectName={project.name || project.teamName || 'Card'}
         />
       </div>
     </article>

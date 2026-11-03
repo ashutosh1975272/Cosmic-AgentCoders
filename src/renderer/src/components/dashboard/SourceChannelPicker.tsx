@@ -20,6 +20,12 @@ function kindLabel(channel: ProjectSourceChannel): string {
   return 'Public'
 }
 
+function formatCreatedDate(epochSeconds?: number): string | null {
+  if (!epochSeconds) return null
+  const d = new Date(epochSeconds * 1000)
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
 /**
  * The only place a browser source earns permission to read. Discovery runs
  * against the card's live Slack session, so no token is needed. Selection is
@@ -171,7 +177,7 @@ export function SourceChannelPicker({
       {list.length === 0 ? (
         <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>{emptyText}</p>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 6, marginTop: 6 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 6, marginTop: 6 }}>
           {list.map((channel) => {
             const checked = selected.has(channel.id)
             return (
@@ -199,9 +205,17 @@ export function SourceChannelPicker({
                       : '#'}{' '}
                   {channel.name || channel.id}
                 </span>
-                <span style={{ marginLeft: 'auto', fontSize: 10, opacity: 0.65 }}>
-                  {kindLabel(channel)}
-                </span>
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, opacity: 0.75, flexShrink: 0 }}>
+                  {channel.memberCount !== undefined ? (
+                    <span title={`${channel.memberCount} members`}>👥 {channel.memberCount}</span>
+                  ) : null}
+                  {channel.created ? (
+                    <span title={`Created ${formatCreatedDate(channel.created)}`}>
+                      📅 {formatCreatedDate(channel.created)}
+                    </span>
+                  ) : null}
+                  <span style={{ opacity: 0.85 }}>{kindLabel(channel)}</span>
+                </div>
               </label>
             )
           })}
@@ -246,6 +260,21 @@ export function SourceChannelPicker({
               {source.workspaceName || source.workspaceId} · nothing is ticked by default. Pick the 2–3
               channels this card actually needs.
             </p>
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              marginTop: 8,
+              padding: '4px 8px',
+              borderRadius: 4,
+              fontSize: 11,
+              background: 'rgba(59, 130, 246, 0.1)',
+              border: '1px solid rgba(59, 130, 246, 0.25)',
+              color: '#93c5fd'
+            }}>
+              <span>🛡️</span>
+              <span><strong>Discovery only:</strong> Zero messages are read during discovery. When a channel is selected, its initial scrape pulls up to 30 days of past messages (or inception if younger), and subsequent syncs capture new messages incrementally.</span>
+            </div>
           </div>
           <button type="button" className="dash-subtle" onClick={onClose} aria-label="Close channel picker">
             ✕

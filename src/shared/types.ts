@@ -147,6 +147,7 @@ export interface SlackChannelSummary {
   name: string
   isPrivate: boolean
   topic?: string
+  created?: number
   memberCount?: number
 }
 

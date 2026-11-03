@@ -729,10 +729,11 @@ export class DashboardSyncEngine {
     this.runProject.set(runId, project.id)
     this.runningSources.add(source.id)
 
-    const backfillHours = clampNumber(source.backfillHours ?? 6, 1, 24)
+    const backfillHours =
+      source.backfillHours === 0 ? 0 : clampNumber(source.backfillHours ?? 6, 1, 720)
     const catchUpCapDays = clampNumber(source.catchUpCapDays ?? 7, 1, 30)
     const windowEndSec = Date.now() / 1000
-    const floorTs = windowEndSec - backfillHours * 3600
+    const floorTs = backfillHours === 0 ? 0 : windowEndSec - backfillHours * 3600
     const catchUpFloorTs = windowEndSec - catchUpCapDays * 86400
     const options = extra.options
     const selectionMode = options?.selectionMode ?? source.selectionMode ?? 'include'
@@ -824,13 +825,16 @@ export class DashboardSyncEngine {
               isPrivate: ch.isPrivate,
               isDm: ch.isDm
             })
+            const existingCh = source.channels?.find((c) => c.id === ch.id)
             return {
               id: ch.id,
               name: ch.name,
               isPrivate: ch.isPrivate,
               isDm: ch.isDm,
               kind,
-              enabled: selectedChannelIds.has(ch.id)
+              enabled: selectedChannelIds.has(ch.id),
+              created: ch.created ?? existingCh?.created,
+              memberCount: ch.memberCount ?? existingCh?.memberCount
             }
           })
           const extras = (source.channels ?? [])
@@ -897,18 +901,38 @@ export class DashboardSyncEngine {
         })
 
         const cursor = await this.channelCursor(source, ch.id)
-        // If first time scraping this channel (no cursor yet), scrape full history from channel genesis (sinceTs = 0).
-        // On subsequent runs, scrape incrementally from cursor - 120s (last scrape minus 2 min buffer).
-        const isFirstScrape = !cursor
-        const sinceTs = isFirstScrape ? 0 : Math.max(catchUpFloorTs, cursor - 120)
-        const maxScrolls = isFirstScrape ? 150 : 40
-        windowStart = isFirstScrape ? 0 : Math.min(windowStart, sinceTs)
+        const requestedDays = options?.days
+        const thirtyDaysAgoTs = Math.floor(Date.now() / 1000) - 30 * 86400
+        // When forceGenesis is true or days is 0, scrape from channel inception (sinceTs = 0).
+        // When explicit days is provided, scrape with custom lookback window from now (e.g. 230 days).
+        // When it is first scrape OR force30Days is true, scrape with a strict 30-day (1-month) historical window.
+        // Subsequent scrapes read incrementally from cursor with a 120s safety buffer.
+        const isGenesis = options?.forceGenesis === true || requestedDays === 0
+        const isCustomDays = typeof requestedDays === 'number' && requestedDays > 0
+        const isThirtyDays = !cursor || options?.force30Days === true
+
+        let sinceTs: number
+        if (isGenesis) {
+          sinceTs = 0
+        } else if (isCustomDays) {
+          sinceTs = Math.floor(Date.now() / 1000) - requestedDays * 86400
+        } else if (isThirtyDays) {
+          sinceTs = thirtyDaysAgoTs
+        } else {
+          sinceTs = Math.max(catchUpFloorTs, cursor - 120)
+        }
+
+        const isDeepHistorical = isGenesis || isCustomDays || isThirtyDays || sinceTs <= thirtyDaysAgoTs
+        const isUltraHistorical = isGenesis || (isCustomDays && requestedDays >= 180)
+        const maxScrolls = isUltraHistorical ? 2000 : isDeepHistorical ? 1000 : 60
+        const maxMessages = isUltraHistorical ? 35000 : isDeepHistorical ? 15000 : 3000
+        windowStart = sinceTs === 0 ? 0 : Math.min(windowStart, sinceTs)
 
         try {
           const result = await reader.readChannelWindow(ch.id, {
             sinceTs,
             maxScrolls,
-            maxMessages: isFirstScrape ? 5000 : 3000,
+            maxMessages,
             signal
           })
           gapSeconds = Math.max(gapSeconds, result.gapSeconds)
@@ -1343,11 +1367,12 @@ export class DashboardInsightSyncEngine extends DashboardSyncEngine {
   private async enrich(
     project: DashboardProject,
     snapshot: DashboardProjectSnapshot,
-    token: string | null
+    token: string | null,
+    options?: { force?: boolean }
   ): Promise<DashboardProjectSnapshot> {
     if (!this.insightEngine) return snapshot
     try {
-      return await this.insightEngine.refresh(project, token, snapshot)
+      return await this.insightEngine.refresh(project, token, snapshot, options)
     } catch {
       return snapshot
     }
@@ -1368,7 +1393,7 @@ export class DashboardInsightSyncEngine extends DashboardSyncEngine {
     const project = projects.find((p) => p.id === projectId)
     if (!project) return snapshot
     const token = await this.tokenFor(project).catch(() => null)
-    const enriched = await this.enrich(project, snapshot, token)
+    const enriched = await this.enrich(project, snapshot, token, { force: true })
     this.lastResults.set(projectId, enriched)
     return enriched
   }
@@ -1385,7 +1410,7 @@ export class DashboardInsightSyncEngine extends DashboardSyncEngine {
     error?: string
   }> {
     const result = await super.syncProjectSource(projectId, sourceId, extra)
-    await this.refreshInsightForProject(projectId).catch((err) => {
+    await this.refreshInsightForProject(projectId, { force: true }).catch((err) => {
       this.logInfo(`[dashboard] post-scrape insight refresh failed (${projectId}): ${String(err)}`)
     })
     return result
@@ -1393,7 +1418,8 @@ export class DashboardInsightSyncEngine extends DashboardSyncEngine {
 
   /** Refresh insight from stored messages, with or without a token. */
   async refreshInsightForProject(
-    projectId: string
+    projectId: string,
+    options?: { force?: boolean }
   ): Promise<DashboardProjectSnapshot | null> {
     if (!this.insightEngine) return null
     const projects = await this.monitorStore.listProjects()
@@ -1403,7 +1429,7 @@ export class DashboardInsightSyncEngine extends DashboardSyncEngine {
     const snapshots = await this.buildSnapshot(projectId)
     const snapshot = snapshots[0]
     if (!snapshot) return null
-    const enriched = await this.enrich(project, snapshot, token)
+    const enriched = await this.enrich(project, snapshot, token, options)
     this.lastResults.set(projectId, enriched)
     try {
       this.onSynced?.([enriched])

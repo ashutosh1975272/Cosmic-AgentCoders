@@ -14,6 +14,8 @@ import type {
   DashboardUpdateSourceResult,
   DashboardAppClientConfig,
   DashboardChatMessage,
+  DashboardChannelHistoryPayload,
+  DashboardChannelHistoryResult,
   DashboardChatPage,
   DashboardChatQueryPayload,
   DashboardChatTokenStatus,
@@ -224,6 +226,10 @@ export const IpcChannels = {
   DashboardGetScrapeRuns: 'dashboard:get-scrape-runs',
   DashboardCancelScrape: 'dashboard:cancel-scrape',
   DashboardSetSourceSchedule: 'dashboard:set-source-schedule',
+  DashboardGetChannelHistory: 'dashboard:get-channel-history',
+  DashboardUploadDocument: 'dashboard:upload-document',
+  DashboardListDocuments: 'dashboard:list-documents',
+  DashboardDeleteDocument: 'dashboard:delete-document',
   DashboardStartWatchLive: 'dashboard:start-watch-live',
   DashboardStopWatchLive: 'dashboard:stop-watch-live',
   DashboardScrapeEvent: 'dashboard:scrape-event'
@@ -524,6 +530,22 @@ export interface IpcApi {
     setSourceSchedule: (payload: DashboardSourceSchedulePayload) => Promise<DashboardSourceScheduleState>
     getRunLogs: (payload: ScrapeRunQuery & { projectId: string }) => Promise<ScrapeRunLog[]>
     getScrapeRuns: (payload: ScrapeRunQuery) => Promise<ScrapeRunLog[]>
+    getChannelHistory: (
+      payload: DashboardChannelHistoryPayload
+    ) => Promise<DashboardChannelHistoryResult[]>
+    uploadDocument: (payload: {
+      projectId: string
+      name: string
+      mimeType: string
+      dataBase64: string
+    }) => Promise<{ ok: boolean; document?: import('./dashboard-contract').ProjectDocument; error?: string }>
+    listDocuments: (payload: {
+      projectId: string
+    }) => Promise<import('./dashboard-contract').ProjectDocument[]>
+    deleteDocument: (payload: {
+      projectId: string
+      documentId: string
+    }) => Promise<{ ok: boolean; error?: string }>
     startWatchLive: (payload: {
       projectId: string
       bounds: { x: number; y: number; width: number; height: number }
@@ -612,6 +634,8 @@ export type {
   CreateProfileInput,
   CurrentWorkspaceInfo,
   DashboardChatMessage,
+  DashboardChannelHistoryPayload,
+  DashboardChannelHistoryResult,
   DashboardChatPage,
   DashboardChatQueryPayload,
   DashboardChatTokenStatus,

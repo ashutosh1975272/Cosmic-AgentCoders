@@ -449,9 +449,34 @@ if (!gotSingleInstanceLock) {
         void dashboardScheduleStore.recordSourceRun(sourceId, atIso)
       },
       onSynced: () => {
-        void refreshDigestNow().catch((err) =>
-          log.warn('[dashboard] digest refresh failed', { err: String(err) })
-        )
+        const win = mainWindow
+        if (win && !win.isDestroyed()) {
+          void dashboardEngine.buildSnapshot().then(async (projects) => {
+            try {
+              const digest = await refreshDigestNow().catch((err) => {
+                log.warn('[dashboard] digest refresh failed', { err: String(err) })
+                return null
+              })
+              const manualTokens = (await dashboardMonitorStore.listManualTokens()).map((t) => ({
+                key: t.key,
+                validated: t.persisted
+              }))
+              win.webContents.send(IpcChannels.DashboardSnapshotChanged, {
+                projects,
+                manualTokens,
+                syncIntervalSeconds: 60,
+                digest,
+                pinnedOrder: await dashboardMonitorStore.readPinnedOrder()
+              })
+            } catch (err) {
+              log.warn('[dashboard] broadcast onSynced failed', { err: String(err) })
+            }
+          })
+        } else {
+          void refreshDigestNow().catch((err) =>
+            log.warn('[dashboard] digest refresh failed', { err: String(err) })
+          )
+        }
       },
       log: (msg) => log.info(msg)
     })
@@ -969,3 +994,5 @@ if (!gotSingleInstanceLock) {
     }
   })
 } // end single-instance lock
+
+export { SlackReaderView } from './slack-reader/slack-reader-view'

@@ -4,6 +4,7 @@ import type {
   DashboardDiscoverSourceChannelsResult,
   DashboardManualToken,
   DashboardProject,
+  DashboardScrapeOptions,
   DashboardSnapshot,
   DashboardSyncProgressPayload,
   DashboardUpdateSourcePayload,
@@ -56,7 +57,7 @@ interface DashboardState {
   ) => Promise<DashboardDiscoverSourceChannelsResult>
   setPinnedOrder: (order: string[]) => Promise<void>
   syncNow: (projectId?: string) => Promise<void>
-  syncSource: (payload: { projectId: string; sourceId?: string }) => Promise<{
+  syncSource: (payload: { projectId: string; sourceId?: string; options?: DashboardScrapeOptions }) => Promise<{
     channelsRead: number
     newMessages: number
     status: string

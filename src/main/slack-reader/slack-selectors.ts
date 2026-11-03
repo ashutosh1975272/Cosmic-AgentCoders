@@ -27,6 +27,16 @@ export const SLACK_SELECTORS = {
   messageTimestamp: '[data-qa="timestamp"], .c-timestamp',
   messageBody: '[data-qa="message-text"], .c-message_kit__blocks .p-rich_text_section, .p-rich_text_section',
 
+  // Thread elements & flexpane side drawer
+  threadReplyButton:
+    '[data-qa="reply_bar_count"], [data-qa="reply_count"], .c-message__reply_count, [data-qa="reply_bar"], .c-message__reply_bar, [data-qa="thread_broadcast_label"], .c-message__thread_replies_summary, button[data-qa="thread_reply_count"], button[aria-label*="repl"]',
+  threadContainer:
+    '[data-qa="threads_flexpane"], [data-qa="flexpane_thread"], .p-flexpane, [data-qa="flexpane_body"], [data-qa="flexpane"]',
+  threadMessageRow:
+    '[data-qa="reply_container"], [data-qa="message_container"], .p-flexpane .c-virtual_list__item, [data-qa="threads_flexpane"] .c-message_kit__message',
+  threadCloseButton:
+    '[data-qa="close_flexpane"], button[aria-label="Close"], button[data-qa="flexpane_close"], button.p-flexpane_header__close',
+
   // Message composer input & send button (for active posting)
   composerEditor: '.ql-editor[contenteditable="true"], [data-qa="message_input"], [role="textbox"][contenteditable="true"]',
   composerSendButton: '[data-qa="texty_send_button"], button[aria-label="Send message"]'

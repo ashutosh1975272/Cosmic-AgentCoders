@@ -2,9 +2,11 @@ import type React from 'react'
 import { useEffect, useState } from 'react'
 import type {
   DashboardChatTokenStatus,
-  DashboardProject
+  DashboardProject,
+  PersonRole
 } from '../../../../shared/dashboard-contract'
 import { useDashboardStore } from '../../hooks/useDashboard'
+import { useProjectActivity } from '../../hooks/useProjectActivity'
 import AiSettingsForm from './AiSettingsForm'
 import DashboardWizard from './DashboardWizard'
 import { RunLogsModal } from './RunLogsModal'
@@ -22,7 +24,7 @@ import type { ProjectSource } from '../../../../shared/dashboard-contract'
 import { CardAddModal } from './CardAddModal'
 import { SourceChannelPicker } from './SourceChannelPicker'
 
-export type SettingsTabKey = 'general' | 'ai' | 'sources' | 'channels' | 'schedule' | 'sidebar' | 'danger'
+export type SettingsTabKey = 'general' | 'ai' | 'documents' | 'sources' | 'channels' | 'schedule' | 'sidebar' | 'danger'
 
 interface ProjectSettingsTabProps {
   project: DashboardProject
@@ -56,6 +58,38 @@ export default function ProjectSettingsTab({
   const [scheduleSaving, setScheduleSaving] = useState(false)
   const [scheduleNotice, setScheduleNotice] = useState<string | null>(null)
   const [scheduleError, setScheduleError] = useState<string | null>(null)
+
+  // Activity & advance participant roles
+  const activityState = useProjectActivity(project.id)
+  const [manualPersonName, setManualPersonName] = useState('')
+  const [manualPersonRole, setManualPersonRole] = useState<PersonRole>('client')
+
+  const handleToggleAdvanceControl = async (): Promise<void> => {
+    const nextVal = !project.advanceDashboardControl
+    await useDashboardStore.getState().upsertProject({
+      ...project,
+      advanceDashboardControl: nextVal
+    })
+  }
+
+  const handleUpdatePersonRole = async (personName: string, role: PersonRole): Promise<void> => {
+    const key = personName.trim().toLowerCase()
+    const nextRoles = { ...(project.personRoles || {}), [key]: role }
+    await useDashboardStore.getState().upsertProject({
+      ...project,
+      personRoles: nextRoles
+    })
+  }
+
+  const handleRemovePersonRole = async (personName: string): Promise<void> => {
+    const key = personName.trim().toLowerCase()
+    const nextRoles = { ...(project.personRoles || {}) }
+    delete nextRoles[key]
+    await useDashboardStore.getState().upsertProject({
+      ...project,
+      personRoles: nextRoles
+    })
+  }
 
   // Layout state
   const { layout, updateLayout } = useSidebarLayout(project.id)
@@ -235,6 +269,7 @@ export default function ProjectSettingsTab({
   const navItems: Array<{ key: SettingsTabKey; label: string; icon: string; danger?: boolean }> = [
     { key: 'general', label: 'General', icon: 'ℹ' },
     { key: 'ai', label: 'AI Configuration', icon: '✨' },
+    { key: 'documents', label: 'Documents & Specs', icon: '📄' },
     { key: 'sources', label: 'Sources', icon: '🔌' },
     { key: 'channels', label: 'Channels', icon: '#' },
     { key: 'schedule', label: 'Schedule', icon: '📅' },
@@ -511,6 +546,207 @@ export default function ProjectSettingsTab({
                   </div>
                 </div>
               </section>
+
+              {/* Advance Dashboard Control Section */}
+              <section className="ws-settings-section">
+                <header className="ws-settings-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <h4>Advance dashboard control</h4>
+                    <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--text-muted)' }}>
+                      Enable participant role tagging (Client, Me, Team, Bot). When OFF (default), Orbit automatically scrapes and builds the dashboard without manual tagging.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleToggleAdvanceControl()}
+                    style={{
+                      background: project.advanceDashboardControl ? '#10b981' : 'var(--surface)',
+                      color: project.advanceDashboardControl ? '#fff' : 'var(--text-muted)',
+                      border: '1px solid var(--border)',
+                      borderRadius: '16px',
+                      padding: '6px 14px',
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                      fontSize: '12px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}
+                  >
+                    <span>{project.advanceDashboardControl ? '● ON' : '○ OFF'}</span>
+                  </button>
+                </header>
+
+                {project.advanceDashboardControl ? (
+                  <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', background: 'var(--surface)', padding: '10px 14px', borderRadius: 'var(--radius-chip)', border: '1px solid var(--border)' }}>
+                      Tag each participant with their role. The AI uses these roles to distinguish the client asks, response times, and team deliverables. Bots are excluded from sentiment.
+                    </div>
+
+                    {Array.from(new Set([
+                      ...(activityState.activity?.participants ?? []).map((p) => p.name),
+                      ...Object.keys(project.personRoles || {})
+                    ])).filter(Boolean).length === 0 ? (
+                      <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '8px 0' }}>
+                        No participants detected yet. Scrape a channel to discover participants, or add them manually below.
+                      </p>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {Array.from(new Set([
+                          ...(activityState.activity?.participants ?? []).map((p) => p.name),
+                          ...Object.keys(project.personRoles || {})
+                        ])).filter(Boolean).map((name) => {
+                          const currentRole: PersonRole = (project.personRoles || {})[name.toLowerCase()] || (
+                            project.selfUserId && name.toLowerCase() === project.selfUserId.toLowerCase()
+                              ? 'me'
+                              : 'client'
+                          )
+                          const pInfo = (activityState.activity?.participants ?? []).find(
+                            (p) => p.name.toLowerCase() === name.toLowerCase()
+                          )
+
+                          return (
+                            <div
+                              key={name}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '8px 12px',
+                                background: 'var(--surface)',
+                                borderRadius: 'var(--radius-chip)',
+                                border: '1px solid var(--border)'
+                              }}
+                            >
+                              <div>
+                                <strong style={{ fontSize: '13px' }}>{name}</strong>
+                                {pInfo ? (
+                                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '8px' }}>
+                                    ({pInfo.count} msgs)
+                                  </span>
+                                ) : null}
+                              </div>
+
+                              <div style={{ display: 'flex', gap: '6px' }}>
+                                {(['client', 'me', 'team', 'bot'] as const).map((r) => {
+                                  const isActive = currentRole === r
+                                  return (
+                                    <button
+                                      key={r}
+                                      type="button"
+                                      onClick={() => void handleUpdatePersonRole(name, r)}
+                                      style={{
+                                        background: isActive
+                                          ? r === 'client'
+                                            ? '#10b981'
+                                            : r === 'me'
+                                              ? '#3b82f6'
+                                              : r === 'team'
+                                                ? '#8b5cf6'
+                                                : '#64748b'
+                                          : 'transparent',
+                                        color: isActive ? '#fff' : 'var(--text-muted)',
+                                        border: `1px solid ${isActive ? 'transparent' : 'var(--border)'}`,
+                                        borderRadius: '12px',
+                                        padding: '3px 10px',
+                                        fontSize: '11px',
+                                        cursor: 'pointer',
+                                        fontWeight: isActive ? 600 : 400
+                                      }}
+                                    >
+                                      {r === 'client'
+                                        ? 'Client'
+                                        : r === 'me'
+                                          ? 'Me'
+                                          : r === 'team'
+                                            ? 'Team'
+                                            : 'Bot'}
+                                    </button>
+                                  )
+                                })}
+                                {(project.personRoles || {})[name.toLowerCase()] ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleRemovePersonRole(name)}
+                                    title="Reset to auto"
+                                    style={{
+                                      background: 'transparent',
+                                      border: 'none',
+                                      color: 'var(--text-muted)',
+                                      cursor: 'pointer',
+                                      fontSize: '13px',
+                                      marginLeft: '4px'
+                                    }}
+                                  >
+                                    ×
+                                  </button>
+                                ) : null}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+
+                    {/* Add manual person */}
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '6px' }}>
+                      <input
+                        type="text"
+                        placeholder="Add person name…"
+                        value={manualPersonName}
+                        onChange={(e) => setManualPersonName(e.target.value)}
+                        style={{
+                          flex: 1,
+                          padding: '6px 10px',
+                          borderRadius: 'var(--radius-input)',
+                          background: 'var(--surface)',
+                          border: '1px solid var(--border)',
+                          color: 'var(--text)',
+                          fontSize: '13px'
+                        }}
+                      />
+                      <select
+                        value={manualPersonRole}
+                        onChange={(e) => setManualPersonRole(e.target.value as PersonRole)}
+                        style={{
+                          padding: '6px 10px',
+                          borderRadius: 'var(--radius-input)',
+                          background: 'var(--surface)',
+                          border: '1px solid var(--border)',
+                          color: 'var(--text)',
+                          fontSize: '13px'
+                        }}
+                      >
+                        <option value="client">Client</option>
+                        <option value="me">Me</option>
+                        <option value="team">Team / Freelancer</option>
+                        <option value="bot">Bot</option>
+                      </select>
+                      <button
+                        type="button"
+                        disabled={!manualPersonName.trim()}
+                        onClick={() => {
+                          if (manualPersonName.trim()) {
+                            void handleUpdatePersonRole(manualPersonName.trim(), manualPersonRole)
+                            setManualPersonName('')
+                          }
+                        }}
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: 'var(--radius-input)',
+                          background: '#3b82f6',
+                          color: '#fff',
+                          border: 'none',
+                          fontSize: '13px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Add Tag
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </section>
             </div>
           )}
 
@@ -531,6 +767,146 @@ export default function ProjectSettingsTab({
                   </p>
                 </header>
                 <AiSettingsForm projectId={project.id} />
+              </section>
+            </div>
+          )}
+
+          {/* TAB: DOCUMENTS & SPECS */}
+          {activeTab === 'documents' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <section className="ws-settings-section">
+                <header className="ws-settings-head">
+                  <h4>Project Specifications & Documents</h4>
+                  <p>
+                    Upload client specifications, SOWs, deliverables docs (.docx, .pdf, .txt, .md).
+                    The AI integrates these into requirements, milestones, and deliverable tracking.
+                  </p>
+                </header>
+
+                <div style={{ marginTop: '14px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <div
+                    style={{
+                      border: '2px dashed var(--border)',
+                      borderRadius: '8px',
+                      padding: '24px',
+                      textAlign: 'center',
+                      background: 'rgba(255, 255, 255, 0.02)',
+                      cursor: 'pointer'
+                    }}
+                    onClick={() => {
+                      const input = document.createElement('input')
+                      input.type = 'file'
+                      input.accept = '.docx,.pdf,.txt,.md,.json,.csv'
+                      input.onchange = async (e) => {
+                        const file = (e.target as HTMLInputElement).files?.[0]
+                        if (!file) return
+                        const reader = new FileReader()
+                        reader.onload = async () => {
+                          const base64 = (reader.result as string).split(',')[1]
+                          setSourceNotice(`Uploading ${file.name}...`)
+                          try {
+                            const res = await window.api.dashboard.uploadDocument({
+                              projectId: project.id,
+                              name: file.name,
+                              mimeType: file.type || 'application/octet-stream',
+                              dataBase64: base64
+                            })
+                            if (res.ok) {
+                              setSourceNotice(`Uploaded and indexed ${file.name}`)
+                              await useDashboardStore.getState().loadSnapshot()
+                            } else {
+                              setSourceNotice(`Failed: ${res.error}`)
+                            }
+                          } catch (err) {
+                            setSourceNotice(`Error: ${err instanceof Error ? err.message : String(err)}`)
+                          }
+                          setTimeout(() => setSourceNotice(null), 4000)
+                        }
+                        reader.readAsDataURL(file)
+                      }
+                      input.click()
+                    }}
+                  >
+                    <span style={{ fontSize: '28px', display: 'block', marginBottom: '8px' }}>📤</span>
+                    <strong style={{ fontSize: '14px', color: 'var(--text)' }}>Click to upload client specification</strong>
+                    <p style={{ margin: '4px 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>
+                      Supports Word (.docx), PDF (.pdf), Text (.txt), Markdown (.md)
+                    </p>
+                  </div>
+
+                  {sourceNotice ? (
+                    <div style={{ padding: '8px 12px', background: 'rgba(59, 130, 246, 0.1)', color: '#60a5fa', borderRadius: '6px', fontSize: '13px' }}>
+                      {sourceNotice}
+                    </div>
+                  ) : null}
+
+                  <div style={{ marginTop: '10px' }}>
+                    <h5 style={{ fontSize: '13px', fontWeight: 600, margin: '0 0 10px', color: 'var(--text-muted)' }}>
+                      Uploaded Documents ({(project.documents || []).length})
+                    </h5>
+
+                    {(project.documents || []).length === 0 ? (
+                      <p style={{ fontSize: '13px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                        No documents uploaded yet.
+                      </p>
+                    ) : (
+                      <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {(project.documents || []).map((doc) => (
+                          <li
+                            key={doc.id}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '10px 14px',
+                              background: 'var(--surface)',
+                              borderRadius: 'var(--radius-chip)',
+                              border: '1px solid var(--border)'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <span style={{ fontSize: '16px' }}>📄</span>
+                              <div>
+                                <strong style={{ fontSize: '13px', color: 'var(--text)', display: 'block' }}>
+                                  {doc.name}
+                                </strong>
+                                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                  {doc.sizeBytes ? `${Math.round(doc.sizeBytes / 1024)} KB • ` : ''}
+                                  Uploaded {new Date(doc.uploadedAt).toLocaleDateString()}
+                                  {doc.extractedText ? ` • ${doc.extractedText.length} chars parsed` : ''}
+                                </span>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (confirm(`Delete document "${doc.name}"?`)) {
+                                  await window.api.dashboard.deleteDocument({
+                                    projectId: project.id,
+                                    documentId: doc.id
+                                  })
+                                  await useDashboardStore.getState().loadSnapshot()
+                                }
+                              }}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                color: '#ef4444',
+                                cursor: 'pointer',
+                                fontSize: '14px',
+                                padding: '4px 8px'
+                              }}
+                              title="Delete document"
+                            >
+                              🗑
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
               </section>
             </div>
           )}
@@ -939,9 +1315,20 @@ export default function ProjectSettingsTab({
                                   })
                                 }
                               >
-                                {[1, 3, 6, 12, 24].map((hours) => (
-                                  <option key={hours} value={hours}>
-                                    {hours}h
+                                {[
+                                  { h: 1, label: '1h' },
+                                  { h: 3, label: '3h' },
+                                  { h: 6, label: '6h' },
+                                  { h: 12, label: '12h' },
+                                  { h: 24, label: '24h (1d)' },
+                                  { h: 72, label: '3d' },
+                                  { h: 168, label: '7d' },
+                                  { h: 336, label: '14d' },
+                                  { h: 720, label: '30d' },
+                                  { h: 0, label: 'All History' }
+                                ].map(({ h, label }) => (
+                                  <option key={h} value={h}>
+                                    {label}
                                   </option>
                                 ))}
                               </select>
@@ -1012,7 +1399,7 @@ export default function ProjectSettingsTab({
                                 Auto-discovered public &amp; private locked channels
                               </span>
                             </div>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 6 }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 6 }}>
                               {src.channels.map((ch) => (
                                 <label
                                   key={ch.id}
@@ -1034,7 +1421,7 @@ export default function ProjectSettingsTab({
                                     checked={ch.enabled !== false}
                                     onChange={() => void handleToggleChannelEnabled(src.id, ch.id, ch.enabled !== false)}
                                   />
-                                  <span>
+                                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     {ch.isDm || ch.kind === 'dm'
                                       ? '💬'
                                       : ch.isPrivate || ch.kind === 'private'
@@ -1042,6 +1429,16 @@ export default function ProjectSettingsTab({
                                         : '#'}{' '}
                                     {ch.name || ch.id}
                                   </span>
+                                  <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, opacity: 0.75, flexShrink: 0 }}>
+                                    {ch.memberCount !== undefined && (
+                                      <span title={`${ch.memberCount} members`}>👥{ch.memberCount}</span>
+                                    )}
+                                    {ch.created ? (
+                                      <span title={`Created ${new Date(ch.created * 1000).toLocaleDateString()}`}>
+                                        📅{new Date(ch.created * 1000).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' })}
+                                      </span>
+                                    ) : null}
+                                  </div>
                                 </label>
                               ))}
                             </div>

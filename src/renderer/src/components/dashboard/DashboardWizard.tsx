@@ -197,7 +197,7 @@ export default function DashboardWizard({
   const [automationNoticeAck, setAutomationNoticeAck] = useState<boolean>(true)
 
   // channels
-  const [channels, setChannels] = useState<Array<{ id: string; name: string }>>([])
+  const [channels, setChannels] = useState<Array<{ id: string; name: string; created?: number; memberCount?: number }>>([])
   const [loadingChannels, setLoadingChannels] = useState(false)
   const [channelError, setChannelError] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(
@@ -272,7 +272,12 @@ export default function DashboardWizard({
         workspaceId: teamId
       })
       if (result.error) setChannelError(result.error)
-      setChannels(result.channels.map((c) => ({ id: c.id, name: c.name })))
+      setChannels(result.channels.map((c) => ({
+        id: c.id,
+        name: c.name,
+        created: c.created,
+        memberCount: c.memberCount
+      })))
     } catch (err) {
       setChannels([])
       setChannelError(err instanceof Error ? err.message : 'channel discovery failed')
@@ -698,6 +703,10 @@ export default function DashboardWizard({
                   }
                 />
                 <span>#{c.name}</span>
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, opacity: 0.75 }}>
+                  {c.memberCount !== undefined && <span>👥 {c.memberCount}</span>}
+                  {c.created ? <span>📅 {new Date(c.created * 1000).toLocaleDateString()}</span> : null}
+                </div>
               </label>
             ))}
             {!loadingChannels && channels.length === 0

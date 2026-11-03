@@ -81,6 +81,21 @@ describe('insights prompt + merge', () => {
     expect(msgs[1].content).toContain('when demo?')
   })
 
+  it('formats threaded replies with hierarchical indentation', () => {
+    const msgs = buildInsightMessages({
+      projectName: 'P',
+      workspaceName: 'W',
+      previous: null,
+      newCount: 2,
+      newMessages: [
+        { ts: '2026-10-21T10:00:00Z', who: 'Client', text: 'Where is the login button?', isClient: true },
+        { ts: '2026-10-21T10:05:00Z', who: 'Dev', text: 'It was moved to top right', isClient: false, threadTs: '2026-10-21T10:00:00Z' }
+      ]
+    })
+    expect(msgs[1].content).toContain('[2026-10-21T10:00:00Z] Client (CLIENT): Where is the login button?')
+    expect(msgs[1].content).toContain('    ↳ [2026-10-21T10:05:00Z] Dev (reply): It was moved to top right')
+  })
+
   it('merges parsed fields and carries over unknowns', () => {
     const prev = mergeInsight(
       null,
