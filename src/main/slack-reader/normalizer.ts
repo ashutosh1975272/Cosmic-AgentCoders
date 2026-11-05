@@ -77,20 +77,6 @@ export function normalizeSlackTimestamp(rawTs?: string | number): string | null 
       return `${parts[0]}.000000`
     }
 
-    // Time-only string (e.g. "02:35 PM", "2:35 PM", "14:35")
-    const timeOnlyMatch = trimmed.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?$/i)
-    if (timeOnlyMatch) {
-      const now = new Date()
-      let hours = parseInt(timeOnlyMatch[1], 10)
-      const minutes = parseInt(timeOnlyMatch[2], 10)
-      const seconds = timeOnlyMatch[3] ? parseInt(timeOnlyMatch[3], 10) : 0
-      const meridiem = (timeOnlyMatch[4] || '').toUpperCase()
-      if (meridiem === 'PM' && hours < 12) hours += 12
-      if (meridiem === 'AM' && hours === 12) hours = 0
-      now.setHours(hours, minutes, seconds, 0)
-      return (now.getTime() / 1000).toFixed(6)
-    }
-
     // Slack humanized dates (e.g. "Today at 2:35 PM", "Yesterday at 4:15 PM")
     const lower = trimmed.toLowerCase()
     if (lower.startsWith('today') || lower.startsWith('yesterday')) {
@@ -105,6 +91,24 @@ export function normalizeSlackTimestamp(rawTs?: string | number): string | null 
         const minutes = parseInt(timeMatch[2], 10)
         const seconds = timeMatch[3] ? parseInt(timeMatch[3], 10) : 0
         const meridiem = (timeMatch[4] || '').toUpperCase()
+        if (meridiem === 'PM' && hours < 12) hours += 12
+        if (meridiem === 'AM' && hours === 12) hours = 0
+        now.setHours(hours, minutes, seconds, 0)
+        return (now.getTime() / 1000).toFixed(6)
+      }
+    }
+
+    // Time-only string with optional sender prefix or whitespace (e.g. "02:35 PM", "5:28 PM", "Ashutosh 5:28 PM")
+    const timeOnlyMatch = trimmed.match(/(?:^|.*\s)(\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?)$/i)
+    if (timeOnlyMatch && !/(?:today|yesterday|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(trimmed)) {
+      const pureTime = timeOnlyMatch[1]
+      const pureMatch = pureTime.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?$/i)
+      if (pureMatch) {
+        const now = new Date()
+        let hours = parseInt(pureMatch[1], 10)
+        const minutes = parseInt(pureMatch[2], 10)
+        const seconds = pureMatch[3] ? parseInt(pureMatch[3], 10) : 0
+        const meridiem = (pureMatch[4] || '').toUpperCase()
         if (meridiem === 'PM' && hours < 12) hours += 12
         if (meridiem === 'AM' && hours === 12) hours = 0
         now.setHours(hours, minutes, seconds, 0)
