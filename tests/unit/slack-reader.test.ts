@@ -404,7 +404,9 @@ describe('Slack Reader Core (SLK-2)', () => {
       expect(result).toBe(true)
       expect(executedScript).toContain('scrollHeight')
       expect(executedScript).toContain('.c-virtual_list__scroll_container')
+      expect(executedScript).toContain('[role="list"]')
       expect(executedScript).toContain("dispatchEvent(new Event('scroll'")
+      expect(executedScript).toContain("dispatchEvent(new WheelEvent('wheel'")
     })
 
     it('scrollToBottom returns false for destroyed or null view', async () => {

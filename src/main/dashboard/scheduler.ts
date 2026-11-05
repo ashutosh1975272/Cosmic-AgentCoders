@@ -200,6 +200,31 @@ export class DashboardScheduler {
             source.id,
             new Date(this.now()).toISOString()
           )
+          if (result.status === 'success' || result.status === 'partial') {
+            await this.store.recordRun({
+              id: result.runId || this.newId(),
+              kind: 'slack-sync',
+              startedAt: new Date(this.now()).toISOString(),
+              finishedAt: new Date(this.now()).toISOString(),
+              status: 'ok',
+              detail: `Scheduled scrape for ${source.workspaceName || source.workspaceId}: ${result.channelsRead} channel${result.channelsRead === 1 ? '' : 's'}, ${result.newMessages} new message${result.newMessages === 1 ? '' : 's'}.`,
+              projects: 1,
+              newMessages: result.newMessages
+            })
+
+            if ((result.newMessages ?? 0) > 0) {
+              await this.store.recordRun({
+                id: this.newId(),
+                kind: 'agent-analysis',
+                startedAt: new Date(this.now()).toISOString(),
+                finishedAt: new Date(this.now()).toISOString(),
+                status: 'ok',
+                detail: `Triggered by ${result.newMessages} new message${result.newMessages === 1 ? '' : 's'}; the insight refresh runs inside the sync.`,
+                projects: 1,
+                newMessages: result.newMessages
+              })
+            }
+          }
           if (result.status === 'error') {
             await this.store.recordRun({
               id: this.newId(),

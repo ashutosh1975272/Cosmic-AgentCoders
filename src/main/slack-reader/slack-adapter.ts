@@ -335,13 +335,16 @@ export class SlackAdapter {
           `(function() {
             const list = document.querySelector('.c-virtual_list__scroll_container') ||
                          document.querySelector('[data-qa="slack_kit_list"]') ||
-                         document.querySelector('.c-scrollbar__hider');
+                         document.querySelector('.c-scrollbar__hider') ||
+                         document.querySelector('[role="list"]') ||
+                         document.querySelector('.p-workspace__primary_view');
             if (!list) return false;
             list.scrollTop = list.scrollHeight;
             if (typeof list.scrollTo === 'function') {
               try { list.scrollTo({ top: list.scrollHeight, behavior: 'instant' }); } catch(e) {}
             }
             try { list.dispatchEvent(new Event('scroll', { bubbles: true })); } catch(e) {}
+            try { list.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, bubbles: true })); } catch(e) {}
             return true;
           })()`,
           true

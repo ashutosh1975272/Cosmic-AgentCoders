@@ -268,8 +268,8 @@ export class SlackReaderView {
               if (hasGenesis) {
                 if (!genesisSeenAt) {
                   genesisSeenAt = Date.now()
-                } else if (Date.now() - genesisSeenAt >= 3000) {
-                  // Channel is confirmed empty: genesis summary and composer observed for at least 3s
+                } else if (Date.now() - genesisSeenAt >= 12000) {
+                  // Channel is confirmed empty: genesis summary and composer observed for at least 12s
                   return true
                 }
               } else {
@@ -492,13 +492,20 @@ export class SlackReaderView {
     // Scroll to bottom to mount newest messages in Slack's virtual list container
     if (isTargetConversation && this.view) {
       await this.adapter.scrollToBottom(this.view)
-      await new Promise((resolve) => setTimeout(resolve, 400))
+      await new Promise((resolve) => setTimeout(resolve, 800))
     }
 
     // Only read messages if we actually reached the target conversation (avoid polluting channels with wrong DM messages)
-    const rawMessages = isTargetConversation
+    let rawMessages = isTargetConversation
       ? await this.adapter.readVisibleMessages(this.view!)
       : []
+
+    // If no messages found on first bottom scroll, retry with secondary settle to give virtual list time
+    if (isTargetConversation && rawMessages.length === 0 && this.view) {
+      await this.adapter.scrollToBottom(this.view)
+      await new Promise((resolve) => setTimeout(resolve, 800))
+      rawMessages = await this.adapter.readVisibleMessages(this.view!)
+    }
     const normalized: DashboardStoredMessage[] = []
 
     for (const raw of rawMessages) {
@@ -564,8 +571,8 @@ export class SlackReaderView {
       const atGenesis = await this.adapter.isAtChannelGenesis(this.view!)
       if (atGenesis && oldest !== null) break
 
-      // If channel is genuinely empty (no messages collected after initial view and retries), break out
-      if (collected.size === 0 && ((atGenesis && scrolls >= 2) || scrolls >= 5)) {
+      // If channel is genuinely empty (no messages collected after bottom settling retries), break out
+      if (collected.size === 0 && ((atGenesis && scrolls >= 4) || scrolls >= 6)) {
         break
       }
 
@@ -579,13 +586,17 @@ export class SlackReaderView {
       })
 
       const prevOldest = oldest
-      canScroll = await this.adapter.scrollUp(this.view!, 800)
-      if (!canScroll) {
-        if (collected.size > 0 || scrolls >= 2) {
+
+      if (collected.size === 0) {
+        // Channel has not mounted messages yet; ensure we are at bottom and allow virtual list to settle
+        await this.adapter.scrollToBottom(this.view!).catch(() => false)
+        canScroll = true
+      } else {
+        // We have bottom messages; scroll up to backfill history towards sinceTs
+        canScroll = await this.adapter.scrollUp(this.view!, 800)
+        if (!canScroll) {
           break
         }
-        // Allow retries when collected.size === 0 on early scroll attempts
-        canScroll = true
       }
 
       // Adaptive settling: if Slack is actively paging older messages, give it dynamic backpressure
@@ -593,6 +604,8 @@ export class SlackReaderView {
       const isPaging = await this.adapter.isPagingMessages(this.view!).catch(() => false)
       if (isPaging) {
         settleMs = 1800
+      } else if (collected.size === 0) {
+        settleMs = 1200
       } else if (zeroProgressRetries > 0) {
         settleMs = Math.min(2200, 1100 + zeroProgressRetries * 250)
       }
@@ -601,11 +614,6 @@ export class SlackReaderView {
       if (signal?.aborted) {
         cancelled = true
         break
-      }
-
-      if (collected.size === 0) {
-        await this.adapter.scrollToBottom(this.view!).catch(() => false)
-        await new Promise((resolve) => setTimeout(resolve, 350))
       }
 
       const raw = await this.adapter.readVisibleMessages(this.view!)
@@ -626,7 +634,7 @@ export class SlackReaderView {
       if (collected.size === 0) {
         zeroProgressRetries++
         const reachedGenesis = await this.adapter.isAtChannelGenesis(this.view!).catch(() => false)
-        if ((reachedGenesis && scrolls >= 2) || zeroProgressRetries >= 6 || scrolls >= 5) {
+        if ((reachedGenesis && scrolls >= 4) || zeroProgressRetries >= 6 || scrolls >= 6) {
           break
         }
       } else {

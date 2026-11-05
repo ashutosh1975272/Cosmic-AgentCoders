@@ -311,6 +311,86 @@ describe('DashboardScheduler', () => {
     scheduler.stop()
   })
 
+  it('triggers incremental scraping every 5 minutes and records runs with metrics', async () => {
+    let mockNow = 1793880000000
+    const source = {
+      id: 'src-test-5min',
+      kind: 'browser',
+      workspaceId: 'T1',
+      workspaceName: 'AgentWork',
+      profileId: 'prof-1',
+      enabled: true,
+      scheduleEnabled: true,
+      scheduleIntervalMinutes: 5 as const,
+      channels: []
+    }
+    const project = {
+      id: 'proj-1',
+      name: 'Ashutosh-Project-01',
+      sources: [source]
+    } as unknown as DashboardProject
+
+    let callCount = 0
+    const syncProjectSource = vi.fn(async () => {
+      callCount++
+      return {
+        runId: `run-call-${callCount}`,
+        channelsRead: 1,
+        newMessages: callCount === 1 ? 5 : 0,
+        status: 'success' as const
+      }
+    })
+
+    const engine = {
+      syncAll: vi.fn(async () => []),
+      syncProjectSource,
+      isSourceRunning: vi.fn(() => false)
+    } as unknown as DashboardSyncEngine
+    const store = new FakeStore({
+      settings: {
+        slackSync: { enabled: false, intervalMinutes: 5 },
+        dailyRecheck: { enabled: false, hour: 9 }
+      }
+    })
+    const scheduler = new DashboardScheduler(engine, store, {
+      now: () => mockNow,
+      listProjects: async () => [project]
+    })
+
+    await scheduler.start()
+    // Initial immediate tick at t=0
+    await vi.advanceTimersByTimeAsync(0)
+    expect(syncProjectSource).toHaveBeenCalledTimes(1)
+    expect(store.data.runs).toHaveLength(2) // 1 slack-sync + 1 agent-analysis (newMessages: 5)
+    expect(store.data.runs[1]).toMatchObject({
+      kind: 'slack-sync',
+      status: 'ok',
+      newMessages: 5
+    })
+    expect(store.data.runs[0]).toMatchObject({
+      kind: 'agent-analysis',
+      status: 'ok',
+      newMessages: 5
+    })
+
+    // Advance 4 minutes (not due yet)
+    mockNow += 4 * 60_000
+    await vi.advanceTimersByTimeAsync(4 * 60_000)
+    expect(syncProjectSource).toHaveBeenCalledTimes(1)
+
+    // Advance 1 more minute (total 5 minutes -> due)
+    mockNow += 1 * 60_000
+    await vi.advanceTimersByTimeAsync(1 * 60_000)
+    expect(syncProjectSource).toHaveBeenCalledTimes(2)
+
+    // Advance another 5 minutes (total 10 minutes -> due again)
+    mockNow += 5 * 60_000
+    await vi.advanceTimersByTimeAsync(5 * 60_000)
+    expect(syncProjectSource).toHaveBeenCalledTimes(3)
+
+    scheduler.stop()
+  })
+
   it('skips paused sources and leaves their last-run stamp alone', async () => {
     const project = {
       id: 'proj-1',
