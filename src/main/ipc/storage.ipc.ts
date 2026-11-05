@@ -12,3 +12,4 @@ export function registerStorageIpc(cleaner: StorageCleanerService): void {
     return cleaner.cleanStorage(payload)
   })
 }
+

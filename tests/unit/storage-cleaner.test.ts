@@ -22,3 +22,4 @@ describe('storage-cleaner unit tests', () => {
     await rm(testDir, { recursive: true, force: true })
   })
 })
+

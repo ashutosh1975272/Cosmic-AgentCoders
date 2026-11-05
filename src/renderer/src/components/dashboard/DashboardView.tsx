@@ -645,14 +645,15 @@ export default function DashboardView(): React.ReactElement | null {
               + New Profile
             </button>
 
-            {/* + New Workspace Button */}
+            {/* + Add Project Button */}
             <button
               type="button"
               className="btn btn-primary"
+              data-testid="btn-add-project"
               onClick={() => setNewProjectModalOpen(true)}
               style={{ fontSize: '13px', padding: '6px 12px' }}
             >
-              + New Workspace
+              + Add Project
             </button>
 
             <div className="segmented" role="group" aria-label="View mode">
@@ -801,18 +802,19 @@ export default function DashboardView(): React.ReactElement | null {
             {filteredEntries.map((entry, index) => renderCard(entry, index, false))}
 
             {projects.length === 0 ? (
-              <div className="empty-state" data-testid="empty-state">
-                <div className="icon" aria-hidden="true">
-                  +
-                </div>
-                <h3>No project cards yet</h3>
-                <p>
-                  Click <strong>New project</strong>. A guided setup walks you through it: create
-                  the Slack app, get the token, pick channels, then sync.
+              <div
+                className="dash-clean-empty"
+                style={{
+                  padding: '48px 16px',
+                  textAlign: 'center',
+                  color: 'var(--text-muted, #94a3b8)',
+                  fontSize: '13px',
+                  gridColumn: '1 / -1'
+                }}
+              >
+                <p style={{ margin: 0, opacity: 0.85 }}>
+                  No projects added yet. Click <strong>+ Add Project</strong> above to create one.
                 </p>
-                <button type="button" className="btn btn-primary" onClick={() => setNewProjectModalOpen(true)}>
-                  New project
-                </button>
               </div>
             ) : filteredEntries.length === 0 ? (
               <p className="dash-filter-empty">Nothing matches this filter.</p>
