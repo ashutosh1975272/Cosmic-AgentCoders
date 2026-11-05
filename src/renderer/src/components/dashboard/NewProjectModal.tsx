@@ -47,6 +47,14 @@ export function NewProjectModal({
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const currentSelectedProfile = useMemo(() => {
+    return (
+      individualProfiles.find((p) => p.id === (selectedProfileId || individualProfiles[0]?.id)) ||
+      individualProfiles[0] ||
+      null
+    )
+  }, [individualProfiles, selectedProfileId])
+
   if (!open) return null
 
   // Virtual project object to pass into CardAddModal so user can select sources
@@ -127,10 +135,6 @@ export function NewProjectModal({
       setCreating(false)
     }
   }
-
-  const currentSelectedProfile = useMemo(() => {
-    return individualProfiles.find((p) => p.id === (selectedProfileId || individualProfiles[0]?.id)) || individualProfiles[0] || null
-  }, [individualProfiles, selectedProfileId])
 
   const modalContent = (
     <div
