@@ -192,6 +192,7 @@ export interface ScrapeRunLog {
   workspaceId: string
   workspaceName: string
   channelsRead: number
+  messagesRead?: number
   newMessages: number
   snippets?: ScrapeRunMessageSnippet[]
   window: ScrapeRunWindow

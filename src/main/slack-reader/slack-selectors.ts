@@ -24,8 +24,9 @@ export const SLACK_SELECTORS = {
   messageListContainer: '[data-qa="slack_kit_list"], .c-virtual_list__scroll_container, [role="list"]',
   messageRow: '[data-qa="message_container"], .c-message_kit__message, .c-virtual_list__item',
   messageSender: '[data-qa="message_sender_name"], .c-message__sender_button',
-  messageTimestamp: '[data-qa="timestamp"], .c-timestamp',
-  messageBody: '[data-qa="message-text"], .c-message_kit__blocks .p-rich_text_section, .p-rich_text_section',
+  messageTimestamp: '[data-qa="timestamp"], .c-timestamp, a.c-timestamp, .c-timestamp__link',
+  messageBody:
+    '[data-qa="message_content"], [data-qa="message-text"], .c-message__body, .c-message_kit__blocks, .p-rich_text_block, .p-rich_text_section, pre.c-mrkdwn__pre',
 
   // Thread elements & flexpane side drawer
   threadReplyButton:

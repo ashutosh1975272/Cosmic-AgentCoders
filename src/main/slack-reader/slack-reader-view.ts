@@ -170,7 +170,7 @@ export class SlackReaderView {
    * If the channel has messages, returns as soon as rows appear.
    * If the channel is genuinely empty, returns true once the composer is mounted and settled.
    */
-  async waitForMessages(timeoutMs = 30000): Promise<boolean> {
+  async waitForMessages(timeoutMs = 30000, expectedChannelId?: string): Promise<boolean> {
     if (!this.view || this.view.webContents.isDestroyed()) return false
     const start = Date.now()
     let composerSeenAt = 0
@@ -186,7 +186,19 @@ export class SlackReaderView {
             (() => {
               const rows = document.querySelectorAll('${SLACK_SELECTORS.messageRow}');
               const composer = document.querySelector('${SLACK_SELECTORS.composerEditor}');
-              return { hasRows: rows.length > 0, rowCount: rows.length, hasComposer: Boolean(composer) };
+              const expectedId = ${JSON.stringify(expectedChannelId || '')};
+              let matchingRows = 0;
+              if (expectedId && rows.length > 0) {
+                rows.forEach(r => {
+                  const link = r.querySelector('a[href*="/archives/"]');
+                  if (!link || (link.getAttribute('href') && link.getAttribute('href').includes('/archives/' + expectedId + '/'))) {
+                    matchingRows++;
+                  }
+                });
+              } else {
+                matchingRows = rows.length;
+              }
+              return { hasRows: matchingRows > 0, rowCount: matchingRows, hasComposer: Boolean(composer) };
             })()
           `, true).catch(() => null)
 
@@ -199,8 +211,8 @@ export class SlackReaderView {
             if (dom.hasComposer) {
               if (!composerSeenAt) {
                 composerSeenAt = Date.now()
-              } else if (Date.now() - composerSeenAt >= 3000) {
-                // Channel is confirmed empty after observing composer for 3 seconds with 0 rows
+              } else if (Date.now() - composerSeenAt >= 4500) {
+                // Channel is confirmed empty after observing composer for 4.5 seconds with 0 rows
                 return true
               }
             }
@@ -295,13 +307,26 @@ export class SlackReaderView {
             (() => {
               const el = document.querySelector('[data-qa-channel-sidebar-channel-id="${channelId}"], a[href*="/${channelId}"]');
               if (el) {
-                el.click();
+                const clickTarget = el.querySelector('a, button, [role="treeitem"]') || el;
+                clickTarget.click();
                 return true;
               }
               return false;
             })()
           `, true)
         )
+        if (switchedViaSidebar) {
+          // Verify URL actually switched within 1.5 seconds
+          const startCheck = Date.now()
+          while (Date.now() - startCheck < 1500) {
+            const url = this.view!.webContents.getURL()
+            if (matchesTargetUrl(url)) break
+            await new Promise((r) => setTimeout(r, 150))
+          }
+          if (!matchesTargetUrl(this.view!.webContents.getURL())) {
+            switchedViaSidebar = false
+          }
+        }
       } catch {
         switchedViaSidebar = false
       }
@@ -318,7 +343,7 @@ export class SlackReaderView {
           }
         }
       }
-      await this.waitForMessages(25000)
+      await this.waitForMessages(25000, channelId)
     } else if (!isStandardSlackId) {
       // If channelId was a slugified name, try to locate and click the corresponding sidebar channel item
       try {
@@ -445,6 +470,11 @@ export class SlackReaderView {
       const atGenesis = await this.adapter.isAtChannelGenesis(this.view!)
       if (atGenesis && oldest !== null) break
 
+      // If channel is genuinely empty (no messages collected after initial view and early scroll), break out
+      if (collected.size === 0 && (atGenesis || scrolls >= 5)) {
+        break
+      }
+
       this.onEvent?.({
         type: 'scroll',
         channelName: channelId,
@@ -483,7 +513,7 @@ export class SlackReaderView {
       }
 
       const newOldest = oldestNumericTs(collected)
-      if (prevOldest !== null && newOldest === prevOldest) {
+      if (newOldest === null || (prevOldest !== null && newOldest === prevOldest)) {
         zeroProgressRetries++
         // Check if we reached true genesis banner before declaring top
         const reachedGenesis = await this.adapter.isAtChannelGenesis(this.view!).catch(() => false)

@@ -229,8 +229,15 @@ export function ScrapeLogExplorer({
                     <span>
                       {run.trigger} · {run.channelsRead} ch
                     </span>
-                    <span style={{ color: run.newMessages > 0 ? '#22c55e' : 'inherit' }}>
-                      +{run.newMessages}
+                    <span>
+                      {typeof run.messagesRead === 'number' && run.messagesRead > 0
+                        ? `${run.messagesRead} read`
+                        : ''}
+                      {run.newMessages > 0 ? (
+                        <span style={{ color: '#22c55e', marginLeft: 4 }}>+{run.newMessages}</span>
+                      ) : (
+                        <span style={{ color: '#64748b', marginLeft: 4 }}>+0</span>
+                      )}
                     </span>
                   </span>
                 </button>
@@ -269,6 +276,14 @@ export function ScrapeLogExplorer({
                 </span>
                 <span>
                   Channels: <b>{activeRun.channelsRead}</b>
+                </span>
+                <span>
+                  Read:{' '}
+                  <b>
+                    {typeof activeRun.messagesRead === 'number'
+                      ? activeRun.messagesRead
+                      : activeRun.channels.reduce((sum, ch) => sum + (ch.messagesRead || 0), 0)}
+                  </b>
                 </span>
                 <span>
                   New: <b>{activeRun.newMessages}</b>

@@ -1053,6 +1053,7 @@ export class DashboardSyncEngine {
 
       const finishedAt = new Date().toISOString()
       const readChannels = channels.filter((ch) => ch.status === 'read' || ch.status === 'empty')
+      const totalMessagesRead = channels.reduce((sum, ch) => sum + (ch.messagesRead || 0), 0)
       const entry: ScrapeRunLog = {
         runId,
         ts: finishedAt,
@@ -1065,6 +1066,7 @@ export class DashboardSyncEngine {
         workspaceId: source.workspaceId,
         workspaceName: effectiveWorkspaceName,
         channelsRead: readChannels.length,
+        messagesRead: totalMessagesRead,
         newMessages,
         snippets: snippets.slice(0, 20),
         window: {

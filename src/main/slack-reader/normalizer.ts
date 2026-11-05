@@ -64,8 +64,37 @@ export function normalizeSlackTimestamp(rawTs?: string | number): string | null 
       return `${pMatch[1]}.${pMatch[2]}`
     }
 
-    // Try parsing ISO/date string
-    const parsed = Date.parse(trimmed)
+    // Embedded 10-digit epoch seconds in string (e.g. data-item-key with prefix/suffix)
+    const embeddedMatch = trimmed.match(/(?:^|[^\d])(\d{10}(?:\.\d+)?)(?:[^\d]|$)/)
+    if (embeddedMatch) {
+      const val = embeddedMatch[1]
+      return val.includes('.') ? val : `${val}.000000`
+    }
+
+    // Slack humanized dates (e.g. "Today at 2:35 PM", "Yesterday at 4:15 PM")
+    const lower = trimmed.toLowerCase()
+    if (lower.startsWith('today') || lower.startsWith('yesterday')) {
+      const now = new Date()
+      if (lower.startsWith('yesterday')) {
+        now.setDate(now.getDate() - 1)
+      }
+      const timePart = trimmed.replace(/^(?:today|yesterday)\s*(?:at\s*)?/i, '').trim()
+      const timeMatch = timePart.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?$/i)
+      if (timeMatch) {
+        let hours = parseInt(timeMatch[1], 10)
+        const minutes = parseInt(timeMatch[2], 10)
+        const seconds = timeMatch[3] ? parseInt(timeMatch[3], 10) : 0
+        const meridiem = (timeMatch[4] || '').toUpperCase()
+        if (meridiem === 'PM' && hours < 12) hours += 12
+        if (meridiem === 'AM' && hours === 12) hours = 0
+        now.setHours(hours, minutes, seconds, 0)
+        return (now.getTime() / 1000).toFixed(6)
+      }
+    }
+
+    // Try parsing date string with ordinal suffix stripped (e.g. "November 4th, 2026 at 2:35 PM")
+    const cleanDateStr = trimmed.replace(/(\d+)(st|nd|rd|th)/gi, '$1').replace(/\bat\b/gi, ' ')
+    const parsed = Date.parse(cleanDateStr)
     if (!Number.isNaN(parsed) && parsed > 0) {
       return (parsed / 1000).toFixed(6)
     }

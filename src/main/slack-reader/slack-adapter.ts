@@ -146,14 +146,31 @@ export function buildReadVisibleMessagesScript(sinceTs = 0): string {
   const floor = Number.isFinite(sinceTs) && sinceTs > 0 ? sinceTs : 0
   return `
 (function() {
-  const rows = document.querySelectorAll('${SLACK_SELECTORS.messageRow}');
+  const container = document.querySelector('${SLACK_SELECTORS.messageListContainer}') || document.body;
+  const elements = container.querySelectorAll('${SLACK_SELECTORS.messageRow}, .c-message_list__day_divider, [data-qa="day_divider"], [role="separator"]');
   const results = [];
   let lastAuthor = null;
+  let currentDateContext = '';
   const sinceTs = ${floor};
 
-  rows.forEach((row) => {
+  elements.forEach((el) => {
+    // Check if this is a day divider
+    if (el.matches('.c-message_list__day_divider, [data-qa="day_divider"], [role="separator"]') || el.classList.contains('c-message_list__day_divider')) {
+      const labelEl = el.querySelector('.c-message_list__day_divider__label__pill, [data-qa="day_divider_label"]') || el;
+      const dateText = (labelEl.textContent || '').trim();
+      if (dateText) {
+        currentDateContext = dateText;
+      }
+      return;
+    }
+
+    const row = el;
     const senderEl = row.querySelector('${SLACK_SELECTORS.messageSender}');
     const tsEl = row.querySelector('${SLACK_SELECTORS.messageTimestamp}');
+    const tsAnchor =
+      (tsEl && tsEl.tagName === 'A' ? tsEl : null) ||
+      (tsEl ? tsEl.closest('a') || tsEl.querySelector('a') : null) ||
+      row.querySelector('a.c-timestamp, [data-qa="timestamp"] a, .c-timestamp__link');
     const bodyEl = row.querySelector('${SLACK_SELECTORS.messageBody}');
 
     // If an author header exists on this row, update lastAuthor
@@ -164,9 +181,8 @@ export function buildReadVisibleMessagesScript(sinceTs = 0): string {
       }
     }
 
-    // Extract permalink if present
-    const permalinkEl = row.querySelector('a[href*="/archives/"]');
-    const permalink = permalinkEl ? permalinkEl.getAttribute('href') : '';
+    // Extract permalink if present specifically on timestamp anchor
+    const permalink = tsAnchor ? (tsAnchor.getAttribute('href') || '') : '';
 
     // Extract exact timestamp from data-ts, data-item-key, archives permalink, or ts element
     let pTs = '';
@@ -178,12 +194,30 @@ export function buildReadVisibleMessagesScript(sinceTs = 0): string {
       }
     }
 
+    let keyTs = '';
+    const itemKey = row.getAttribute('data-item-key') || (row.closest('.c-virtual_list__item') ? row.closest('.c-virtual_list__item').getAttribute('data-item-key') : '') || '';
+    if (itemKey) {
+      const match = itemKey.match(/(\\d{10}(?:\\.\\d+)?)/);
+      if (match) {
+        keyTs = match[1];
+      }
+    }
+
     let rawTs =
       (tsEl ? tsEl.getAttribute('data-ts') : '') ||
-      (row.getAttribute('data-item-key') && row.getAttribute('data-item-key').length >= 10 ? row.getAttribute('data-item-key') : '') ||
       (row.getAttribute('data-ts') || '') ||
+      keyTs ||
       pTs ||
-      (tsEl ? (tsEl.getAttribute('datetime') || tsEl.textContent.trim()) : '');
+      (tsEl ? (tsEl.getAttribute('aria-label') || tsEl.getAttribute('title') || tsEl.getAttribute('datetime') || '') : '');
+
+    if (!rawTs && tsEl) {
+      const timeText = (tsEl.textContent || '').trim();
+      if (timeText) {
+        rawTs = currentDateContext && !timeText.includes(currentDateContext) ? (currentDateContext + ' at ' + timeText) : timeText;
+      }
+    } else if (rawTs && currentDateContext && /^\\d{1,2}:\\d{2}/.test(rawTs) && !rawTs.includes(currentDateContext)) {
+      rawTs = currentDateContext + ' at ' + rawTs;
+    }
 
     const sender = lastAuthor || 'Anonymous';
 
