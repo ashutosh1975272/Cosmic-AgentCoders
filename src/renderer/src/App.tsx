@@ -388,7 +388,7 @@ function App(): React.JSX.Element {
   const splitOn =
     settings.splitViewEnabled && Boolean(splitSecondary) && !browserAuthBusy && !locked
   // Keep embed mounted for WhatsApp QR even while status is signing-in / not yet linked.
-  // Hide native WebContentsViews while HTML overlays (settings / cmdk / onboarding) are open
+  // Hide native WebContentsViews while HTML overlays (settings / cmdk / onboarding / modals) are open
   // — otherwise they paint above the renderer and block the modal.
   const showEmbed = Boolean(
     adminAuthenticated &&
@@ -405,7 +405,12 @@ function App(): React.JSX.Element {
     !platformSettings &&
     !addPlatformOpen &&
     !accountsModalOpen &&
-    !showOnboarding
+    !showOnboarding &&
+    !newProjectModalOpen &&
+    !newProfileModalOpen &&
+    !cardPickerOpen &&
+    !cardAddProject &&
+    !sidebarDeleteTarget
   )
 
   useEffect(() => {
@@ -1204,9 +1209,13 @@ function App(): React.JSX.Element {
           onClose={() => setNewProjectModalOpen(false)}
           onSuccess={(projectId) => {
             setNewProjectModalOpen(false)
-            const p = useDashboardStore.getState().snapshot?.projects.find((proj) => proj.project.id === projectId)
-            const pProfileId = p?.project.profileId || 'all'
-            useDashboardStore.getState().setCosmicNavigation(pProfileId, projectId)
+            if (isBasicActive) {
+              useDashboardStore.getState().setBasicNavigation(projectId, 'dashboard')
+            } else {
+              const p = useDashboardStore.getState().snapshot?.projects.find((proj) => proj.project.id === projectId)
+              const pProfileId = p?.project.profileId || 'all'
+              useDashboardStore.getState().setCosmicNavigation(pProfileId, projectId)
+            }
             useProfileStore.getState().clearActiveApp()
           }}
           showLinkedAccounts={settings.showNewProjectLinkedAccounts ?? false}

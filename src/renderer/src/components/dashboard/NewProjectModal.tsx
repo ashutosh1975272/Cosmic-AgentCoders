@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useProfileStore } from '../../hooks/useProfiles'
 import { useDashboardStore } from '../../hooks/useDashboard'
 import { isIndividualProfile } from '../../../../shared/types'
@@ -54,6 +54,17 @@ export function NewProjectModal({
       null
     )
   }, [individualProfiles, selectedProfileId])
+
+  // Suspend native WebContentsView (Slack / Teams / WhatsApp embeds) while modal is open
+  useEffect(() => {
+    if (open && !embedded) {
+      void window.api?.profiles?.setEmbedVisible?.(false)
+      return () => {
+        void window.api?.profiles?.setEmbedVisible?.(true)
+      }
+    }
+    return undefined
+  }, [open, embedded])
 
   if (!open) return null
 
