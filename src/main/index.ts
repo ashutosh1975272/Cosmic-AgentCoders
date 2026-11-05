@@ -21,6 +21,8 @@ import { registerProfileIpc } from './ipc/profiles.ipc'
 import { registerSlackDataIpc } from './ipc/slack-data.ipc'
 import { registerDashboardIpc } from './ipc/dashboard.ipc'
 import { registerLogsIpc } from './ipc/logs.ipc'
+import { registerStorageIpc } from './ipc/storage.ipc'
+import { StorageCleanerService } from './storage/storage-cleaner'
 import { DashboardDeltaStore } from './dashboard/delta-store'
 import { MonitorStore } from './dashboard/monitor-store'
 import { WorkspaceMappingStore } from './dashboard/workspace-mapping-store'
@@ -807,6 +809,8 @@ if (!gotSingleInstanceLock) {
     })()
     dashboardScheduler.start()
     registerLogsIpc()
+    const storageCleaner = new StorageCleanerService(profileStore, dashboardMonitorStore)
+    registerStorageIpc(storageCleaner)
     registerAppIpc({
       settingsStore,
       lock,

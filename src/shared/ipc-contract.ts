@@ -232,7 +232,10 @@ export const IpcChannels = {
   DashboardDeleteDocument: 'dashboard:delete-document',
   DashboardStartWatchLive: 'dashboard:start-watch-live',
   DashboardStopWatchLive: 'dashboard:stop-watch-live',
-  DashboardScrapeEvent: 'dashboard:scrape-event'
+  DashboardScrapeEvent: 'dashboard:scrape-event',
+
+  StorageGetSummary: 'storage:get-summary',
+  StorageClean: 'storage:clean'
 } as const
 
 export type IpcChannel = (typeof IpcChannels)[keyof typeof IpcChannels]
@@ -594,6 +597,10 @@ export interface IpcApi {
     ) => Promise<void>
     onLogEntry: (callback: (entry: LogEntry) => void) => () => void
   }
+  storage: {
+    getSummary: () => Promise<StorageSummaryResult>
+    clean: (payload: CleanStoragePayload) => Promise<CleanStorageResult>
+  }
 }
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'security'
@@ -678,3 +685,35 @@ export type {
   WorkspacePayload,
   WorkspaceThemePayload
 }
+
+export interface PartitionStorageInfo {
+  id: string
+  partitionName: string
+  label: string
+  type: 'global' | 'profile' | 'card' | 'custom_link' | 'orphaned'
+  ownerName?: string
+  totalSizeBytes: number
+  cacheSizeBytes: number
+  hasSession: boolean
+}
+
+export interface StorageSummaryResult {
+  totalDiskUsageBytes: number
+  totalCacheUsageBytes: number
+  orphanedCount: number
+  partitions: PartitionStorageInfo[]
+}
+
+export interface CleanStoragePayload {
+  mode: 'safe_cache_only' | 'full_reset'
+  partitionIds?: string[]
+  removeOrphaned?: boolean
+}
+
+export interface CleanStorageResult {
+  ok: boolean
+  freedBytes: number
+  cleanedCount: number
+  error?: string
+}
+

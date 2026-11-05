@@ -488,6 +488,11 @@ const api: IpcApi = {
       ipcRenderer.on(IpcChannels.LogsOnEntry, listener)
       return () => ipcRenderer.removeListener(IpcChannels.LogsOnEntry, listener)
     }
+  },
+  storage: {
+    getSummary: () => ipcRenderer.invoke(IpcChannels.StorageGetSummary),
+    clean: (payload: import('../shared/ipc-contract').CleanStoragePayload) =>
+      ipcRenderer.invoke(IpcChannels.StorageClean, payload)
   }
 }
 

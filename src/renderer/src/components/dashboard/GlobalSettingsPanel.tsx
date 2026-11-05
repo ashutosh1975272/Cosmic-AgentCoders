@@ -5,6 +5,7 @@ import type {
 } from '../../../../shared/dashboard-contract'
 import AiSettingsForm from './AiSettingsForm'
 import TeamSlackSettings from './TeamSlackSettings'
+import StorageCleanerPanel from './StorageCleanerPanel'
 
 interface GlobalSettingsPanelProps {
   open: boolean
@@ -98,6 +99,17 @@ export default function GlobalSettingsPanel({
             </p>
           </div>
           <AiSettingsForm />
+        </section>
+
+        <section className="ws-settings-section global-settings-section">
+          <div className="ws-settings-head">
+            <h4>3. Storage &amp; Cache Cleaner</h4>
+            <p>
+              Inspect global sessions, profiles, and card partitions. Safely purge temporary HTTP,
+              V8 code, and service worker caches without losing logins.
+            </p>
+          </div>
+          <StorageCleanerPanel />
         </section>
 
         <section className="ws-settings-section global-settings-section">
