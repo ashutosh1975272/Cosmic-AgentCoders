@@ -186,19 +186,27 @@ export class SlackReaderView {
             (() => {
               const rows = document.querySelectorAll('${SLACK_SELECTORS.messageRow}');
               const composer = document.querySelector('${SLACK_SELECTORS.composerEditor}');
+              const isPaging = Boolean(document.querySelector('.c-message_list__loading_spinner, [data-qa="loading_spinner"]'));
               const expectedId = ${JSON.stringify(expectedChannelId || '')};
+              const url = window.location.href;
+              const isTargetUrl = !expectedId || url.includes('/' + expectedId);
               let matchingRows = 0;
               if (expectedId && rows.length > 0) {
                 rows.forEach(r => {
-                  const link = r.querySelector('a[href*="/archives/"]');
-                  if (!link || (link.getAttribute('href') && link.getAttribute('href').includes('/archives/' + expectedId + '/'))) {
+                  const link = r.querySelector('a.c-timestamp, [data-qa="timestamp"] a, .c-timestamp__link, a[href*="/archives/"]');
+                  if (link && link.getAttribute('href')) {
+                    const href = link.getAttribute('href');
+                    if (href.includes('/archives/' + expectedId + '/') || href.includes('/' + expectedId)) {
+                      matchingRows++;
+                    }
+                  } else if (isTargetUrl) {
                     matchingRows++;
                   }
                 });
               } else {
                 matchingRows = rows.length;
               }
-              return { hasRows: matchingRows > 0, rowCount: matchingRows, hasComposer: Boolean(composer) };
+              return { isTargetUrl, hasRows: matchingRows > 0, rowCount: matchingRows, hasComposer: Boolean(composer), isPaging };
             })()
           `, true).catch(() => null)
 
@@ -208,13 +216,15 @@ export class SlackReaderView {
               return true
             }
 
-            if (dom.hasComposer) {
+            if (dom.isTargetUrl && dom.hasComposer && !dom.isPaging) {
               if (!composerSeenAt) {
                 composerSeenAt = Date.now()
-              } else if (Date.now() - composerSeenAt >= 4500) {
-                // Channel is confirmed empty after observing composer for 4.5 seconds with 0 rows
+              } else if (Date.now() - composerSeenAt >= 7000) {
+                // Channel is confirmed empty after observing composer for at least 7 seconds with 0 rows and no spinner
                 return true
               }
+            } else {
+              composerSeenAt = 0
             }
           }
         }
@@ -269,7 +279,7 @@ export class SlackReaderView {
       } catch (err: any) {
         if (!err.message?.includes('ERR_ABORTED')) throw err
       }
-      await this.waitForMessages(25000)
+      await this.waitForMessages(25000, channelId)
     }
 
     const state = await this.checkState()
@@ -307,7 +317,7 @@ export class SlackReaderView {
             (() => {
               const el = document.querySelector('[data-qa-channel-sidebar-channel-id="${channelId}"], a[href*="/${channelId}"]');
               if (el) {
-                const clickTarget = el.querySelector('a, button, [role="treeitem"]') || el;
+                const clickTarget = el.querySelector('a') || el.querySelector('button') || el;
                 clickTarget.click();
                 return true;
               }
@@ -316,9 +326,9 @@ export class SlackReaderView {
           `, true)
         )
         if (switchedViaSidebar) {
-          // Verify URL actually switched within 1.5 seconds
+          // Verify URL actually switched within 2 seconds
           const startCheck = Date.now()
-          while (Date.now() - startCheck < 1500) {
+          while (Date.now() - startCheck < 2000) {
             const url = this.view!.webContents.getURL()
             if (matchesTargetUrl(url)) break
             await new Promise((r) => setTimeout(r, 150))
@@ -512,17 +522,25 @@ export class SlackReaderView {
         if (collected.size >= maxMessages) break
       }
 
-      const newOldest = oldestNumericTs(collected)
-      if (newOldest === null || (prevOldest !== null && newOldest === prevOldest)) {
+      if (collected.size === 0) {
         zeroProgressRetries++
-        // Check if we reached true genesis banner before declaring top
         const reachedGenesis = await this.adapter.isAtChannelGenesis(this.view!).catch(() => false)
-        if (reachedGenesis || zeroProgressRetries >= 8) {
-          // If 8 consecutive scroll attempts yield no earlier messages or genesis reached, top reached
+        if (reachedGenesis || zeroProgressRetries >= 6 || scrolls >= 5) {
           break
         }
       } else {
-        zeroProgressRetries = 0
+        const newOldest = oldestNumericTs(collected)
+        if (prevOldest !== null && newOldest === prevOldest) {
+          zeroProgressRetries++
+          // Check if we reached true genesis banner before declaring top
+          const reachedGenesis = await this.adapter.isAtChannelGenesis(this.view!).catch(() => false)
+          if (reachedGenesis || zeroProgressRetries >= 8) {
+            // If 8 consecutive scroll attempts yield no earlier messages or genesis reached, top reached
+            break
+          }
+        } else {
+          zeroProgressRetries = 0
+        }
       }
       scrolls++
     }

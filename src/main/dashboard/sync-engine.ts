@@ -923,7 +923,7 @@ export class DashboardSyncEngine {
         // Subsequent scrapes read incrementally from cursor with a 120s safety buffer.
         const isGenesis = options?.forceGenesis === true || requestedDays === 0
         const isCustomDays = typeof requestedDays === 'number' && requestedDays > 0
-        const isThirtyDays = !cursor || options?.force30Days === true
+        const isThirtyDays = options?.force30Days === true
 
         let sinceTs: number
         if (isGenesis) {
@@ -932,6 +932,8 @@ export class DashboardSyncEngine {
           sinceTs = Math.floor(Date.now() / 1000) - requestedDays * 86400
         } else if (isThirtyDays) {
           sinceTs = thirtyDaysAgoTs
+        } else if (!cursor) {
+          sinceTs = backfillHours > 0 ? floorTs : thirtyDaysAgoTs
         } else {
           sinceTs = Math.max(catchUpFloorTs, cursor - 120)
         }
@@ -1126,8 +1128,8 @@ export class DashboardSyncEngine {
           status === 'error'
             ? `Scrape stopped: ${runError ?? 'error'}`
             : status === 'stopped'
-              ? `Scrape cancelled. ${newMessages} new messages kept from completed channels.`
-              : `Scraped ${readChannels.length} channels. ${newMessages} new messages captured.${
+              ? `Scrape cancelled. ${totalMessagesRead} messages read (${newMessages} new kept from completed channels).`
+              : `Scraped ${readChannels.length} channels (${totalMessagesRead} read, ${newMessages} new).${
                   gapSeconds > 0 ? ` History gap: ${gapSeconds}s.` : ''
                 }`
       })

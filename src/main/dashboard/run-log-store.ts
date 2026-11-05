@@ -92,10 +92,7 @@ function normalizeEntry(raw: unknown): ScrapeRunLog | null {
     workspaceName:
       typeof r.workspaceName === 'string' ? r.workspaceName : String(r.workspaceId ?? ''),
     channelsRead: Number(r.channelsRead ?? channels.length),
-    messagesRead:
-      typeof r.messagesRead === 'number'
-        ? r.messagesRead
-        : channels.reduce((sum, ch) => sum + (ch.messagesRead || 0), 0),
+    messagesRead: Number(r.messagesRead ?? channels.reduce((sum, ch) => sum + (ch.messagesRead ?? 0), 0)),
     newMessages: Number(r.newMessages ?? 0),
     snippets,
     window:

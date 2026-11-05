@@ -50,7 +50,12 @@ export function normalizeSlackTimestamp(rawTs?: string | number): string | null 
 
     // Exact Slack numeric timestamp format: 10+ digits with optional decimal fraction
     if (/^\d{10}(?:\.\d+)?$/.test(trimmed)) {
-      return trimmed.includes('.') ? trimmed : `${trimmed}.000000`
+      const parts = trimmed.split('.')
+      if (parts.length === 2) {
+        const frac = parts[1].padEnd(6, '0').slice(0, 6)
+        return `${parts[0]}.${frac}`
+      }
+      return `${parts[0]}.000000`
     }
 
     // Epoch milliseconds in string
@@ -68,7 +73,26 @@ export function normalizeSlackTimestamp(rawTs?: string | number): string | null 
     const embeddedMatch = trimmed.match(/(?:^|[^\d])(\d{10}(?:\.\d+)?)(?:[^\d]|$)/)
     if (embeddedMatch) {
       const val = embeddedMatch[1]
-      return val.includes('.') ? val : `${val}.000000`
+      const parts = val.split('.')
+      if (parts.length === 2) {
+        const frac = parts[1].padEnd(6, '0').slice(0, 6)
+        return `${parts[0]}.${frac}`
+      }
+      return `${parts[0]}.000000`
+    }
+
+    // Time-only string (e.g. "02:35 PM", "2:35 PM", "14:35")
+    const timeOnlyMatch = trimmed.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?$/i)
+    if (timeOnlyMatch) {
+      const now = new Date()
+      let hours = parseInt(timeOnlyMatch[1], 10)
+      const minutes = parseInt(timeOnlyMatch[2], 10)
+      const seconds = timeOnlyMatch[3] ? parseInt(timeOnlyMatch[3], 10) : 0
+      const meridiem = (timeOnlyMatch[4] || '').toUpperCase()
+      if (meridiem === 'PM' && hours < 12) hours += 12
+      if (meridiem === 'AM' && hours === 12) hours = 0
+      now.setHours(hours, minutes, seconds, 0)
+      return (now.getTime() / 1000).toFixed(6)
     }
 
     // Slack humanized dates (e.g. "Today at 2:35 PM", "Yesterday at 4:15 PM")
@@ -93,10 +117,22 @@ export function normalizeSlackTimestamp(rawTs?: string | number): string | null 
     }
 
     // Try parsing date string with ordinal suffix stripped (e.g. "November 4th, 2026 at 2:35 PM")
-    const cleanDateStr = trimmed.replace(/(\d+)(st|nd|rd|th)/gi, '$1').replace(/\bat\b/gi, ' ')
-    const parsed = Date.parse(cleanDateStr)
-    if (!Number.isNaN(parsed) && parsed > 0) {
-      return (parsed / 1000).toFixed(6)
+    let cleanDateStr = trimmed.replace(/(\d+)(st|nd|rd|th)/gi, '$1').replace(/\bat\b/gi, ' ')
+    const hasMonthOrTime = /(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{1,2}:\d{2})/i.test(cleanDateStr)
+    if (hasMonthOrTime) {
+      if (!/\b20\d{2}\b/.test(cleanDateStr)) {
+        const currentYear = new Date().getFullYear()
+        const timeIdx = cleanDateStr.search(/\b\d{1,2}:\d{2}/)
+        if (timeIdx !== -1) {
+          cleanDateStr = `${cleanDateStr.slice(0, timeIdx)}${currentYear} ${cleanDateStr.slice(timeIdx)}`.trim()
+        } else {
+          cleanDateStr = `${cleanDateStr} ${currentYear}`
+        }
+      }
+      const parsed = Date.parse(cleanDateStr)
+      if (!Number.isNaN(parsed) && parsed > 0) {
+        return (parsed / 1000).toFixed(6)
+      }
     }
   }
 

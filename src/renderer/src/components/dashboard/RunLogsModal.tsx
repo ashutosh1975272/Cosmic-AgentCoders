@@ -225,21 +225,23 @@ export function ScrapeLogExplorer({
                     {showProjectColumn ? `${run.projectName} · ` : ''}
                     {run.workspaceName}
                   </span>
-                  <span style={{ fontSize: 11, color: '#64748b', display: 'flex', justifyContent: 'space-between' }}>
-                    <span>
-                      {run.trigger} · {run.channelsRead} ch
-                    </span>
-                    <span>
-                      {typeof run.messagesRead === 'number' && run.messagesRead > 0
-                        ? `${run.messagesRead} read`
-                        : ''}
-                      {run.newMessages > 0 ? (
-                        <span style={{ color: '#22c55e', marginLeft: 4 }}>+{run.newMessages}</span>
-                      ) : (
-                        <span style={{ color: '#64748b', marginLeft: 4 }}>+0</span>
-                      )}
-                    </span>
-                  </span>
+                  {(() => {
+                    const totalRead =
+                      run.messagesRead ??
+                      (Array.isArray(run.channels)
+                        ? run.channels.reduce((sum, ch) => sum + (ch.messagesRead || 0), 0)
+                        : 0)
+                    return (
+                      <span style={{ fontSize: 11, color: '#64748b', display: 'flex', justifyContent: 'space-between' }}>
+                        <span>
+                          {run.trigger} · {run.channelsRead} ch · {totalRead} read
+                        </span>
+                        <span style={{ color: run.newMessages > 0 ? '#22c55e' : 'inherit' }}>
+                          {run.newMessages > 0 ? `+${run.newMessages}` : '+0'}
+                        </span>
+                      </span>
+                    )
+                  })()}
                 </button>
               )
             })
@@ -355,7 +357,9 @@ export function ScrapeLogExplorer({
                               {channel.kind === 'dm' ? '💬' : channel.kind === 'private' ? '🔒' : '#'}{' '}
                               {channel.channelName}
                             </span>
-                            <span style={{ color: '#64748b' }}>{channel.messagesRead}</span>
+                            <span style={{ color: '#64748b', fontSize: 11 }}>
+                              {channel.messagesRead} read{channel.newMessages > 0 ? ` (+${channel.newMessages})` : ''}
+                            </span>
                           </span>
                           <span style={{ fontSize: 10, color: '#64748b' }}>
                             {channelKindLabel(channel.kind)} · {channel.status}
