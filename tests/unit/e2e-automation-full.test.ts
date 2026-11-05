@@ -472,6 +472,31 @@ describe('[L5] SlackReaderView', () => {
     expect(view.webContents.loadURL).toHaveBeenCalledWith('https://app.slack.com/client/T123/C999')
   })
 
+  it('readChannelMessages heals pending workspaceId and matches currentUrl containing channelId', async () => {
+    let url = 'https://app.slack.com/client/TREAL123/C999'
+    const view = makeMockView({ url })
+    view.webContents.getURL = () => url
+    view.webContents.loadURL = vi.fn().mockImplementation((newUrl: string) => {
+      url = newUrl
+      return Promise.resolve()
+    })
+    view.webContents.executeJavaScript = vi.fn().mockImplementation((code: string) => {
+      if (code.includes('hasRows')) return Promise.resolve({ hasRows: true, hasComposer: true })
+      if (url.includes('slack.com')) return Promise.resolve('logged_in')
+      return Promise.resolve('unknown')
+    })
+    const reader = new SlackReaderView({
+      profileId: 'p-heal',
+      workspaceId: 'pending-proj-123',
+      existingView: view as any
+    })
+    const msgs = await reader.readChannelMessages('C999')
+    // Successfully extracted without failing target safety check
+    expect(msgs).toBeDefined()
+    // It should have resolved workspaceId from URL TREAL123 and not loaded URL because it already matches target C999
+    expect(view.webContents.loadURL).not.toHaveBeenCalled()
+  })
+
   it('destroy does not destroy a borrowed view', () => {
     const view = makeMockView({ jsResult: 'logged_in' })
     const reader = new SlackReaderView({

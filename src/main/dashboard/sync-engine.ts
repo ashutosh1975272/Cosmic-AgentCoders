@@ -697,6 +697,20 @@ export class DashboardSyncEngine {
     deltas: DashboardChannelDelta[]
   }> {
     const empty = { runId: '', channelsRead: 0, newMessages: 0, deltas: [] as DashboardChannelDelta[] }
+    // Auto-heal workspaceId if pending or missing and project has a real teamId
+    if (
+      (!source.workspaceId || source.workspaceId.startsWith('pending-')) &&
+      project.teamId &&
+      !project.teamId.startsWith('pending-')
+    ) {
+      source.workspaceId = project.teamId
+      await this.mergeSource(project.id, source.id, (current) => ({
+        ...current,
+        workspaceId: project.teamId,
+        updatedAt: new Date().toISOString()
+      }))
+    }
+
     if (!source.profileId || !source.workspaceId) {
       return { ...empty, status: 'error', error: 'Source has no profile/workspace' }
     }

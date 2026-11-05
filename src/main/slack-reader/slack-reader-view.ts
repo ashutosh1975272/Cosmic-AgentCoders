@@ -75,7 +75,7 @@ export class SlackReaderView {
   private isBorrowedView = false
   private readonly adapter = new SlackAdapter()
   private readonly profileId: string
-  private readonly workspaceId: string
+  private workspaceId: string
   private readonly projectId?: string
   private readonly onEvent?: (event: ScrapeStepEvent) => void
 
@@ -238,8 +238,17 @@ export class SlackReaderView {
   async readChannelMessages(channelId: string): Promise<DashboardStoredMessage[]> {
     if (!this.view) await this.initialize()
 
-    const channelUrl = `https://app.slack.com/client/${this.workspaceId}/${channelId}`
     let currentUrl = this.view!.webContents.getURL()
+
+    // If workspaceId is pending or differs from authentic Slack client URL, resolve it from currentUrl
+    const initialTeamMatch = currentUrl.match(/\/client\/([A-Z0-9]+)/)
+    if (initialTeamMatch && (this.workspaceId.startsWith('pending-') || !this.workspaceId)) {
+      this.workspaceId = initialTeamMatch[1]
+    }
+
+    const channelUrl = this.workspaceId.startsWith('pending-')
+      ? `https://app.slack.com/client`
+      : `https://app.slack.com/client/${this.workspaceId}/${channelId}`
 
     // If the view is unnavigated (e.g. fresh background view at about:blank), navigate immediately to the channel
     if (!currentUrl.includes('slack.com')) {
@@ -259,6 +268,12 @@ export class SlackReaderView {
 
     currentUrl = this.view!.webContents.getURL()
 
+    // If workspaceId is pending or differs from authentic Slack client URL, resolve it from currentUrl
+    const urlTeamMatch = currentUrl.match(/\/client\/([A-Z0-9]+)/)
+    if (urlTeamMatch && (this.workspaceId.startsWith('pending-') || !this.workspaceId || this.workspaceId !== urlTeamMatch[1])) {
+      this.workspaceId = urlTeamMatch[1]
+    }
+
     this.onEvent?.({
       type: 'navigate',
       channelName: channelId,
@@ -268,7 +283,10 @@ export class SlackReaderView {
     // If channelId is a standard Slack ID (C... for public, G... for private, D... for DM), direct URL navigation works best.
     const isStandardSlackId = /^[CGD][A-Z0-9]{8,12}$/.test(channelId)
 
-    if (isStandardSlackId && !currentUrl.includes(`/${this.workspaceId}/${channelId}`)) {
+    const matchesTargetUrl = (url: string) =>
+      url.includes(`/${this.workspaceId}/${channelId}`) || url.includes(`/${channelId}`)
+
+    if (isStandardSlackId && !matchesTargetUrl(currentUrl)) {
       // First try switching channel instantly via sidebar link/treeitem to avoid slow full-page reload
       let switchedViaSidebar = false
       try {
@@ -290,7 +308,7 @@ export class SlackReaderView {
 
       if (!switchedViaSidebar) {
         try {
-          await this.view!.webContents.loadURL(channelUrl)
+          await this.view!.webContents.loadURL(`https://app.slack.com/client/${this.workspaceId}/${channelId}`)
         } catch (err: any) {
           // Chromium throws ERR_ABORTED (-3) if Slack's SPA client redirect intervenes.
           // If the URL actually navigated or contains the channel, this is non-fatal.
@@ -331,7 +349,7 @@ export class SlackReaderView {
 
     // Safety check: ensure we didn't land on a completely different conversation (e.g. redirected fallback DM)
     const isTargetConversation = isStandardSlackId
-      ? currentUrl.includes(`/${this.workspaceId}/${channelId}`)
+      ? matchesTargetUrl(currentUrl)
       : true
 
     this.onEvent?.({
@@ -555,8 +573,10 @@ export class SlackReaderView {
 
     const channelUrl = `https://app.slack.com/client/${this.workspaceId}/${channelId}`
     const currentUrl = this.view!.webContents.getURL()
+    const matchesTargetUrl =
+      currentUrl.includes(`/${this.workspaceId}/${channelId}`) || currentUrl.includes(`/${channelId}`)
 
-    if (!currentUrl.includes(`/${this.workspaceId}/${channelId}`)) {
+    if (!matchesTargetUrl) {
       await this.view!.webContents.loadURL(channelUrl)
       await new Promise((resolve) => setTimeout(resolve, 3000))
     }
