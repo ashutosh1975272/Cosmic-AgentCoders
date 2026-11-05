@@ -19,6 +19,7 @@ import { requestMessageJump } from './jump-to-message'
 import SchedulesPage from './SchedulesPage'
 import { AppIcon } from '../AppIcon'
 import { SourceChannelPicker } from './SourceChannelPicker'
+import { WorkspaceControlModal } from './WorkspaceControlModal'
 import { useProfileStore } from '../../hooks/useProfiles'
 import { useDashboardStore } from '../../hooks/useDashboard'
 import { BASE_APP_PRESETS } from '../../../../shared/base-app-presets'
@@ -125,6 +126,7 @@ export default function WorkspaceContent({
   const [slackViewMode, setSlackViewMode] = useState<'messages' | 'live'>('live')
   const [cardAuthenticated, setCardAuthenticated] = useState<boolean | null>(null)
   const [channelPickerSourceId, setChannelPickerSourceId] = useState<string | null>(null)
+  const [controlSource, setControlSource] = useState<ProjectSource | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -150,22 +152,14 @@ export default function WorkspaceContent({
     if (!scheduled) onSelect('m:project')
   }, [nav.selection, project.sources, onSelect])
 
-  const unreviewedSource = useMemo(
-    () =>
-      (project.sources ?? []).find(
-        (source) =>
-          source.kind === 'browser' && source.enabled !== false && !source.channelsReviewedAt
-      ) ?? null,
-    [project.sources]
-  )
 
   useEffect(() => {
-    if (channelPickerSourceId) {
+    if (channelPickerSourceId || controlSource) {
       void window.api?.profiles?.setEmbedVisible?.(false)
     } else {
       void window.api?.profiles?.setEmbedVisible?.(true)
     }
-  }, [channelPickerSourceId])
+  }, [channelPickerSourceId, controlSource])
 
   const slackBrowserSource = useMemo(
     () =>
@@ -415,43 +409,26 @@ export default function WorkspaceContent({
                 <>
                   <button
                     type="button"
-                    onClick={() => setChannelPickerSourceId(matchingSource.id)}
+                    onClick={() => setControlSource(matchingSource)}
                     style={{
-                      background: !matchingSource.channelsReviewedAt
-                        ? 'rgba(99, 102, 241, 0.2)'
-                        : 'rgba(255, 255, 255, 0.08)',
-                      border: `1px solid ${
-                        !matchingSource.channelsReviewedAt
-                          ? 'rgba(99, 102, 241, 0.45)'
-                          : 'rgba(255, 255, 255, 0.16)'
-                      }`,
-                      color: !matchingSource.channelsReviewedAt ? '#a5b4fc' : '#cbd5e1',
+                      background: 'rgba(99, 102, 241, 0.22)',
+                      border: '1px solid rgba(99, 102, 241, 0.45)',
+                      color: '#c7d2fe',
                       fontSize: 11,
                       borderRadius: 6,
-                      padding: '3px 9px',
+                      padding: '3px 10px',
                       cursor: 'pointer',
-                      fontWeight: 600
+                      fontWeight: 650,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4
                     }}
-                    title="Choose channels to scrape or exclude"
+                    title="Open Workspace Control: Channels, Schedule & Scrape Logs"
                   >
-                    Choose channels
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setChannelPickerSourceId(matchingSource.id)}
-                    style={{
-                      background: 'rgba(255, 255, 255, 0.08)',
-                      border: '1px solid rgba(255, 255, 255, 0.16)',
-                      color: '#cbd5e1',
-                      fontSize: 11,
-                      borderRadius: 6,
-                      padding: '3px 9px',
-                      cursor: 'pointer',
-                      fontWeight: 600
-                    }}
-                    title="View or modify channel selection"
-                  >
-                    ☑ Channels ({matchingSource.channels.filter((c) => c.enabled !== false).length})
+                    <span>⚙️ Control</span>
+                    <span style={{ fontSize: 10, opacity: 0.85, background: 'rgba(0,0,0,0.25)', padding: '1px 5px', borderRadius: 4 }}>
+                      {matchingSource.channels.filter((c) => c.enabled !== false).length}
+                    </span>
                   </button>
                 </>
               ) : null}
@@ -628,43 +605,26 @@ export default function WorkspaceContent({
                   <>
                     <button
                       type="button"
-                      onClick={() => setChannelPickerSourceId(teamsSource.id)}
+                      onClick={() => setControlSource(teamsSource)}
                       style={{
-                        background: !teamsSource.channelsReviewedAt
-                          ? 'rgba(99, 102, 241, 0.2)'
-                          : 'rgba(255, 255, 255, 0.08)',
-                        border: `1px solid ${
-                          !teamsSource.channelsReviewedAt
-                            ? 'rgba(99, 102, 241, 0.45)'
-                            : 'rgba(255, 255, 255, 0.16)'
-                        }`,
-                        color: !teamsSource.channelsReviewedAt ? '#a5b4fc' : '#cbd5e1',
+                        background: 'rgba(99, 102, 241, 0.22)',
+                        border: '1px solid rgba(99, 102, 241, 0.45)',
+                        color: '#c7d2fe',
                         fontSize: 11,
                         borderRadius: 6,
-                        padding: '3px 9px',
+                        padding: '3px 10px',
                         cursor: 'pointer',
-                        fontWeight: 600
+                        fontWeight: 650,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4
                       }}
-                      title="Choose channels to scrape or exclude"
+                      title="Open Workspace Control: Channels, Schedule & Scrape Logs"
                     >
-                      Choose channels
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setChannelPickerSourceId(teamsSource.id)}
-                      style={{
-                        background: 'rgba(255, 255, 255, 0.08)',
-                        border: '1px solid rgba(255, 255, 255, 0.16)',
-                        color: '#cbd5e1',
-                        fontSize: 11,
-                        borderRadius: 6,
-                        padding: '3px 9px',
-                        cursor: 'pointer',
-                        fontWeight: 600
-                      }}
-                      title="View or modify channel selection"
-                    >
-                      ☑ Channels ({teamsSource.channels.filter((c) => c.enabled !== false).length})
+                      <span>⚙️ Control</span>
+                      <span style={{ fontSize: 10, opacity: 0.85, background: 'rgba(0,0,0,0.25)', padding: '1px 5px', borderRadius: 4 }}>
+                        {teamsSource.channels.filter((c) => c.enabled !== false).length}
+                      </span>
                     </button>
                   </>
                 ) : null}
@@ -818,43 +778,26 @@ export default function WorkspaceContent({
                   <>
                     <button
                       type="button"
-                      onClick={() => setChannelPickerSourceId(whatsappSource.id)}
+                      onClick={() => setControlSource(whatsappSource)}
                       style={{
-                        background: !whatsappSource.channelsReviewedAt
-                          ? 'rgba(99, 102, 241, 0.2)'
-                          : 'rgba(255, 255, 255, 0.08)',
-                        border: `1px solid ${
-                          !whatsappSource.channelsReviewedAt
-                            ? 'rgba(99, 102, 241, 0.45)'
-                            : 'rgba(255, 255, 255, 0.16)'
-                        }`,
-                        color: !whatsappSource.channelsReviewedAt ? '#a5b4fc' : '#cbd5e1',
+                        background: 'rgba(99, 102, 241, 0.22)',
+                        border: '1px solid rgba(99, 102, 241, 0.45)',
+                        color: '#c7d2fe',
                         fontSize: 11,
                         borderRadius: 6,
-                        padding: '3px 9px',
+                        padding: '3px 10px',
                         cursor: 'pointer',
-                        fontWeight: 600
+                        fontWeight: 650,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4
                       }}
-                      title="Choose chats to scrape or exclude"
+                      title="Open Workspace Control: Channels, Schedule & Scrape Logs"
                     >
-                      Choose channels
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setChannelPickerSourceId(whatsappSource.id)}
-                      style={{
-                        background: 'rgba(255, 255, 255, 0.08)',
-                        border: '1px solid rgba(255, 255, 255, 0.16)',
-                        color: '#cbd5e1',
-                        fontSize: 11,
-                        borderRadius: 6,
-                        padding: '3px 9px',
-                        cursor: 'pointer',
-                        fontWeight: 600
-                      }}
-                      title="View or modify chat selection"
-                    >
-                      ☑ Channels ({whatsappSource.channels.filter((c) => c.enabled !== false).length})
+                      <span>⚙️ Control</span>
+                      <span style={{ fontSize: 10, opacity: 0.85, background: 'rgba(0,0,0,0.25)', padding: '1px 5px', borderRadius: 4 }}>
+                        {whatsappSource.channels.filter((c) => c.enabled !== false).length}
+                      </span>
                     </button>
                   </>
                 ) : null}
@@ -1026,43 +969,26 @@ export default function WorkspaceContent({
                   <>
                     <button
                       type="button"
-                      onClick={() => setChannelPickerSourceId(slackBrowserSource.id)}
+                      onClick={() => setControlSource(slackBrowserSource)}
                       style={{
-                        background: unreviewedSource
-                          ? 'rgba(99, 102, 241, 0.2)'
-                          : 'rgba(255, 255, 255, 0.08)',
-                        border: `1px solid ${
-                          unreviewedSource
-                            ? 'rgba(99, 102, 241, 0.45)'
-                            : 'rgba(255, 255, 255, 0.16)'
-                        }`,
-                        color: unreviewedSource ? '#a5b4fc' : '#cbd5e1',
+                        background: 'rgba(99, 102, 241, 0.22)',
+                        border: '1px solid rgba(99, 102, 241, 0.45)',
+                        color: '#c7d2fe',
                         fontSize: 11,
                         borderRadius: 6,
-                        padding: '3px 9px',
+                        padding: '3px 10px',
                         cursor: 'pointer',
-                        fontWeight: 600
+                        fontWeight: 650,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4
                       }}
-                      title="Choose channels to scrape or exclude"
+                      title="Open Workspace Control: Channels, Schedule & Scrape Logs"
                     >
-                      Choose channels
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setChannelPickerSourceId(slackBrowserSource.id)}
-                      style={{
-                        background: 'rgba(255, 255, 255, 0.08)',
-                        border: '1px solid rgba(255, 255, 255, 0.16)',
-                        color: '#cbd5e1',
-                        fontSize: 11,
-                        borderRadius: 6,
-                        padding: '3px 9px',
-                        cursor: 'pointer',
-                        fontWeight: 600
-                      }}
-                      title="View or modify channel selection"
-                    >
-                      ☑ Channels ({slackBrowserSource.channels.filter((c) => c.enabled !== false).length})
+                      <span>⚙️ Control</span>
+                      <span style={{ fontSize: 10, opacity: 0.85, background: 'rgba(0,0,0,0.25)', padding: '1px 5px', borderRadius: 4 }}>
+                        {slackBrowserSource.channels.filter((c) => c.enabled !== false).length}
+                      </span>
                     </button>
                   </>
                 ) : null}
@@ -1226,6 +1152,18 @@ export default function WorkspaceContent({
       })()
     : null
 
+  const controlModalElement = controlSource ? (
+    <WorkspaceControlModal
+      open={Boolean(controlSource)}
+      project={project}
+      source={controlSource}
+      onClose={() => setControlSource(null)}
+      onSaved={() => {
+        void useDashboardStore.getState().loadSnapshot()
+      }}
+    />
+  ) : null
+
   if (bare) {
     return (
       <>
@@ -1237,6 +1175,7 @@ export default function WorkspaceContent({
           {body}
         </section>
         {channelPickerElement}
+        {controlModalElement}
       </>
     )
   }
@@ -1258,6 +1197,7 @@ export default function WorkspaceContent({
         </div>
       </section>
       {channelPickerElement}
+      {controlModalElement}
     </>
   )
 }

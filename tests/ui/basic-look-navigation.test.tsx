@@ -354,20 +354,19 @@ describe('BasicSidebarProjectTree & Basic Look Navigation', () => {
       <CosmicWorkspaceView sidebarLook="basic" />
     )
 
-    // Should render Choose channels and Channels in header
-    expect(getByText('Choose channels')).not.toBeNull()
-    expect(getByText(/☑ Channels \(1\)/i)).not.toBeNull()
+    // Should render Control button in header
+    expect(getByText(/Control/i)).not.toBeNull()
     expect(getByText('Re-authenticate')).not.toBeNull()
 
     // Must NOT render yellow banner
     expect(queryByText(/Choose the 2–3 channels this card should scrape/i)).toBeNull()
 
-    // Must NOT automatically open the channel picker modal dialog
-    expect(queryByRole('dialog', { name: /select channels to scrape/i })).toBeNull()
+    // Must NOT automatically open the control modal dialog
+    expect(queryByRole('dialog', { name: /workspace control/i })).toBeNull()
 
-    // Clicking Choose channels manually opens the modal
-    fireEvent.click(getByText('Choose channels'))
-    expect(await findByRole('dialog', { name: /select channels to scrape/i })).not.toBeNull()
+    // Clicking Control manually opens the modal
+    fireEvent.click(getByText(/Control/i))
+    expect(await findByRole('dialog', { name: /workspace control/i })).not.toBeNull()
   })
 
   it('renders thin header navbar for Teams and WhatsApp with Connected badge and Re-authenticate', () => {

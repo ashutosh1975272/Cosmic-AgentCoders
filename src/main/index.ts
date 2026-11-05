@@ -225,6 +225,10 @@ if (!gotSingleInstanceLock) {
       return { action: 'deny' }
     })
 
+    mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+      console.log(`[Renderer Console level=${level} line=${line} source=${sourceId}]: ${message}`)
+    })
+
     if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
       void mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
     } else {

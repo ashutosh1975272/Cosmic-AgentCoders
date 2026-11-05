@@ -1,0 +1,657 @@
+import React, { useEffect, useMemo, useState } from 'react'
+import type {
+  DashboardProject,
+  ProjectSource,
+  ProjectSourceChannel,
+  ProjectSourceSelectionMode
+} from '../../../../shared/dashboard-contract'
+import { useDashboardStore } from '../../hooks/useDashboard'
+import { ScrapeLogExplorer } from './RunLogsModal'
+
+interface WorkspaceControlModalProps {
+  open: boolean
+  onClose: () => void
+  project: DashboardProject
+  source: ProjectSource
+  onSaved?: () => void
+}
+
+type ControlTab = 'channels' | 'schedules' | 'logs'
+
+function kindLabel(channel: ProjectSourceChannel): string {
+  if (channel.isDm || channel.kind === 'dm') return 'DM'
+  if (channel.isPrivate || channel.kind === 'private') return 'Private'
+  return 'Public'
+}
+
+export function WorkspaceControlModal({
+  open,
+  onClose,
+  project,
+  source,
+  onSaved
+}: WorkspaceControlModalProps): React.JSX.Element | null {
+  const syncNow = useDashboardStore((s) => s.syncNow)
+  const updateSource = useDashboardStore((s) => s.updateSource)
+  const loadSnapshot = useDashboardStore((s) => s.loadSnapshot)
+
+  const [activeTab, setActiveTab] = useState<ControlTab>('channels')
+
+  // Channels state
+  const [channels, setChannels] = useState<ProjectSourceChannel[]>([])
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [selectionMode, setSelectionMode] = useState<ProjectSourceSelectionMode>(
+    source.selectionMode ?? 'include'
+  )
+  const [channelsLoading, setChannelsLoading] = useState(false)
+  const [savingChannels, setSavingChannels] = useState(false)
+  const [channelsError, setChannelsError] = useState<string | null>(null)
+
+  // Schedules state
+  const [scheduleEnabled, setScheduleEnabled] = useState(source.scheduleEnabled ?? true)
+  const [intervalMinutes, setIntervalMinutes] = useState<number>(
+    source.scheduleIntervalMinutes ?? 15
+  )
+  const [savingSchedule, setSavingSchedule] = useState(false)
+  const [manualSyncing, setManualSyncing] = useState(false)
+  const [syncFeedback, setSyncFeedback] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    setChannelsLoading(true)
+    setChannelsError(null)
+    setSelectionMode(source.selectionMode ?? 'include')
+    setScheduleEnabled(source.scheduleEnabled ?? true)
+    setIntervalMinutes(source.scheduleIntervalMinutes ?? 15)
+
+    const existing = new Map(source.channels.map((c) => [c.id, c]))
+    setSelected(
+      new Set(
+        source.channels.filter((c) => c.enabled !== false).map((c) => c.id)
+      )
+    )
+
+    void window.api.dashboard
+      .discoverSourceChannels({
+        projectId: project.id,
+        sourceId: source.id,
+        profileId: source.profileId,
+        workspaceId: source.workspaceId
+      })
+      .then((result) => {
+        if (!alive) return
+        if (result.error) setChannelsError(result.error)
+        if (result.channels.length === 0) {
+          setChannels(source.channels)
+          return
+        }
+        setChannels(
+          result.channels.map((channel) => {
+            const previous = existing.get(channel.id)
+            return {
+              ...channel,
+              enabled: previous ? previous.enabled !== false : false
+            }
+          })
+        )
+      })
+      .catch((err) => {
+        if (!alive) return
+        setChannelsError(err instanceof Error ? err.message : 'Channel discovery failed')
+        setChannels(source.channels)
+      })
+      .finally(() => {
+        if (alive) setChannelsLoading(false)
+      })
+
+    return () => {
+      alive = false
+    }
+  }, [open, project.id, source])
+
+  const grouped = useMemo(() => {
+    const publicChannels: ProjectSourceChannel[] = []
+    const privateChannels: ProjectSourceChannel[] = []
+    const dms: ProjectSourceChannel[] = []
+    for (const channel of channels) {
+      if (channel.isDm || channel.kind === 'dm') dms.push(channel)
+      else if (channel.isPrivate || channel.kind === 'private') privateChannels.push(channel)
+      else publicChannels.push(channel)
+    }
+    return { publicChannels, privateChannels, dms }
+  }, [channels])
+
+  if (!open) return null
+
+  const toggleChannel = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleSaveChannels = async () => {
+    setSavingChannels(true)
+    try {
+      const updatedChannels: ProjectSourceChannel[] = channels.map((channel) => ({
+        ...channel,
+        enabled: selected.has(channel.id)
+      }))
+
+      await updateSource({
+        projectId: project.id,
+        sourceId: source.id,
+        patch: {
+          channels: updatedChannels,
+          selectionMode,
+          channelsReviewedAt: new Date().toISOString()
+        }
+      })
+      await loadSnapshot()
+      onSaved?.()
+      setSyncFeedback('Channel selection saved successfully.')
+      setTimeout(() => setSyncFeedback(null), 3000)
+    } catch (err) {
+      setChannelsError(err instanceof Error ? err.message : 'Failed to save channels')
+    } finally {
+      setSavingChannels(false)
+    }
+  }
+
+  const handleUpdateSchedule = async (enabled: boolean, interval: number) => {
+    setSavingSchedule(true)
+    setScheduleEnabled(enabled)
+    setIntervalMinutes(interval)
+    try {
+      await updateSource({
+        projectId: project.id,
+        sourceId: source.id,
+        patch: {
+          scheduleEnabled: enabled,
+          scheduleIntervalMinutes: interval as any
+        }
+      })
+      await loadSnapshot()
+      onSaved?.()
+      setSyncFeedback('Schedule settings updated.')
+      setTimeout(() => setSyncFeedback(null), 3000)
+    } catch (err) {
+      setSyncFeedback(err instanceof Error ? err.message : 'Failed to update schedule')
+    } finally {
+      setSavingSchedule(false)
+    }
+  }
+
+  const handleManualScrapeNow = async () => {
+    setManualSyncing(true)
+    setSyncFeedback('Scraping initiated across selected channels…')
+    try {
+      await syncNow(project.id)
+      await loadSnapshot()
+      setSyncFeedback('Scrape finished. Dashboard updated!')
+      setTimeout(() => setSyncFeedback(null), 4000)
+    } catch (err) {
+      setSyncFeedback(err instanceof Error ? err.message : 'Scrape encountered an issue.')
+    } finally {
+      setManualSyncing(false)
+    }
+  }
+
+  const renderGroup = (
+    label: string,
+    items: ProjectSourceChannel[],
+    emptyMessage: string
+  ) => {
+    if (items.length === 0) {
+      return (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+            {label} (0)
+          </div>
+          <div style={{ fontSize: 12, color: '#64748b', fontStyle: 'italic', padding: '6px 0' }}>
+            {emptyMessage}
+          </div>
+        </div>
+      )
+    }
+
+    return (
+      <div style={{ marginTop: 16 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+          {label} ({items.length})
+        </div>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+            gap: 8,
+            maxHeight: 280,
+            overflowY: 'auto',
+            paddingRight: 6
+          }}
+        >
+          {items.map((channel) => {
+            const isChecked = selected.has(channel.id)
+            return (
+              <label
+                key={channel.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  background: isChecked ? 'rgba(99, 102, 241, 0.14)' : 'rgba(255, 255, 255, 0.03)',
+                  border: isChecked ? '1px solid rgba(99, 102, 241, 0.45)' : '1px solid rgba(255, 255, 255, 0.08)',
+                  cursor: 'pointer',
+                  transition: 'all 0.12s ease'
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={isChecked}
+                  onChange={() => toggleChannel(channel.id)}
+                  style={{ cursor: 'pointer', accentColor: '#6366f1' }}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: isChecked ? '#fff' : '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {channel.isDm ? '👤 ' : '# '}
+                    {channel.name}
+                  </div>
+                  {channel.topic && (
+                    <div style={{ fontSize: 11, color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {channel.topic}
+                    </div>
+                  )}
+                </div>
+                <span style={{ fontSize: 10, color: '#94a3b8', background: 'rgba(255, 255, 255, 0.06)', padding: '2px 6px', borderRadius: 4 }}>
+                  {kindLabel(channel)}
+                </span>
+              </label>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="add-platform-backdrop" onClick={onClose} style={{ zIndex: 1200 }}>
+      <div
+        className="add-platform-panel accounts-hub-panel"
+        style={{
+          width: 'min(1440px, 98vw)',
+          height: 'min(92vh, 920px)',
+          maxHeight: 'min(92vh, 920px)',
+          padding: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          background: '#090d16',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          borderRadius: 14,
+          boxShadow: '0 24px 60px rgba(0, 0, 0, 0.65)'
+        }}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Workspace Control"
+      >
+        {/* Header */}
+        <header
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '16px 24px',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+            background: 'rgba(15, 23, 42, 0.85)'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <span style={{ fontSize: 24 }}>⚙️</span>
+            <div>
+              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#f8fafc' }}>
+                Workspace Control · {source.workspaceName || project.name}
+              </h2>
+              <p style={{ margin: 0, fontSize: 12, color: '#94a3b8' }}>
+                Channel discovery &amp; selection • Automated scrape scheduling • Detailed scraping logs
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {syncFeedback && (
+              <span style={{ fontSize: 12, color: '#38bdf8', background: 'rgba(56, 189, 248, 0.12)', padding: '4px 10px', borderRadius: 6 }}>
+                {syncFeedback}
+              </span>
+            )}
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => void handleManualScrapeNow()}
+              disabled={manualSyncing}
+              style={{
+                fontSize: 12,
+                fontWeight: 650,
+                padding: '6px 14px',
+                background: '#6366f1',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 8,
+                cursor: manualSyncing ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6
+              }}
+            >
+              <span>{manualSyncing ? '⏳ Scraping…' : '▶ Scrape Now'}</span>
+            </button>
+            <button
+              type="button"
+              className="btn ghost btn-sm"
+              onClick={onClose}
+              style={{ fontSize: 13, color: '#94a3b8', padding: '6px 12px' }}
+            >
+              ✕ Close
+            </button>
+          </div>
+        </header>
+
+        {/* 2-Column Body */}
+        <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          {/* Left Navigation Rail */}
+          <aside
+            style={{
+              width: 260,
+              borderRight: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'rgba(15, 23, 42, 0.5)',
+              padding: '18px 14px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+              overflowY: 'auto'
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '0 8px 4px' }}>
+              Control Options
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('channels')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 14px',
+                borderRadius: 8,
+                background: activeTab === 'channels' ? 'rgba(99, 102, 241, 0.18)' : 'transparent',
+                color: activeTab === 'channels' ? '#a5b4fc' : '#cbd5e1',
+                border: activeTab === 'channels' ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid transparent',
+                cursor: 'pointer',
+                fontSize: 13,
+                fontWeight: 600,
+                textAlign: 'left',
+                transition: 'all 0.12s ease'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 16 }}>📋</span>
+                <span>Select Channels</span>
+              </div>
+              <span style={{ fontSize: 11, color: '#4ade80', background: 'rgba(74, 222, 128, 0.12)', padding: '2px 6px', borderRadius: 4 }}>
+                {selected.size} active
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('schedules')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 14px',
+                borderRadius: 8,
+                background: activeTab === 'schedules' ? 'rgba(99, 102, 241, 0.18)' : 'transparent',
+                color: activeTab === 'schedules' ? '#a5b4fc' : '#cbd5e1',
+                border: activeTab === 'schedules' ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid transparent',
+                cursor: 'pointer',
+                fontSize: 13,
+                fontWeight: 600,
+                textAlign: 'left',
+                transition: 'all 0.12s ease'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 16 }}>⏱️</span>
+                <span>Schedules &amp; Trigger</span>
+              </div>
+              <span style={{ fontSize: 11, color: scheduleEnabled ? '#4ade80' : '#94a3b8', background: 'rgba(255, 255, 255, 0.06)', padding: '2px 6px', borderRadius: 4 }}>
+                {scheduleEnabled ? `${intervalMinutes}m` : 'Paused'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('logs')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 14px',
+                borderRadius: 8,
+                background: activeTab === 'logs' ? 'rgba(99, 102, 241, 0.18)' : 'transparent',
+                color: activeTab === 'logs' ? '#a5b4fc' : '#cbd5e1',
+                border: activeTab === 'logs' ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid transparent',
+                cursor: 'pointer',
+                fontSize: 13,
+                fontWeight: 600,
+                textAlign: 'left',
+                transition: 'all 0.12s ease'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 16 }}>🕷️</span>
+                <span>Scrape Logs</span>
+              </div>
+            </button>
+          </aside>
+
+          {/* Right Main Content Panel */}
+          <main
+            style={{
+              flex: 1,
+              overflowY: 'auto',
+              padding: '24px 32px',
+              background: '#090d16',
+              display: 'flex',
+              flexDirection: 'column'
+            }}
+          >
+            {/* TAB 1: CHANNELS */}
+            {activeTab === 'channels' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#f8fafc' }}>
+                      Select Channels to Scrape
+                    </h3>
+                    <p style={{ margin: '4px 0 0', fontSize: 12, color: '#94a3b8' }}>
+                      Discovery reads visible public &amp; private channels directly from your session. Only checked channels are scraped.
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      type="button"
+                      className="btn ghost btn-sm"
+                      onClick={() => setSelected(new Set())}
+                      disabled={selected.size === 0}
+                      style={{ fontSize: 12, padding: '5px 12px' }}
+                    >
+                      Clear all
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      onClick={() => void handleSaveChannels()}
+                      disabled={savingChannels || channelsLoading}
+                      style={{ fontSize: 12, fontWeight: 650, padding: '5px 16px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 6 }}
+                    >
+                      {savingChannels ? 'Saving…' : 'Save Channel Selection'}
+                    </button>
+                  </div>
+                </div>
+
+                {channelsLoading ? (
+                  <div style={{ padding: '36px 0', textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>
+                    ⏳ Reading workspace channel list from Slack session…
+                  </div>
+                ) : (
+                  <>
+                    {channelsError && (
+                      <div style={{ padding: '8px 14px', borderRadius: 8, background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#f87171', fontSize: 12 }}>
+                        {channelsError}
+                      </div>
+                    )}
+                    {renderGroup('Public Channels', grouped.publicChannels, 'No public channels found.')}
+                    {renderGroup('Private Channels', grouped.privateChannels, 'No private channels found.')}
+                    {renderGroup('Direct Messages (DMs)', grouped.dms, 'No direct messages found.')}
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* TAB 2: SCHEDULES & TRIGGER */}
+            {activeTab === 'schedules' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 840 }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#f8fafc' }}>
+                    Scrape Schedules &amp; Automation
+                  </h3>
+                  <p style={{ margin: '4px 0 0', fontSize: 12, color: '#94a3b8' }}>
+                    Configure automatic background polling frequency or immediately trigger a fresh scrape to update the entire dashboard.
+                  </p>
+                </div>
+
+                {/* Manual Trigger Card */}
+                <div style={{ padding: 20, borderRadius: 10, background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.08)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 650, color: '#f8fafc' }}>
+                      Manual Scrape Now
+                    </div>
+                    <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>
+                      Immediately scrapes messages from all selected channels for this workspace and refreshes insights across cards.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => void handleManualScrapeNow()}
+                    disabled={manualSyncing}
+                    style={{
+                      padding: '8px 20px',
+                      fontSize: 13,
+                      fontWeight: 650,
+                      background: '#6366f1',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: 8,
+                      cursor: manualSyncing ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    {manualSyncing ? 'Scraping in progress…' : '▶ Scrape Now'}
+                  </button>
+                </div>
+
+                {/* Automatic Scheduling Card */}
+                <div style={{ padding: 20, borderRadius: 10, background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.08)', display: 'flex', flexDirection: 'column', gap: 18 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 650, color: '#f8fafc' }}>
+                        Automatic Background Scrape
+                      </div>
+                      <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>
+                        When enabled, the app automatically runs incremental message capture at the selected frequency.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleUpdateSchedule(!scheduleEnabled, intervalMinutes)}
+                      disabled={savingSchedule}
+                      style={{
+                        padding: '6px 14px',
+                        fontSize: 12,
+                        fontWeight: 650,
+                        borderRadius: 6,
+                        border: `1px solid ${scheduleEnabled ? 'rgba(74, 222, 128, 0.4)' : 'rgba(255, 255, 255, 0.15)'}`,
+                        background: scheduleEnabled ? 'rgba(74, 222, 128, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                        color: scheduleEnabled ? '#4ade80' : '#94a3b8',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {scheduleEnabled ? '● AUTO SCRAPE: ON' : '○ AUTO SCRAPE: OFF'}
+                    </button>
+                  </div>
+
+                  {/* Interval Dropdown */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: 10, borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                    <span style={{ fontSize: 13, color: '#cbd5e1', fontWeight: 500 }}>
+                      Scrape Frequency:
+                    </span>
+                    <select
+                      value={intervalMinutes}
+                      disabled={savingSchedule || !scheduleEnabled}
+                      onChange={(e) => void handleUpdateSchedule(scheduleEnabled, Number(e.target.value))}
+                      style={{
+                        padding: '6px 12px',
+                        background: '#1e293b',
+                        color: '#f8fafc',
+                        border: '1px solid rgba(255, 255, 255, 0.15)',
+                        borderRadius: 6,
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: scheduleEnabled ? 'pointer' : 'not-allowed'
+                      }}
+                    >
+                      <option value={5}>Every 5 minutes</option>
+                      <option value={15}>Every 15 minutes</option>
+                      <option value={25}>Every 25 minutes</option>
+                      <option value={35}>Every 35 minutes</option>
+                      <option value={60}>Every 60 minutes (1 hour)</option>
+                    </select>
+                    <span style={{ fontSize: 12, color: '#64748b' }}>
+                      {scheduleEnabled ? `Next cycle in ~${intervalMinutes} minutes.` : 'Automation is currently paused.'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 3: SCRAPE LOGS */}
+            {activeTab === 'logs' && (
+              <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <header>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#f8fafc' }}>
+                    🕷️ Workspace Scrape Audit Logs
+                  </h3>
+                  <p style={{ margin: '4px 0 0', fontSize: 12, color: '#94a3b8' }}>
+                    Live execution history for {project.name}. Shows fetched messages, channel statuses, and timing.
+                  </p>
+                </header>
+                <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+                  <ScrapeLogExplorer projectId={project.id} projectName={project.name} />
+                </div>
+              </div>
+            )}
+          </main>
+        </div>
+      </div>
+    </div>
+  )
+}
+
