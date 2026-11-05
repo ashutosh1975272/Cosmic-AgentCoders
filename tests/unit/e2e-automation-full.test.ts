@@ -38,6 +38,7 @@ function makeMockView(overrides: Partial<{
       getURL: () => url,
       loadURL: vi.fn().mockResolvedValue(undefined),
       executeJavaScript: vi.fn().mockResolvedValue(jsResult),
+      setBackgroundThrottling: vi.fn(),
       setWindowOpenHandler: vi.fn(),
       on: vi.fn(),
       removeListener: vi.fn(),
@@ -517,6 +518,79 @@ describe('[L5] SlackReaderView', () => {
     })
     const result = await reader.postChannelMessage('C1', 'hello')
     expect(result).toBe(false)
+  })
+
+  it('disables background throttling on borrowed and initialized views', async () => {
+    const view = makeMockView({ jsResult: 'logged_in' })
+    const reader = new SlackReaderView({
+      profileId: 'p-throttle',
+      workspaceId: 'T1',
+      existingView: view as any
+    })
+    expect(view.webContents.setBackgroundThrottling).toHaveBeenCalledWith(false)
+    await reader.initialize()
+    expect(view.webContents.setBackgroundThrottling).toHaveBeenCalledWith(false)
+  })
+
+  it('readChannelMessages executes scrollToBottom before reading visible messages', async () => {
+    const executedScripts: string[] = []
+    const view = makeMockView({ url: 'https://app.slack.com/client/T1/C0CF72BSYKT' })
+    view.webContents.executeJavaScript = vi.fn().mockImplementation((code: string) => {
+      executedScripts.push(code)
+      if (code.includes('hasRows')) return Promise.resolve({ hasRows: true, hasComposer: true })
+      if (code.includes('scrollHeight')) return Promise.resolve(true)
+      if (code.includes('c-message_kit__blocks') || code.includes('READ_VISIBLE_MESSAGES')) {
+        return Promise.resolve([
+          { rawTs: '1730000000.000001', sender: 'Alice', text: 'Newest bottom msg' }
+        ])
+      }
+      return Promise.resolve('logged_in')
+    })
+
+    const reader = new SlackReaderView({
+      profileId: 'p-scroll-bottom',
+      workspaceId: 'T1',
+      existingView: view as any
+    })
+
+    const msgs = await reader.readChannelMessages('C0CF72BSYKT')
+    expect(msgs.length).toBe(1)
+    const scrollBottomIndex = executedScripts.findIndex((s) => s.includes('scrollHeight'))
+    const readMessagesIndex = executedScripts.findIndex(
+      (s) => s.includes('c-message_kit__blocks') || s.includes('READ_VISIBLE_MESSAGES')
+    )
+    expect(scrollBottomIndex).toBeGreaterThan(-1)
+    expect(readMessagesIndex).toBeGreaterThan(scrollBottomIndex)
+  })
+
+  it('readChannelWindow preserves messages when channelId is a slugified name', async () => {
+    const view = makeMockView({ url: 'https://app.slack.com/client/T1/C0CF72BSYKT' })
+    view.webContents.executeJavaScript = vi.fn().mockImplementation((code: string) => {
+      if (code.includes('hasRows')) return Promise.resolve({ hasRows: true, hasComposer: true })
+      if (code.includes('scrollHeight')) return Promise.resolve(true)
+      if (code.includes('c-message_kit__blocks') || code.includes('READ_VISIBLE_MESSAGES')) {
+        return Promise.resolve([
+          {
+            rawTs: '1730000000.000001',
+            sender: 'Alice',
+            text: 'General slug message',
+            permalink: 'https://app.slack.com/client/T1/C0CF72BSYKT/p1730000000000001'
+          }
+        ])
+      }
+      return Promise.resolve('logged_in')
+    })
+
+    const reader = new SlackReaderView({
+      profileId: 'p-slug',
+      workspaceId: 'T1',
+      existingView: view as any
+    })
+
+    // Passing 'general' (non-standard ID) should not drop messages with C0CF72BSYKT permalinks
+    const result = await reader.readChannelWindow('general', { maxScrolls: 0 })
+    expect(result.messages.length).toBe(1)
+    expect(result.messages[0].text).toBe('General slug message')
   })
 })
 

@@ -85,12 +85,7 @@ export interface ProjectSourceChannel {
 }
 
 export type ProjectSourceStatus =
-  | 'connected'
-  | 'needs-login'
-  | 'challenge'
-  | 'adapter-broken'
-  | 'paused'
-  | 'running'
+  'connected' | 'needs-login' | 'challenge' | 'adapter-broken' | 'paused' | 'running'
 
 export interface ProjectSource {
   id: string

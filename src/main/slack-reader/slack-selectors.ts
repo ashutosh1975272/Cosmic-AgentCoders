@@ -16,12 +16,14 @@ export const SLACK_SELECTORS = {
   channelListContainer: '[data-qa="channel_sidebar_name_page"], .p-channel_sidebar__list',
   channelItem:
     '[data-qa="channel_sidebar_name_page"] [role="treeitem"], .p-channel_sidebar__channel, .p-channel_sidebar__item--user, [data-qa-channel-sidebar-item="true"], [data-qa-channel-sidebar-channel-id]',
-  channelName: '.p-channel_sidebar__name, [data-qa="channel_sidebar_name"], span[data-qa="channel_sidebar_name"]',
+  channelName:
+    '.p-channel_sidebar__name, [data-qa="channel_sidebar_name"], span[data-qa="channel_sidebar_name"]',
   channelUnreadBadge:
     '.p-channel_sidebar__badge, [data-qa="channel-sidebar-unread-badge"], .c-mention_badge',
 
   // Message list and message elements
-  messageListContainer: '[data-qa="slack_kit_list"], .c-virtual_list__scroll_container, [role="list"]',
+  messageListContainer:
+    '[data-qa="slack_kit_list"], .c-virtual_list__scroll_container, [role="list"]',
   messageRow: '[data-qa="message_container"], .c-message_kit__message, .c-virtual_list__item',
   messageSender: '[data-qa="message_sender_name"], .c-message__sender_button',
   messageTimestamp: '[data-qa="timestamp"], .c-timestamp, a.c-timestamp, .c-timestamp__link',
@@ -39,6 +41,7 @@ export const SLACK_SELECTORS = {
     '[data-qa="close_flexpane"], button[aria-label="Close"], button[data-qa="flexpane_close"], button.p-flexpane_header__close',
 
   // Message composer input & send button (for active posting)
-  composerEditor: '.ql-editor[contenteditable="true"], [data-qa="message_input"], [role="textbox"][contenteditable="true"]',
+  composerEditor:
+    '.ql-editor[contenteditable="true"], [data-qa="message_input"], [role="textbox"][contenteditable="true"]',
   composerSendButton: '[data-qa="texty_send_button"], button[aria-label="Send message"]'
 } as const

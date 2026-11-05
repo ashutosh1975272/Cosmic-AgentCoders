@@ -17,7 +17,10 @@ export type RunLogEntry = ScrapeRunLog
 
 const CHANNEL_KINDS: ScrapeChannelKind[] = ['public', 'private', 'dm', 'group-dm']
 
-function kindOf(value: unknown, channel?: { isPrivate?: boolean; isDm?: boolean }): ScrapeChannelKind {
+function kindOf(
+  value: unknown,
+  channel?: { isPrivate?: boolean; isDm?: boolean }
+): ScrapeChannelKind {
   if (typeof value === 'string' && (CHANNEL_KINDS as string[]).includes(value)) {
     return value as ScrapeChannelKind
   }
@@ -77,7 +80,9 @@ function normalizeEntry(raw: unknown): ScrapeRunLog | null {
         error: ch.error
       }))
     : []
-  const people = Array.isArray(r.people) ? (r.people as ScrapeRunPerson[]) : peopleFromSnippets(snippets)
+  const people = Array.isArray(r.people)
+    ? (r.people as ScrapeRunPerson[])
+    : peopleFromSnippets(snippets)
 
   return {
     runId: r.runId,
@@ -92,7 +97,9 @@ function normalizeEntry(raw: unknown): ScrapeRunLog | null {
     workspaceName:
       typeof r.workspaceName === 'string' ? r.workspaceName : String(r.workspaceId ?? ''),
     channelsRead: Number(r.channelsRead ?? channels.length),
-    messagesRead: Number(r.messagesRead ?? channels.reduce((sum, ch) => sum + (ch.messagesRead ?? 0), 0)),
+    messagesRead: Number(
+      r.messagesRead ?? channels.reduce((sum, ch) => sum + (ch.messagesRead ?? 0), 0)
+    ),
     newMessages: Number(r.newMessages ?? 0),
     snippets,
     window:
@@ -101,8 +108,7 @@ function normalizeEntry(raw: unknown): ScrapeRunLog | null {
             startTs: String(r.window.startTs ?? ''),
             endTs: String(r.window.endTs ?? r.ts),
             backfillHours: Number(r.window.backfillHours ?? 0),
-            gapSeconds:
-              typeof r.window.gapSeconds === 'number' ? r.window.gapSeconds : undefined
+            gapSeconds: typeof r.window.gapSeconds === 'number' ? r.window.gapSeconds : undefined
           }
         : { startTs: '', endTs: r.ts, backfillHours: 0 },
     channels,

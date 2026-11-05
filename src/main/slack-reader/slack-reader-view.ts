@@ -87,6 +87,11 @@ export class SlackReaderView {
     if (options.existingView && !options.existingView.webContents.isDestroyed()) {
       this.view = options.existingView
       this.isBorrowedView = true
+      try {
+        this.view.webContents.setBackgroundThrottling?.(false)
+      } catch {
+        // ignore
+      }
     }
   }
 
@@ -95,7 +100,14 @@ export class SlackReaderView {
    * Otherwise initializes the background view using the card or profile's dedicated session partition.
    */
   async initialize(): Promise<void> {
-    if (this.view && !this.view.webContents.isDestroyed()) return
+    if (this.view && !this.view.webContents.isDestroyed()) {
+      try {
+        this.view.webContents.setBackgroundThrottling?.(false)
+      } catch {
+        // ignore
+      }
+      return
+    }
 
     const partition = this.projectId
       ? partitionForCard(this.projectId, 'slack')
@@ -113,6 +125,11 @@ export class SlackReaderView {
     })
 
     applySlackWebContentsTweaks(this.view.webContents)
+    try {
+      this.view.webContents.setBackgroundThrottling?.(false)
+    } catch {
+      // ignore
+    }
 
     // Strict URL allowlist: reader view only loads Slack domain URLs
     this.view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -145,14 +162,17 @@ export class SlackReaderView {
       try {
         const state = await this.adapter.detectState(this.view)
         if (state === 'logged_in') {
-          const isDomReady = await this.view.webContents.executeJavaScript(`
+          const isDomReady = await this.view.webContents.executeJavaScript(
+            `
             Boolean(
               document.querySelector('${SLACK_SELECTORS.messageRow}') ||
               document.querySelector('${SLACK_SELECTORS.channelItem}') ||
               document.querySelector('${SLACK_SELECTORS.channelListContainer}') ||
               document.querySelector('${SLACK_SELECTORS.loggedInIndicator}')
             )
-          `, true)
+          `,
+            true
+          )
           if (isDomReady) return true
         } else if (state === 'needs_login' || state === 'challenge') {
           return false
@@ -174,6 +194,7 @@ export class SlackReaderView {
     if (!this.view || this.view.webContents.isDestroyed()) return false
     const start = Date.now()
     let composerSeenAt = 0
+    let genesisSeenAt = 0
 
     while (Date.now() - start < timeoutMs) {
       if (this.view.webContents.isDestroyed()) return false
@@ -181,50 +202,88 @@ export class SlackReaderView {
         const state = await this.adapter.detectState(this.view)
         if (state === 'needs_login' || state === 'challenge') return false
 
-        if (state === 'logged_in') {
-          const dom = await this.view.webContents.executeJavaScript(`
+        if (state === 'logged_in' || Array.isArray(state) || (typeof state === 'object' && state !== null)) {
+          const dom = await this.view.webContents
+            .executeJavaScript(
+              `
             (() => {
               const rows = document.querySelectorAll('${SLACK_SELECTORS.messageRow}');
               const composer = document.querySelector('${SLACK_SELECTORS.composerEditor}');
               const isPaging = Boolean(document.querySelector('.c-message_list__loading_spinner, [data-qa="loading_spinner"]'));
+              const hasGenesis = Boolean(
+                document.querySelector('[data-qa="channel_created_summary"]') ||
+                Array.from(document.querySelectorAll('.c-virtual_list__item')).some(el =>
+                  /created this channel on|This is the start of|This is the very beginning|This conversation is just between/i.test(el.textContent || el.innerText || '')
+                )
+              );
               const expectedId = ${JSON.stringify(expectedChannelId || '')};
               const url = window.location.href;
               const isTargetUrl = !expectedId || url.includes('/' + expectedId);
               let matchingRows = 0;
               if (expectedId && rows.length > 0) {
+                let hasOtherChannelRows = false;
+                let channelMatches = 0;
                 rows.forEach(r => {
                   const link = r.querySelector('a.c-timestamp, [data-qa="timestamp"] a, .c-timestamp__link, a[href*="/archives/"]');
                   if (link && link.getAttribute('href')) {
-                    const href = link.getAttribute('href');
+                    const href = link.getAttribute('href') || '';
                     if (href.includes('/archives/' + expectedId + '/') || href.includes('/' + expectedId)) {
-                      matchingRows++;
+                      channelMatches++;
+                    } else if (href.includes('/archives/') || href.includes('/client/')) {
+                      hasOtherChannelRows = true;
                     }
-                  } else if (isTargetUrl) {
-                    matchingRows++;
                   }
                 });
+                if (hasOtherChannelRows && channelMatches === 0) {
+                  // The DOM still contains messages from the previous channel during SPA transition
+                  matchingRows = 0;
+                } else if (channelMatches > 0) {
+                  matchingRows = channelMatches;
+                } else if (isTargetUrl) {
+                  matchingRows = rows.length;
+                }
               } else {
                 matchingRows = rows.length;
               }
-              return { isTargetUrl, hasRows: matchingRows > 0, rowCount: matchingRows, hasComposer: Boolean(composer), isPaging };
+              return { isTargetUrl, hasRows: matchingRows > 0, rowCount: matchingRows, hasComposer: Boolean(composer), isPaging, hasGenesis };
             })()
-          `, true).catch(() => null)
+          `,
+              true
+            )
+            .catch(() => null)
 
           if (dom && typeof dom === 'object') {
-            if (dom.hasRows) {
+            const hasRows = Boolean((dom as any).hasRows || (Array.isArray(dom) && (dom as any[]).length > 0))
+            if (hasRows) {
               await new Promise((resolve) => setTimeout(resolve, 800))
               return true
             }
 
-            if (dom.isTargetUrl && dom.hasComposer && !dom.isPaging) {
-              if (!composerSeenAt) {
-                composerSeenAt = Date.now()
-              } else if (Date.now() - composerSeenAt >= 7000) {
-                // Channel is confirmed empty after observing composer for at least 7 seconds with 0 rows and no spinner
-                return true
+            const isTargetUrl = (dom as any).isTargetUrl ?? true
+            const hasComposer = Boolean((dom as any).hasComposer)
+            const isPaging = Boolean((dom as any).isPaging)
+            const hasGenesis = Boolean((dom as any).hasGenesis)
+
+            if (isTargetUrl && hasComposer && !isPaging) {
+              if (hasGenesis) {
+                if (!genesisSeenAt) {
+                  genesisSeenAt = Date.now()
+                } else if (Date.now() - genesisSeenAt >= 3000) {
+                  // Channel is confirmed empty: genesis summary and composer observed for at least 3s
+                  return true
+                }
+              } else {
+                genesisSeenAt = 0
+                // Composer seen without genesis summary: allow up to 15s before fallback
+                if (!composerSeenAt) {
+                  composerSeenAt = Date.now()
+                } else if (Date.now() - composerSeenAt >= 15000) {
+                  return true
+                }
               }
             } else {
               composerSeenAt = 0
+              genesisSeenAt = 0
             }
           }
         }
@@ -292,7 +351,12 @@ export class SlackReaderView {
 
     // If workspaceId is pending or differs from authentic Slack client URL, resolve it from currentUrl
     const urlTeamMatch = currentUrl.match(/\/client\/([A-Z0-9]+)/)
-    if (urlTeamMatch && (this.workspaceId.startsWith('pending-') || !this.workspaceId || this.workspaceId !== urlTeamMatch[1])) {
+    if (
+      urlTeamMatch &&
+      (this.workspaceId.startsWith('pending-') ||
+        !this.workspaceId ||
+        this.workspaceId !== urlTeamMatch[1])
+    ) {
       this.workspaceId = urlTeamMatch[1]
     }
 
@@ -313,7 +377,8 @@ export class SlackReaderView {
       let switchedViaSidebar = false
       try {
         switchedViaSidebar = Boolean(
-          await this.view!.webContents.executeJavaScript(`
+          await this.view!.webContents.executeJavaScript(
+            `
             (() => {
               const el = document.querySelector('[data-qa-channel-sidebar-channel-id="${channelId}"], a[href*="/${channelId}"]');
               if (el) {
@@ -323,7 +388,9 @@ export class SlackReaderView {
               }
               return false;
             })()
-          `, true)
+          `,
+            true
+          )
         )
         if (switchedViaSidebar) {
           // Verify URL actually switched within 2 seconds
@@ -343,7 +410,9 @@ export class SlackReaderView {
 
       if (!switchedViaSidebar) {
         try {
-          await this.view!.webContents.loadURL(`https://app.slack.com/client/${this.workspaceId}/${channelId}`)
+          await this.view!.webContents.loadURL(
+            `https://app.slack.com/client/${this.workspaceId}/${channelId}`
+          )
         } catch (err: any) {
           // Chromium throws ERR_ABORTED (-3) if Slack's SPA client redirect intervenes.
           // If the URL actually navigated or contains the channel, this is non-fatal.
@@ -353,11 +422,11 @@ export class SlackReaderView {
           }
         }
       }
-      await this.waitForMessages(25000, channelId)
     } else if (!isStandardSlackId) {
       // If channelId was a slugified name, try to locate and click the corresponding sidebar channel item
       try {
-        await this.view!.webContents.executeJavaScript(`
+        await this.view!.webContents.executeJavaScript(
+          `
           (() => {
             const target = ${JSON.stringify(channelId.toLowerCase())};
             const items = document.querySelectorAll('${SLACK_SELECTORS.channelItem}');
@@ -373,19 +442,22 @@ export class SlackReaderView {
             }
             return false;
           })()
-        `, true)
+        `,
+          true
+        )
         await new Promise((resolve) => setTimeout(resolve, 2000))
       } catch {
         // ignore
       }
     }
 
+    // Unconditionally wait for messages to mount in the target channel
+    await this.waitForMessages(25000, channelId)
+
     currentUrl = this.view!.webContents.getURL()
 
     // Safety check: ensure we didn't land on a completely different conversation (e.g. redirected fallback DM)
-    const isTargetConversation = isStandardSlackId
-      ? matchesTargetUrl(currentUrl)
-      : true
+    const isTargetConversation = isStandardSlackId ? matchesTargetUrl(currentUrl) : true
 
     this.onEvent?.({
       type: 'status',
@@ -395,14 +467,17 @@ export class SlackReaderView {
 
     // Inspect active message container bounds for highlight overlay
     try {
-      const bounds = await this.view!.webContents.executeJavaScript(`
+      const bounds = await this.view!.webContents.executeJavaScript(
+        `
         (() => {
           const el = document.querySelector('.c-virtual_list__item') || document.querySelector('[data-qa="message_container"]');
           if (!el) return null;
           const r = el.getBoundingClientRect();
           return { x: r.x, y: r.y, width: r.width, height: r.height };
         })()
-      `, true)
+      `,
+        true
+      )
       if (bounds) {
         this.onEvent?.({
           type: 'highlight',
@@ -414,13 +489,25 @@ export class SlackReaderView {
       // ignore
     }
 
+    // Scroll to bottom to mount newest messages in Slack's virtual list container
+    if (isTargetConversation && this.view) {
+      await this.adapter.scrollToBottom(this.view)
+      await new Promise((resolve) => setTimeout(resolve, 400))
+    }
+
     // Only read messages if we actually reached the target conversation (avoid polluting channels with wrong DM messages)
-    const rawMessages = isTargetConversation ? await this.adapter.readVisibleMessages(this.view!) : []
+    const rawMessages = isTargetConversation
+      ? await this.adapter.readVisibleMessages(this.view!)
+      : []
     const normalized: DashboardStoredMessage[] = []
 
     for (const raw of rawMessages) {
       // If message permalink indicates a different channel archive and standard Slack ID was expected, filter it out
-      if (isStandardSlackId && raw.permalink && !raw.permalink.includes(`/archives/${channelId}/`)) {
+      if (
+        isStandardSlackId &&
+        raw.permalink &&
+        !raw.permalink.includes(`/archives/${channelId}/`)
+      ) {
         continue
       }
       const msg = normalizeScrapedMessage(raw, channelId)
@@ -446,7 +533,8 @@ export class SlackReaderView {
     channelId: string,
     options: ReadChannelWindowOptions = {}
   ): Promise<ReadChannelWindowResult> {
-    const sinceTs = Number.isFinite(options.sinceTs) && (options.sinceTs ?? 0) > 0 ? options.sinceTs! : 0
+    const sinceTs =
+      Number.isFinite(options.sinceTs) && (options.sinceTs ?? 0) > 0 ? options.sinceTs! : 0
     const maxScrolls = Math.max(0, options.maxScrolls ?? 40)
     const maxMessages = Math.max(1, options.maxMessages ?? 3000)
     const signal = options.signal
@@ -462,17 +550,13 @@ export class SlackReaderView {
       return { messages, oldestTs: oldest, gapSeconds: 0, scrolls: 0, cancelled: false }
     }
 
+    const isStandardSlackId = /^[CGD][A-Z0-9]{8,12}$/.test(channelId)
     let scrolls = 0
     let cancelled = signal?.aborted === true
     let canScroll = true
     let zeroProgressRetries = 0
 
-    while (
-      !cancelled &&
-      canScroll &&
-      scrolls < maxScrolls &&
-      collected.size < maxMessages
-    ) {
+    while (!cancelled && canScroll && scrolls < maxScrolls && collected.size < maxMessages) {
       const oldest = oldestNumericTs(collected)
       // Visible history already reaches the requested floor.
       if (sinceTs > 0 && oldest !== null && oldest <= sinceTs) break
@@ -480,8 +564,8 @@ export class SlackReaderView {
       const atGenesis = await this.adapter.isAtChannelGenesis(this.view!)
       if (atGenesis && oldest !== null) break
 
-      // If channel is genuinely empty (no messages collected after initial view and early scroll), break out
-      if (collected.size === 0 && (atGenesis || scrolls >= 5)) {
+      // If channel is genuinely empty (no messages collected after initial view and retries), break out
+      if (collected.size === 0 && ((atGenesis && scrolls >= 2) || scrolls >= 5)) {
         break
       }
 
@@ -496,7 +580,13 @@ export class SlackReaderView {
 
       const prevOldest = oldest
       canScroll = await this.adapter.scrollUp(this.view!, 800)
-      if (!canScroll) break
+      if (!canScroll) {
+        if (collected.size > 0 || scrolls >= 2) {
+          break
+        }
+        // Allow retries when collected.size === 0 on early scroll attempts
+        canScroll = true
+      }
 
       // Adaptive settling: if Slack is actively paging older messages, give it dynamic backpressure
       let settleMs = 1100
@@ -513,9 +603,20 @@ export class SlackReaderView {
         break
       }
 
+      if (collected.size === 0) {
+        await this.adapter.scrollToBottom(this.view!).catch(() => false)
+        await new Promise((resolve) => setTimeout(resolve, 350))
+      }
+
       const raw = await this.adapter.readVisibleMessages(this.view!)
       for (const item of raw) {
-        if (item.permalink && !item.permalink.includes(`/archives/${channelId}/`)) continue
+        if (
+          isStandardSlackId &&
+          item.permalink &&
+          !item.permalink.includes(`/archives/${channelId}/`)
+        ) {
+          continue
+        }
         const msg = normalizeScrapedMessage(item, channelId)
         if (!msg) continue
         collected.set(msg.ts, msg)
@@ -525,7 +626,7 @@ export class SlackReaderView {
       if (collected.size === 0) {
         zeroProgressRetries++
         const reachedGenesis = await this.adapter.isAtChannelGenesis(this.view!).catch(() => false)
-        if (reachedGenesis || zeroProgressRetries >= 6 || scrolls >= 5) {
+        if ((reachedGenesis && scrolls >= 2) || zeroProgressRetries >= 6 || scrolls >= 5) {
           break
         }
       } else {
@@ -533,7 +634,9 @@ export class SlackReaderView {
         if (prevOldest !== null && newOldest === prevOldest) {
           zeroProgressRetries++
           // Check if we reached true genesis banner before declaring top
-          const reachedGenesis = await this.adapter.isAtChannelGenesis(this.view!).catch(() => false)
+          const reachedGenesis = await this.adapter
+            .isAtChannelGenesis(this.view!)
+            .catch(() => false)
           if (reachedGenesis || zeroProgressRetries >= 8) {
             // If 8 consecutive scroll attempts yield no earlier messages or genesis reached, top reached
             break
@@ -622,7 +725,8 @@ export class SlackReaderView {
     const channelUrl = `https://app.slack.com/client/${this.workspaceId}/${channelId}`
     const currentUrl = this.view!.webContents.getURL()
     const matchesTargetUrl =
-      currentUrl.includes(`/${this.workspaceId}/${channelId}`) || currentUrl.includes(`/${channelId}`)
+      currentUrl.includes(`/${this.workspaceId}/${channelId}`) ||
+      currentUrl.includes(`/${channelId}`)
 
     if (!matchesTargetUrl) {
       await this.view!.webContents.loadURL(channelUrl)

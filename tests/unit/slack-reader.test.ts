@@ -12,7 +12,11 @@ import {
 } from '../../src/main/slack-reader/normalizer'
 import { SLACK_SELECTORS } from '../../src/main/slack-reader/slack-selectors'
 import { __test__ as slackApiInternal } from '../../src/main/slack/slack-api-client'
-import { LIST_CHANNELS_SCRIPT, buildReadVisibleMessagesScript } from '../../src/main/slack-reader/slack-adapter'
+import {
+  LIST_CHANNELS_SCRIPT,
+  buildReadVisibleMessagesScript,
+  SlackAdapter
+} from '../../src/main/slack-reader/slack-adapter'
 import { RunLogStore } from '../../src/main/dashboard/run-log-store'
 
 describe('Slack Reader Core (SLK-2)', () => {
@@ -180,7 +184,12 @@ describe('Slack Reader Core (SLK-2)', () => {
 
     it('deduplicates identical messages based on workspaceId, channelId and ts', () => {
       const m1 = { ts: '1730000000.000001', user: 'Alice', text: 'Hi', source: 'client' as const }
-      const m2 = { ts: '1730000000.000001', user: 'Alice', text: 'Hi duplicate', source: 'client' as const }
+      const m2 = {
+        ts: '1730000000.000001',
+        user: 'Alice',
+        text: 'Hi duplicate',
+        source: 'client' as const
+      }
       const m3 = { ts: '1730000000.000002', user: 'Bob', text: 'Hey', source: 'client' as const }
 
       const deduped = deduplicateMessages('T_WORKSPACE', 'C_GENERAL', [m1, m2, m3])
@@ -274,8 +283,22 @@ describe('Slack Reader Core (SLK-2)', () => {
         newMessages: 0,
         window: { startTs: '0', endTs: '1', backfillHours: 6 },
         channels: [
-          { channelId: 'C1', channelName: '0005', kind: 'public', messagesRead: 3, newMessages: 0, status: 'read' },
-          { channelId: 'C2', channelName: 'general', kind: 'public', messagesRead: 2, newMessages: 0, status: 'read' }
+          {
+            channelId: 'C1',
+            channelName: '0005',
+            kind: 'public',
+            messagesRead: 3,
+            newMessages: 0,
+            status: 'read'
+          },
+          {
+            channelId: 'C2',
+            channelName: 'general',
+            kind: 'public',
+            messagesRead: 2,
+            newMessages: 0,
+            status: 'read'
+          }
         ],
         people: [],
         filters: { includeKinds: ['public', 'private'] },
@@ -301,7 +324,14 @@ describe('Slack Reader Core (SLK-2)', () => {
         newMessages: 2,
         window: { startTs: '0', endTs: '1', backfillHours: 6 },
         channels: [
-          { channelId: 'C1', channelName: '0005', kind: 'public', messagesRead: 7, newMessages: 2, status: 'read' }
+          {
+            channelId: 'C1',
+            channelName: '0005',
+            kind: 'public',
+            messagesRead: 7,
+            newMessages: 2,
+            status: 'read'
+          }
         ],
         people: [],
         filters: { includeKinds: ['public', 'private'] },
@@ -355,4 +385,97 @@ describe('Slack Reader Core (SLK-2)', () => {
       expect(sinceTs).toBeGreaterThan(thirtyDaysAgoTs)
     })
   })
+
+  describe('SlackAdapter Scrolling & Genesis Detection', () => {
+    it('scrollToBottom executes scrollHeight assignment on virtual list and returns true', async () => {
+      const adapter = new SlackAdapter()
+      let executedScript = ''
+      const mockView: any = {
+        webContents: {
+          isDestroyed: () => false,
+          executeJavaScript: async (script: string) => {
+            executedScript = script
+            return true
+          }
+        }
+      }
+
+      const result = await adapter.scrollToBottom(mockView)
+      expect(result).toBe(true)
+      expect(executedScript).toContain('scrollHeight')
+      expect(executedScript).toContain('.c-virtual_list__scroll_container')
+      expect(executedScript).toContain("dispatchEvent(new Event('scroll'")
+    })
+
+    it('scrollToBottom returns false for destroyed or null view', async () => {
+      const adapter = new SlackAdapter()
+      const destroyedView: any = {
+        webContents: {
+          isDestroyed: () => true,
+          executeJavaScript: async () => true
+        }
+      }
+      expect(await adapter.scrollToBottom(destroyedView)).toBe(false)
+      expect(await adapter.scrollToBottom(null as any)).toBe(false)
+    })
+
+    it('genesis detection script does not include channel_banner_header or top_banner', async () => {
+      const adapter = new SlackAdapter()
+      let executedScript = ''
+      const mockView: any = {
+        webContents: {
+          isDestroyed: () => false,
+          executeJavaScript: async (script: string) => {
+            executedScript = script
+            return true
+          }
+        }
+      }
+
+      await adapter.isAtChannelGenesis(mockView)
+      expect(executedScript).toContain('[data-qa="channel_created_summary"]')
+      expect(executedScript).not.toContain('[data-qa="channel_banner_header"]')
+      expect(executedScript).not.toContain('.c-message_list__top_banner')
+    })
+
+    it('genesis detection script includes channel and DM inception text patterns', async () => {
+      const adapter = new SlackAdapter()
+      let executedScript = ''
+      const mockView: any = {
+        webContents: {
+          isDestroyed: () => false,
+          executeJavaScript: async (script: string) => {
+            executedScript = script
+            return true
+          }
+        }
+      }
+
+      await adapter.isAtChannelGenesis(mockView)
+      expect(executedScript).toContain('This is the start of')
+      expect(executedScript).toContain('This conversation is just between')
+      expect(executedScript).toContain('created this channel on')
+      expect(executedScript).toContain('This is the very beginning')
+    })
+
+    it('scrollUp script uses refined genesis detection without false layout banners', async () => {
+      const adapter = new SlackAdapter()
+      let executedScript = ''
+      const mockView: any = {
+        webContents: {
+          isDestroyed: () => false,
+          executeJavaScript: async (script: string) => {
+            executedScript = script
+            return true
+          }
+        }
+      }
+
+      await adapter.scrollUp(mockView, 800)
+      expect(executedScript).toContain('[data-qa="channel_created_summary"]')
+      expect(executedScript).not.toContain('[data-qa="channel_banner_header"]')
+      expect(executedScript).not.toContain('.c-message_list__top_banner')
+    })
+  })
 })
+

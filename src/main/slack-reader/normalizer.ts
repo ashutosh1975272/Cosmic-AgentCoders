@@ -13,11 +13,7 @@ export interface RawScrapedMessage {
 /**
  * Creates a unique deterministic hash for deduplicating messages across polling cycles.
  */
-export function createMessageHash(
-  workspaceId: string,
-  channelId: string,
-  ts: string
-): string {
+export function createMessageHash(workspaceId: string, channelId: string, ts: string): string {
   return createHash('sha256')
     .update(`${workspaceId.trim()}|${channelId.trim()}|${ts.trim()}`, 'utf8')
     .digest('hex')
@@ -118,13 +114,15 @@ export function normalizeSlackTimestamp(rawTs?: string | number): string | null 
 
     // Try parsing date string with ordinal suffix stripped (e.g. "November 4th, 2026 at 2:35 PM")
     let cleanDateStr = trimmed.replace(/(\d+)(st|nd|rd|th)/gi, '$1').replace(/\bat\b/gi, ' ')
-    const hasMonthOrTime = /(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{1,2}:\d{2})/i.test(cleanDateStr)
+    const hasMonthOrTime =
+      /(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{1,2}:\d{2})/i.test(cleanDateStr)
     if (hasMonthOrTime) {
       if (!/\b20\d{2}\b/.test(cleanDateStr)) {
         const currentYear = new Date().getFullYear()
         const timeIdx = cleanDateStr.search(/\b\d{1,2}:\d{2}/)
         if (timeIdx !== -1) {
-          cleanDateStr = `${cleanDateStr.slice(0, timeIdx)}${currentYear} ${cleanDateStr.slice(timeIdx)}`.trim()
+          cleanDateStr =
+            `${cleanDateStr.slice(0, timeIdx)}${currentYear} ${cleanDateStr.slice(timeIdx)}`.trim()
         } else {
           cleanDateStr = `${cleanDateStr} ${currentYear}`
         }
@@ -147,6 +145,7 @@ export function normalizeScrapedMessage(
   raw: RawScrapedMessage,
   _channelId: string
 ): DashboardStoredMessage | null {
+  void _channelId
   const ts = normalizeSlackTimestamp(raw.rawTs)
   if (!ts) {
     // Hard rule: if timestamp cannot be determined from DOM, skip message to avoid corrupting time ordering

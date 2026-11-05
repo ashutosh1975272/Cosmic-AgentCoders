@@ -280,17 +280,16 @@ export function buildReadVisibleMessagesScript(sinceTs = 0): string {
 
 export const READ_VISIBLE_MESSAGES_SCRIPT = buildReadVisibleMessagesScript(0)
 
-const CHANNEL_GENESIS_SELECTORS = [
-  '[data-qa="channel_created_summary"]',
-  '.c-message_list__top_banner',
-  '[data-qa="channel_banner_header"]'
-].join(', ')
+const CHANNEL_GENESIS_SELECTORS = '[data-qa="channel_created_summary"]'
 
 export class SlackAdapter {
   async detectState(view: WebContentsView): Promise<SlackSessionState> {
     if (!view || view.webContents?.isDestroyed()) return 'unknown'
     try {
-      const state = (await view.webContents.executeJavaScript(DETECT_STATE_SCRIPT, true)) as SlackSessionState
+      const state = (await view.webContents.executeJavaScript(
+        DETECT_STATE_SCRIPT,
+        true
+      )) as SlackSessionState
       return state ?? 'unknown'
     } catch {
       return 'unknown'
@@ -300,7 +299,10 @@ export class SlackAdapter {
   async listChannels(view: WebContentsView): Promise<ScrapedChannelItem[]> {
     if (!view || view.webContents?.isDestroyed()) return []
     try {
-      const channels = (await view.webContents.executeJavaScript(LIST_CHANNELS_SCRIPT, true)) as ScrapedChannelItem[]
+      const channels = (await view.webContents.executeJavaScript(
+        LIST_CHANNELS_SCRIPT,
+        true
+      )) as ScrapedChannelItem[]
       return Array.isArray(channels) ? channels : []
     } catch {
       return []
@@ -314,10 +316,39 @@ export class SlackAdapter {
     if (!view || view.webContents?.isDestroyed()) return []
     try {
       const script = buildReadVisibleMessagesScript(options.sinceTs ?? 0)
-      const messages = (await view.webContents.executeJavaScript(script, true)) as RawScrapedMessage[]
+      const messages = (await view.webContents.executeJavaScript(
+        script,
+        true
+      )) as RawScrapedMessage[]
       return Array.isArray(messages) ? messages : []
     } catch {
       return []
+    }
+  }
+
+  /** Scroll the message list to the bottom (newest messages) without clicking or synthetic input events. */
+  async scrollToBottom(view: WebContentsView): Promise<boolean> {
+    if (!view || view.webContents?.isDestroyed()) return false
+    try {
+      return Boolean(
+        await view.webContents.executeJavaScript(
+          `(function() {
+            const list = document.querySelector('.c-virtual_list__scroll_container') ||
+                         document.querySelector('[data-qa="slack_kit_list"]') ||
+                         document.querySelector('.c-scrollbar__hider');
+            if (!list) return false;
+            list.scrollTop = list.scrollHeight;
+            if (typeof list.scrollTo === 'function') {
+              try { list.scrollTo({ top: list.scrollHeight, behavior: 'instant' }); } catch(e) {}
+            }
+            try { list.dispatchEvent(new Event('scroll', { bubbles: true })); } catch(e) {}
+            return true;
+          })()`,
+          true
+        )
+      )
+    } catch {
+      return false
     }
   }
 
@@ -336,7 +367,7 @@ export class SlackAdapter {
             const isAtGenesis = Boolean(
               document.querySelector('${CHANNEL_GENESIS_SELECTORS}') ||
               Array.from(document.querySelectorAll('.c-virtual_list__item')).some(el =>
-                /This is the start of the|This is the very beginning|created this channel on/i.test(el.innerText || '')
+                /created this channel on|This is the start of|This is the very beginning|This conversation is just between/i.test(el.textContent || el.innerText || '')
               )
             );
 
@@ -382,7 +413,7 @@ export class SlackAdapter {
             return Boolean(
               document.querySelector('${CHANNEL_GENESIS_SELECTORS}') ||
               Array.from(document.querySelectorAll('.c-virtual_list__item')).some(el =>
-                /This is the start of the|This is the very beginning|created this channel on/i.test(el.innerText || '')
+                /created this channel on|This is the start of|This is the very beginning|This conversation is just between/i.test(el.textContent || el.innerText || '')
               )
             );
           })()`,
@@ -403,8 +434,9 @@ export class SlackAdapter {
 
     // 1. Click the thread trigger on the parent message
     const opened = Boolean(
-      await view.webContents.executeJavaScript(
-        `(function() {
+      await view.webContents
+        .executeJavaScript(
+          `(function() {
           const targetTs = ${JSON.stringify(parentTs)};
           const rows = document.querySelectorAll('${SLACK_SELECTORS.messageRow}');
           for (const row of rows) {
@@ -420,8 +452,9 @@ export class SlackAdapter {
           }
           return false;
         })()`,
-        true
-      ).catch(() => false)
+          true
+        )
+        .catch(() => false)
     )
 
     if (!opened) return []
@@ -431,15 +464,17 @@ export class SlackAdapter {
     for (let i = 0; i < 6; i++) {
       await new Promise((r) => setTimeout(r, 500))
       paneMounted = Boolean(
-        await view.webContents.executeJavaScript(
-          `(function() {
+        await view.webContents
+          .executeJavaScript(
+            `(function() {
             const pane = document.querySelector('${SLACK_SELECTORS.threadContainer}');
             if (!pane) return false;
             const rows = pane.querySelectorAll('${SLACK_SELECTORS.threadMessageRow}');
             return rows.length > 0;
           })()`,
-          true
-        ).catch(() => false)
+            true
+          )
+          .catch(() => false)
       )
       if (paneMounted) break
     }
@@ -450,8 +485,9 @@ export class SlackAdapter {
     }
 
     // 3. Extract messages from the flexpane thread container
-    const rawReplies = (await view.webContents.executeJavaScript(
-      `(function() {
+    const rawReplies = (await view.webContents
+      .executeJavaScript(
+        `(function() {
         const pane = document.querySelector('${SLACK_SELECTORS.threadContainer}');
         if (!pane) return [];
         const rows = pane.querySelectorAll('${SLACK_SELECTORS.threadMessageRow}');
@@ -522,8 +558,9 @@ export class SlackAdapter {
         });
         return results;
       })()`,
-      true
-    ).catch(() => [])) as RawScrapedMessage[]
+        true
+      )
+      .catch(() => [])) as RawScrapedMessage[]
 
     // 4. Close the flexpane
     await this.closeThreadPane(view)

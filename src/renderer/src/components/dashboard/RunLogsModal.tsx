@@ -120,9 +120,10 @@ export function ScrapeLogExplorer({
     }
   }
 
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%', minHeight: 0 }}>
+    <div
+      style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%', minHeight: 0 }}
+    >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0' }}>
           {projectName ? `${projectName} · ` : ''}Scrape run history ({runs.length})
@@ -232,7 +233,14 @@ export function ScrapeLogExplorer({
                         ? run.channels.reduce((sum, ch) => sum + (ch.messagesRead || 0), 0)
                         : 0)
                     return (
-                      <span style={{ fontSize: 11, color: '#64748b', display: 'flex', justifyContent: 'space-between' }}>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: '#64748b',
+                          display: 'flex',
+                          justifyContent: 'space-between'
+                        }}
+                      >
                         <span>
                           {run.trigger} · {run.channelsRead} ch · {totalRead} read
                         </span>
@@ -271,9 +279,7 @@ export function ScrapeLogExplorer({
                   Window:{' '}
                   <b>
                     {activeRun.window.backfillHours}h
-                    {activeRun.window.gapSeconds
-                      ? ` · gap ${activeRun.window.gapSeconds}s`
-                      : ''}
+                    {activeRun.window.gapSeconds ? ` · gap ${activeRun.window.gapSeconds}s` : ''}
                   </b>
                 </span>
                 <span>
@@ -325,11 +331,20 @@ export function ScrapeLogExplorer({
                     gap: 4
                   }}
                 >
-                  <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: '#64748b',
+                      textTransform: 'uppercase'
+                    }}
+                  >
                     Channels
                   </div>
                   {activeRun.channels.length === 0 ? (
-                    <div style={{ fontSize: 12, color: '#64748b' }}>No channel detail recorded.</div>
+                    <div style={{ fontSize: 12, color: '#64748b' }}>
+                      No channel detail recorded.
+                    </div>
                   ) : (
                     activeRun.channels.map((channel) => {
                       const selected = activeChannel?.channelId === channel.channelId
@@ -352,13 +367,20 @@ export function ScrapeLogExplorer({
                             gap: 2
                           }}
                         >
-                          <span style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
+                          <span
+                            style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}
+                          >
                             <span>
-                              {channel.kind === 'dm' ? '💬' : channel.kind === 'private' ? '🔒' : '#'}{' '}
+                              {channel.kind === 'dm'
+                                ? '💬'
+                                : channel.kind === 'private'
+                                  ? '🔒'
+                                  : '#'}{' '}
                               {channel.channelName}
                             </span>
                             <span style={{ color: '#64748b', fontSize: 11 }}>
-                              {channel.messagesRead} read{channel.newMessages > 0 ? ` (+${channel.newMessages})` : ''}
+                              {channel.messagesRead} read
+                              {channel.newMessages > 0 ? ` (+${channel.newMessages})` : ''}
                             </span>
                           </span>
                           <span style={{ fontSize: 10, color: '#64748b' }}>
@@ -371,8 +393,24 @@ export function ScrapeLogExplorer({
                   )}
                 </div>
 
-                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden' }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>
+                <div
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                    overflow: 'hidden'
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: '#64748b',
+                      textTransform: 'uppercase'
+                    }}
+                  >
                     People ({activeRun.people.length})
                   </div>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -397,10 +435,25 @@ export function ScrapeLogExplorer({
                     )}
                   </div>
 
-                  <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: '#64748b',
+                      textTransform: 'uppercase'
+                    }}
+                  >
                     Messages
                   </div>
-                  <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div
+                    style={{
+                      flex: 1,
+                      overflowY: 'auto',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 6
+                    }}
+                  >
                     {snippets.length === 0 ? (
                       <div style={{ fontSize: 12, color: '#64748b' }}>
                         No snippets for this channel in this run.

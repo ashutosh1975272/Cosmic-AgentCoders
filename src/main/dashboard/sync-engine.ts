@@ -696,7 +696,12 @@ export class DashboardSyncEngine {
     error?: string
     deltas: DashboardChannelDelta[]
   }> {
-    const empty = { runId: '', channelsRead: 0, newMessages: 0, deltas: [] as DashboardChannelDelta[] }
+    const empty = {
+      runId: '',
+      channelsRead: 0,
+      newMessages: 0,
+      deltas: [] as DashboardChannelDelta[]
+    }
     // Auto-heal workspaceId if pending or missing and project has a real teamId
     if (
       (!source.workspaceId || source.workspaceId.startsWith('pending-')) &&
@@ -757,11 +762,7 @@ export class DashboardSyncEngine {
           .filter((channel) => channel.enabled !== false)
           .map((channel) => channel.id)
     )
-    const allowDms = resolveDmPolicy(
-      source,
-      options,
-      await this.getScrapePersonalDms()
-    )
+    const allowDms = resolveDmPolicy(source, options, await this.getScrapePersonalDms())
 
     const includeKinds = new Set<ScrapeChannelKind>()
     if (options?.includePublic !== false) includeKinds.add('public')
@@ -938,7 +939,8 @@ export class DashboardSyncEngine {
           sinceTs = Math.max(catchUpFloorTs, cursor - 120)
         }
 
-        const isDeepHistorical = isGenesis || isCustomDays || isThirtyDays || sinceTs <= thirtyDaysAgoTs
+        const isDeepHistorical =
+          isGenesis || isCustomDays || isThirtyDays || sinceTs <= thirtyDaysAgoTs
         const isUltraHistorical = isGenesis || (isCustomDays && requestedDays >= 180)
         const maxScrolls = isUltraHistorical ? 2000 : isDeepHistorical ? 1000 : 60
         const maxMessages = isUltraHistorical ? 35000 : isDeepHistorical ? 15000 : 3000
@@ -956,9 +958,7 @@ export class DashboardSyncEngine {
 
           let messages = result.messages
           if (peopleFilter.size > 0) {
-            messages = messages.filter((m) =>
-              peopleFilter.has((m.user ?? '').trim().toLowerCase())
-            )
+            messages = messages.filter((m) => peopleFilter.has((m.user ?? '').trim().toLowerCase()))
           }
 
           if (messages.length === 0) {
@@ -1117,7 +1117,12 @@ export class DashboardSyncEngine {
       this.onSourceRun?.(source.id, finishedAt)
 
       this.scrapeEventListener?.({
-        type: status === 'error' ? 'run_failed' : status === 'stopped' ? 'run_cancelled' : 'run_finished',
+        type:
+          status === 'error'
+            ? 'run_failed'
+            : status === 'stopped'
+              ? 'run_cancelled'
+              : 'run_finished',
         runId,
         projectId: project.id,
         sourceId: source.id,
@@ -1486,4 +1491,3 @@ function resolveDmPolicy(
   if (policy === 'off') return false
   return globalEnabled
 }
-
