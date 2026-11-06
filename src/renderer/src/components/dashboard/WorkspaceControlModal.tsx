@@ -750,6 +750,11 @@ export function WorkspaceControlModal({
                         cursor: scheduleEnabled ? 'pointer' : 'not-allowed'
                       }}
                     >
+                      <option value={0.05}>Every 3 seconds (⚡ Rapid)</option>
+                      <option value={0.083}>Every 5 seconds (⚡ Rapid)</option>
+                      <option value={0.167}>Every 10 seconds (⚡ Rapid)</option>
+                      <option value={0.333}>Every 20 seconds (⚡ Rapid)</option>
+                      <option value={0.5}>Every 30 seconds</option>
                       <option value={1}>Every 1 minute</option>
                       <option value={5}>Every 5 minutes</option>
                       <option value={10}>Every 10 minutes</option>
@@ -758,7 +763,7 @@ export function WorkspaceControlModal({
                       <option value={60}>Every 60 minutes (1 hour)</option>
                     </select>
                     <span style={{ fontSize: 12, color: '#64748b' }}>
-                      {scheduleEnabled ? `Next cycle in ~${intervalMinutes} minutes.` : 'Automation is currently paused.'}
+                      {scheduleEnabled ? intervalMinutes < 1 ? `Next cycle in ~${Math.round(intervalMinutes * 60)} seconds.` : `Next cycle in ~${intervalMinutes} minutes.` : 'Automation is currently paused.'}
                     </span>
                   </div>
                   {scheduleEnabled && (

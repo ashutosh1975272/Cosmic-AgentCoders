@@ -141,6 +141,8 @@ export class DashboardSyncEngine {
   protected readonly onSynced: ((snapshots: DashboardProjectSnapshot[]) => void) | undefined
   private readonly getScrapePersonalDms: () => boolean | Promise<boolean>
   private readonly onSourceRun?: (sourceId: string, atIso: string) => void
+  private readonly getExistingBrowserView?: (profileId: string, appId: 'slack') => any
+  private readonly getExistingCardView?: (projectId: string, appId: 'slack') => any
   private scrapeEventListener: ((event: ScrapeStepEvent) => void) | null = null
   private activeWatchReader: SlackReaderView | null = null
   private scrapeQueuePromise: Promise<any> = Promise.resolve()
@@ -175,6 +177,8 @@ export class DashboardSyncEngine {
     this.onSynced = deps.onSynced
     this.getScrapePersonalDms = deps.getScrapePersonalDms ?? (() => false)
     this.onSourceRun = deps.onSourceRun
+    this.getExistingBrowserView = deps.getExistingBrowserView
+    this.getExistingCardView = deps.getExistingCardView
     if (deps.onProgress) this.progressCallbacks.push(deps.onProgress)
   }
 
@@ -829,6 +833,12 @@ export class DashboardSyncEngine {
     const requestedEngineMode = source.engineMode ?? 'direct_api'
     let activeEngineMode: 'direct_api' | 'browser' = 'browser'
     let directApiClient: SlackApiClient | null = null
+    const cacheKey = `slack:${project.id}:${source.workspaceId}`
+    const candidateViews = [
+      this.getExistingCardView?.(project.id, 'slack'),
+      this.getExistingBrowserView?.(source.profileId, 'slack'),
+      reader.getView()
+    ].filter(Boolean)
 
     try {
       let targetChannels: ProjectSourceChannel[] = source.channels ?? []
@@ -877,8 +887,24 @@ export class DashboardSyncEngine {
 
       if (requestedEngineMode === 'direct_api') {
         try {
-          await reader.initialize()
-          const creds = await sessionTokenExtractor.extractSlackSessionTokens(reader.getView())
+          let creds = await sessionTokenExtractor.extractSlackSessionTokens(candidateViews, cacheKey)
+
+          if (!creds) {
+            await reader.initialize()
+            const bgView = reader.getView()
+            if (bgView && !bgView.webContents.isDestroyed() && !bgView.webContents.getURL().includes('slack.com')) {
+              const targetUrl = `https://app.slack.com/client/${source.workspaceId}`
+              try {
+                await bgView.webContents.loadURL(targetUrl)
+                await reader.waitForContent(8000)
+              } catch {
+                // ignore
+              }
+            }
+            const allCandidates = [bgView, ...candidateViews].filter(Boolean)
+            creds = await sessionTokenExtractor.extractSlackSessionTokens(allCandidates, cacheKey)
+          }
+
           if (creds) {
             directApiClient = new SlackApiClient(creds)
             activeEngineMode = 'direct_api'
@@ -948,15 +974,21 @@ export class DashboardSyncEngine {
         const lastSyncSec = cursorInfo.lastSyncAt
           ? Math.floor(new Date(cursorInfo.lastSyncAt).getTime() / 1000)
           : null
+        const sourceLastSyncSec = source.lastScrapeAt
+          ? Math.floor(new Date(source.lastScrapeAt).getTime() / 1000)
+          : source.lastReadAt
+            ? Math.floor(new Date(source.lastReadAt).getTime() / 1000)
+            : null
+        const effectiveLastSyncSec = lastSyncSec ?? sourceLastSyncSec
         const nowSec = Math.floor(Date.now() / 1000)
 
         // Calculate offline gap: elapsed seconds since the last sync or since latest cursor
         const offlineGapSec = Math.max(
           cursor ? Math.max(0, nowSec - cursor) : 0,
-          lastSyncSec ? Math.max(0, nowSec - lastSyncSec) : 0
+          effectiveLastSyncSec ? Math.max(0, nowSec - effectiveLastSyncSec) : 0
         )
-        // If laptop was off / app was closed for > 15 minutes, or startup catch-up triggered
-        const isOfflineGap = offlineGapSec > 15 * 60 || extra.trigger === 'startup'
+        // If laptop was off / app was closed / gap > 60s, or startup catch-up triggered
+        const isOfflineGap = offlineGapSec > 60 || extra.trigger === 'startup'
 
         const requestedDays = options?.days
         const thirtyDaysAgoTs = nowSec - 30 * 86400
@@ -979,8 +1011,6 @@ export class DashboardSyncEngine {
           sinceTs = nowSec - requestedDays * 86400
         } else if (isThirtyDays) {
           sinceTs = thirtyDaysAgoTs
-        } else if (!cursor) {
-          sinceTs = backfillHours > 0 ? floorTs : thirtyDaysAgoTs
         } else if (isOfflineGap) {
           // Smart 24-40 hour lookback: cover at least 24h, up to 40h (or more if offline for days)
           isSmartCatchUp = true
@@ -988,7 +1018,11 @@ export class DashboardSyncEngine {
           const smartLookbackHours = Math.max(24, Math.min(720, Math.ceil(offlineHours + 2)))
           const smartFloorTs = nowSec - smartLookbackHours * 3600
           // Guarantee we cover from cursor - 120s or the smart 24-40h floor, capped by catchUpFloorTs
-          sinceTs = Math.max(catchUpFloorTs, Math.min(cursor - 120, smartFloorTs))
+          sinceTs = cursor
+            ? Math.max(catchUpFloorTs, Math.min(cursor - 120, smartFloorTs))
+            : Math.max(catchUpFloorTs, smartFloorTs)
+        } else if (!cursor) {
+          sinceTs = backfillHours > 0 ? floorTs : thirtyDaysAgoTs
         } else {
           sinceTs = Math.max(catchUpFloorTs, cursor - 120)
         }
@@ -1036,7 +1070,8 @@ export class DashboardSyncEngine {
                   `[sync-engine] direct API session expired for ${ch.id}, attempting refresh...`
                 )
                 const refreshed = await sessionTokenExtractor.refreshSlackSessionTokens(
-                  reader.getView()
+                  candidateViews,
+                  cacheKey
                 )
                 if (refreshed) {
                   directApiClient = new SlackApiClient(refreshed)

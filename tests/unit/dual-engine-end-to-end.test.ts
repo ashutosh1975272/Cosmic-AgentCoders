@@ -312,4 +312,58 @@ describe('Dual-Engine End-to-End Testing', () => {
     expect(stored?.messages).toHaveLength(2)
     expect(stored?.messages[0].text).toBe('offline sleep message 1')
   })
+
+  it('automatically triggers 24-hour lookback window when time gap exceeds 60 seconds', async () => {
+    const { monitors, delta, history } = await createStores()
+    const project = testProject('direct_api')
+    // Set last sync to 3 minutes ago (> 60s gap)
+    const threeMinsAgoIso = new Date(Date.now() - 180_000).toISOString()
+    project.sources![0].lastScrapeAt = threeMinsAgoIso
+    project.sources![0].lastReadAt = threeMinsAgoIso
+    await monitors.upsertProject({ project })
+
+    vi.spyOn(sessionTokenExtractor, 'extractSlackSessionTokens').mockResolvedValue({
+      token: 'xoxc-test-token-123',
+      cookie: 'xoxd-test-cookie-456'
+    })
+
+    let requestedSinceTs: number | undefined
+    vi.spyOn(SlackApiClient.prototype, 'fetchChannelMessages').mockImplementation(async (opts) => {
+      requestedSinceTs = opts.sinceTs
+      return {
+        messages: [
+          { ts: '1793950000.000001', user: 'Ashutosh', text: 'gap caught up message', source: 'client' }
+        ],
+        oldestTs: 1793950000.000001,
+        newestTs: 1793950000.000001,
+        hasMore: false
+      }
+    })
+
+    const insightEngineMock = new InsightEngine({
+      provider: null,
+      historyStore: history,
+      deltaStore: delta,
+      resolveSources: (p) => Promise.resolve(resolveProjectMessageSources(p))
+    })
+    vi.spyOn(insightEngineMock, 'refresh').mockImplementation((_p, _t, s) => Promise.resolve(s))
+
+    const engine = new DashboardInsightSyncEngine({
+      monitorStore: monitors,
+      deltaStore: delta,
+      oauthTokenProvider: { tryGet: async () => null },
+      pollerFactory: () => ({ fetchHistory: async () => ({ messages: [], hasMore: false }) }),
+      insightEngine: insightEngineMock
+    })
+
+    const run = await engine.syncProjectSource('proj-test', 'src-test-1', {
+      trigger: 'scheduled'
+    })
+
+    expect(run.status).toBe('success')
+    expect(run.newMessages).toBe(1)
+    // requestedSinceTs must be at least ~24 hours ago (>= 86,000 seconds lookback)
+    const nowSec = Math.floor(Date.now() / 1000)
+    expect(nowSec - (requestedSinceTs ?? 0)).toBeGreaterThanOrEqual(86000)
+  })
 })

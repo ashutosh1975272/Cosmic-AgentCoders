@@ -5,6 +5,7 @@ import type {
   DashboardProject,
   PersonRole
 } from '../../../../shared/dashboard-contract'
+import { DASHBOARD_SCHEDULE_INTERVALS } from '../../../../shared/dashboard-contract'
 import { useDashboardStore } from '../../hooks/useDashboard'
 import { useProjectActivity } from '../../hooks/useProjectActivity'
 import AiSettingsForm from './AiSettingsForm'
@@ -1205,9 +1206,9 @@ export default function ProjectSettingsTab({
                                       })
                                     }
                                   >
-                                    {[1, 5, 10, 15, 30, 60].map((m) => (
+                                    {DASHBOARD_SCHEDULE_INTERVALS.map((m) => (
                                       <option key={m} value={m} style={{ background: '#0f172a', color: '#fff' }}>
-                                        {m}m
+                                        {m < 1 ? `${Math.round(m * 60)}s` : `${m}m`}
                                       </option>
                                     ))}
                                   </select>

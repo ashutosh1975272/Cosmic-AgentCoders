@@ -50,62 +50,133 @@ export const EXTRACT_TOKEN_SCRIPT = `
 })()
 `
 
+const DEFAULT_CACHE_TTL_MS = 60 * 60 * 1000 // 1 hour
+
 export class SessionTokenExtractor {
+  private readonly cache = new Map<string, { creds: SlackSessionCredentials; expiresAt: number }>()
+
   /**
-   * Extracts xoxc token and xoxd session cookie from a WebContentsView.
-   * Returns null if the view is not logged in or credentials cannot be found.
+   * Retrieves unexpired credentials from cache if available.
    */
-  async extractSlackSessionTokens(
-    view: WebContentsView | null
-  ): Promise<SlackSessionCredentials | null> {
-    if (!view || view.webContents?.isDestroyed()) return null
-
-    try {
-      // 1. Extract xoxd cookie from view partition
-      const cookies = await view.webContents.session.cookies.get({ domain: '.slack.com', name: 'd' })
-      let xoxdCookie = cookies.find((c) => c.name === 'd')?.value
-
-      if (!xoxdCookie) {
-        // Fallback: check all slack cookies
-        const allSlackCookies = await view.webContents.session.cookies.get({ url: 'https://app.slack.com' })
-        xoxdCookie = allSlackCookies.find((c) => c.name === 'd')?.value
-      }
-
-      if (!xoxdCookie || !xoxdCookie.startsWith('xoxd-')) {
-        log.info('[token-extractor] xoxd session cookie not found or invalid format')
-        return null
-      }
-
-      // 2. Extract xoxc token from the page context
-      const xoxcToken = (await view.webContents.executeJavaScript(
-        EXTRACT_TOKEN_SCRIPT,
-        true
-      )) as string
-
-      if (!xoxcToken || !xoxcToken.startsWith('xoxc-')) {
-        log.info('[token-extractor] xoxc client token not found in DOM context')
-        return null
-      }
-
-      return {
-        token: xoxcToken.trim(),
-        cookie: xoxdCookie.trim()
-      }
-    } catch (err) {
-      log.info('[token-extractor] credential extraction failed:', { error: String(err) })
+  getCached(key: string): SlackSessionCredentials | null {
+    if (!key) return null
+    const entry = this.cache.get(key)
+    if (!entry) return null
+    if (Date.now() > entry.expiresAt) {
+      this.cache.delete(key)
       return null
+    }
+    return entry.creds
+  }
+
+  /**
+   * Clears cached credentials (all or for a specific key).
+   */
+  clearCache(key?: string): void {
+    if (key) {
+      this.cache.delete(key)
+    } else {
+      this.cache.clear()
     }
   }
 
   /**
-   * Refreshes the session tokens by briefly re-probing the view cookies and window state.
+   * Caches valid credentials under a key.
+   */
+  setCached(key: string, creds: SlackSessionCredentials, ttlMs = DEFAULT_CACHE_TTL_MS): void {
+    if (!key || !creds) return
+    this.cache.set(key, { creds, expiresAt: Date.now() + ttlMs })
+  }
+
+  /**
+   * Extracts xoxc token and xoxd session cookie from a WebContentsView or an array of candidate views.
+   * Checks the cache first if cacheKey is provided.
+   * Returns null if no candidate view yields valid credentials.
+   */
+  async extractSlackSessionTokens(
+    viewOrViews: WebContentsView | null | (WebContentsView | null | undefined)[],
+    cacheKey?: string
+  ): Promise<SlackSessionCredentials | null> {
+    if (cacheKey) {
+      const cached = this.getCached(cacheKey)
+      if (cached) {
+        return cached
+      }
+    }
+
+    const views = Array.isArray(viewOrViews) ? viewOrViews : [viewOrViews]
+
+    for (const view of views) {
+      if (!view || view.webContents?.isDestroyed()) continue
+
+      try {
+        const creds = await this.extractFromSingleView(view)
+        if (creds) {
+          if (cacheKey) {
+            this.setCached(cacheKey, creds)
+          }
+          return creds
+        }
+      } catch (err) {
+        log.info('[token-extractor] probe on view failed, trying next candidate:', {
+          error: String(err)
+        })
+      }
+    }
+
+    return null
+  }
+
+  private async extractFromSingleView(
+    view: WebContentsView
+  ): Promise<SlackSessionCredentials | null> {
+    // 1. Extract xoxd cookie from view partition
+    const sessionObj = view.webContents.session
+    if (!sessionObj?.cookies) return null
+
+    const cookies = await sessionObj.cookies.get({ domain: '.slack.com', name: 'd' })
+    let xoxdCookie = cookies.find((c) => c.name === 'd')?.value
+
+    if (!xoxdCookie) {
+      const allSlackCookies = await sessionObj.cookies.get({ url: 'https://app.slack.com' })
+      xoxdCookie = allSlackCookies.find((c) => c.name === 'd')?.value
+    }
+
+    if (!xoxdCookie || !xoxdCookie.startsWith('xoxd-')) {
+      return null
+    }
+
+    // 2. Extract xoxc token from the page context
+    let xoxcToken = ''
+    try {
+      xoxcToken = (await view.webContents.executeJavaScript(
+        EXTRACT_TOKEN_SCRIPT,
+        true
+      )) as string
+    } catch {
+      xoxcToken = ''
+    }
+
+    if (!xoxcToken || !xoxcToken.startsWith('xoxc-')) {
+      return null
+    }
+
+    return {
+      token: xoxcToken.trim(),
+      cookie: xoxdCookie.trim()
+    }
+  }
+
+  /**
+   * Refreshes the session tokens by clearing the cache key and briefly re-probing candidate views.
    */
   async refreshSlackSessionTokens(
-    view: WebContentsView | null
+    viewOrViews: WebContentsView | null | (WebContentsView | null | undefined)[],
+    cacheKey?: string
   ): Promise<SlackSessionCredentials | null> {
-    return this.extractSlackSessionTokens(view)
+    if (cacheKey) this.clearCache(cacheKey)
+    return this.extractSlackSessionTokens(viewOrViews, cacheKey)
   }
 }
 
 export const sessionTokenExtractor = new SessionTokenExtractor()
-
