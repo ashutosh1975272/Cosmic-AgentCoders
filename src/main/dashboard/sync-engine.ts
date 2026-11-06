@@ -915,26 +915,52 @@ export class DashboardSyncEngine {
           text: `Reading ${kind === 'dm' ? 'DM' : '#'}${name}…`
         })
 
-        const cursor = await this.channelCursor(source, ch.id)
+        const cursorInfo = await this.channelCursorInfo(source, ch.id)
+        const cursor = cursorInfo.cursor
+        const lastSyncSec = cursorInfo.lastSyncAt
+          ? Math.floor(new Date(cursorInfo.lastSyncAt).getTime() / 1000)
+          : null
+        const nowSec = Math.floor(Date.now() / 1000)
+
+        // Calculate offline gap: elapsed seconds since the last sync or since latest cursor
+        const offlineGapSec = Math.max(
+          cursor ? Math.max(0, nowSec - cursor) : 0,
+          lastSyncSec ? Math.max(0, nowSec - lastSyncSec) : 0
+        )
+        // If laptop was off / app was closed for > 15 minutes, or startup catch-up triggered
+        const isOfflineGap = offlineGapSec > 15 * 60 || extra.trigger === 'startup'
+
         const requestedDays = options?.days
-        const thirtyDaysAgoTs = Math.floor(Date.now() / 1000) - 30 * 86400
+        const thirtyDaysAgoTs = nowSec - 30 * 86400
         // When forceGenesis is true or days is 0, scrape from channel inception (sinceTs = 0).
         // When explicit days is provided, scrape with custom lookback window from now (e.g. 230 days).
         // When it is first scrape OR force30Days is true, scrape with a strict 30-day (1-month) historical window.
-        // Subsequent scrapes read incrementally from cursor with a 120s safety buffer.
+        // When an offline gap occurred (laptop shut down), smartly look back 24-40 hours (or full offline gap)
+        // so no intermediate messages are lost.
+        // Subsequent active scrapes read incrementally from cursor with a 120s safety buffer.
         const isGenesis = options?.forceGenesis === true || requestedDays === 0
         const isCustomDays = typeof requestedDays === 'number' && requestedDays > 0
         const isThirtyDays = options?.force30Days === true
 
         let sinceTs: number
+        let isSmartCatchUp = false
+
         if (isGenesis) {
           sinceTs = 0
         } else if (isCustomDays) {
-          sinceTs = Math.floor(Date.now() / 1000) - requestedDays * 86400
+          sinceTs = nowSec - requestedDays * 86400
         } else if (isThirtyDays) {
           sinceTs = thirtyDaysAgoTs
         } else if (!cursor) {
           sinceTs = backfillHours > 0 ? floorTs : thirtyDaysAgoTs
+        } else if (isOfflineGap) {
+          // Smart 24-40 hour lookback: cover at least 24h, up to 40h (or more if offline for days)
+          isSmartCatchUp = true
+          const offlineHours = offlineGapSec / 3600
+          const smartLookbackHours = Math.max(24, Math.min(720, Math.ceil(offlineHours + 2)))
+          const smartFloorTs = nowSec - smartLookbackHours * 3600
+          // Guarantee we cover from cursor - 120s or the smart 24-40h floor, capped by catchUpFloorTs
+          sinceTs = Math.max(catchUpFloorTs, Math.min(cursor - 120, smartFloorTs))
         } else {
           sinceTs = Math.max(catchUpFloorTs, cursor - 120)
         }
@@ -942,8 +968,20 @@ export class DashboardSyncEngine {
         const isDeepHistorical =
           isGenesis || isCustomDays || isThirtyDays || sinceTs <= thirtyDaysAgoTs
         const isUltraHistorical = isGenesis || (isCustomDays && requestedDays >= 180)
-        const maxScrolls = isUltraHistorical ? 2000 : isDeepHistorical ? 1000 : 60
-        const maxMessages = isUltraHistorical ? 35000 : isDeepHistorical ? 15000 : 3000
+        const maxScrolls = isUltraHistorical
+          ? 2000
+          : isDeepHistorical
+            ? 1000
+            : isSmartCatchUp
+              ? 500
+              : 80
+        const maxMessages = isUltraHistorical
+          ? 35000
+          : isDeepHistorical
+            ? 15000
+            : isSmartCatchUp
+              ? 10000
+              : 3000
         windowStart = sinceTs === 0 ? 0 : Math.min(windowStart, sinceTs)
 
         try {
@@ -1168,15 +1206,26 @@ export class DashboardSyncEngine {
     }
   }
 
-  private async channelCursor(source: ProjectSource, channelId: string): Promise<number | null> {
-    if (!source.profileId) return null
+  private async channelCursorInfo(
+    source: ProjectSource,
+    channelId: string
+  ): Promise<{ cursor: number | null; lastSyncAt: string | null }> {
+    if (!source.profileId) return { cursor: null, lastSyncAt: null }
     try {
       const delta = await this.deltaStore.load(source.profileId, source.workspaceId, channelId)
       const cursor = delta?.cursor ? Number.parseFloat(delta.cursor) : Number.NaN
-      return Number.isFinite(cursor) && cursor > 0 ? cursor : null
+      return {
+        cursor: Number.isFinite(cursor) && cursor > 0 ? cursor : null,
+        lastSyncAt: delta?.lastSyncAt ?? null
+      }
     } catch {
-      return null
+      return { cursor: null, lastSyncAt: null }
     }
+  }
+
+  async channelCursor(source: ProjectSource, channelId: string): Promise<number | null> {
+    const info = await this.channelCursorInfo(source, channelId)
+    return info.cursor
   }
 
   async syncAll(

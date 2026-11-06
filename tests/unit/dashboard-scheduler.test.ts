@@ -454,4 +454,48 @@ describe('DashboardScheduler', () => {
     expect(dailyRun).toMatchObject({ kind: 'daily-recheck', status: 'ok' })
     scheduler.stop()
   })
+
+  it('triggers startup catch-up when a browser source is overdue on boot', async () => {
+    const T_LAST = new Date(T0.getTime() - 20 * 60_000) // 20m ago (overdue for 5m interval)
+    const source = {
+      id: 'src-overdue',
+      kind: 'browser' as const,
+      workspaceId: 'T1',
+      workspaceName: 'Acme',
+      profileId: 'prof-1',
+      enabled: true,
+      scheduleEnabled: true,
+      scheduleIntervalMinutes: 5 as const,
+      channels: []
+    }
+    const project = {
+      id: 'proj-1',
+      name: 'Project 1',
+      sources: [source]
+    } as unknown as DashboardProject
+
+    const syncProjectSource = vi.fn(async () => ({ status: 'success' as const }))
+    const engine = {
+      syncAll: vi.fn(async () => []),
+      syncProjectSource,
+      isSourceRunning: vi.fn(() => false)
+    } as unknown as DashboardSyncEngine
+    const store = new FakeStore({
+      sourceLastRunAt: {
+        'src-overdue': T_LAST.toISOString()
+      }
+    })
+    const scheduler = new DashboardScheduler(engine, store, {
+      now: () => T0.getTime(),
+      listProjects: async () => [project]
+    })
+
+    await scheduler.start()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(syncProjectSource).toHaveBeenCalledWith('proj-1', 'src-overdue', {
+      trigger: 'startup'
+    })
+    scheduler.stop()
+  })
 })

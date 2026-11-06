@@ -618,16 +618,25 @@ export function WorkspaceControlModal({
                         cursor: scheduleEnabled ? 'pointer' : 'not-allowed'
                       }}
                     >
+                      <option value={1}>Every 1 minute</option>
                       <option value={5}>Every 5 minutes</option>
+                      <option value={10}>Every 10 minutes</option>
                       <option value={15}>Every 15 minutes</option>
-                      <option value={25}>Every 25 minutes</option>
-                      <option value={35}>Every 35 minutes</option>
+                      <option value={30}>Every 30 minutes</option>
                       <option value={60}>Every 60 minutes (1 hour)</option>
                     </select>
                     <span style={{ fontSize: 12, color: '#64748b' }}>
                       {scheduleEnabled ? `Next cycle in ~${intervalMinutes} minutes.` : 'Automation is currently paused.'}
                     </span>
                   </div>
+                  {scheduleEnabled && (
+                    <div style={{ fontSize: 12, color: '#38bdf8', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span>🛡️</span>
+                      <span>
+                        <strong>Smart Offline & 24–40h Catch-Up Active:</strong> When your computer turns back on after being off or closed, any missed messages are automatically caught up and deduplicated without missing history.
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

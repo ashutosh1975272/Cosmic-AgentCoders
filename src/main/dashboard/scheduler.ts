@@ -70,6 +70,7 @@ export class DashboardScheduler {
   private running = false
   private started = false
   private pendingSlackTrigger: SlackTrigger = 'scheduled'
+  private hasRunStartupSourceCatchUp = false
 
   constructor(
     engine: DashboardSyncEngine,
@@ -105,6 +106,7 @@ export class DashboardScheduler {
     this.nextDailyAt = null
     this.running = false
     this.sourcesRunning = false
+    this.hasRunStartupSourceCatchUp = false
   }
 
   async getState(): Promise<DashboardSchedulesState> {
@@ -190,11 +192,19 @@ export class DashboardScheduler {
             source.lastReadAt ??
             null
           const lastMs = last ? new Date(last).getTime() : null
-          const due = lastMs === null || !Number.isFinite(lastMs) || this.now() >= lastMs + intervalMs
+          const isOverdue =
+            lastMs === null || !Number.isFinite(lastMs) || this.now() >= lastMs + intervalMs
+          const isStartupCatchUp =
+            !this.hasRunStartupSourceCatchUp &&
+            lastMs !== null &&
+            Number.isFinite(lastMs) &&
+            this.now() - lastMs > intervalMs
+          const due = isOverdue
           if (!due) continue
 
+          const trigger: SlackTrigger = isStartupCatchUp ? 'startup' : 'scheduled'
           const result = await this.engine.syncProjectSource(project.id, source.id, {
-            trigger: 'scheduled'
+            trigger
           })
           await this.store.recordSourceRun?.(
             source.id,
@@ -240,6 +250,7 @@ export class DashboardScheduler {
       }
 
       await this.store.pruneSourceRuns?.(activeIds)
+      this.hasRunStartupSourceCatchUp = true
       await this.emit()
     } catch {
       // A malformed project must not kill the scheduler loop.

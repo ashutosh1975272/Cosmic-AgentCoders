@@ -1205,7 +1205,7 @@ export default function ProjectSettingsTab({
                                       })
                                     }
                                   >
-                                    {[1, 5, 15, 30, 60].map((m) => (
+                                    {[1, 5, 10, 15, 30, 60].map((m) => (
                                       <option key={m} value={m} style={{ background: '#0f172a', color: '#fff' }}>
                                         {m}m
                                       </option>

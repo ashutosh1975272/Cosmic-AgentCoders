@@ -1,15 +1,16 @@
 import type React from 'react'
 import { useCallback, useEffect, useState } from 'react'
-import type {
-  DashboardScheduleKind,
-  DashboardScheduleRun,
-  DashboardScheduleRunSource,
-  DashboardSchedulesState,
-  DashboardSourceSchedulePayload,
-  DashboardSourceScheduleState
+import {
+  type DashboardScheduleKind,
+  type DashboardScheduleRun,
+  type DashboardScheduleRunSource,
+  type DashboardSchedulesState,
+  type DashboardSourceSchedulePayload,
+  type DashboardSourceScheduleState,
+  DASHBOARD_SCHEDULE_INTERVALS
 } from '../../../../shared/dashboard-contract'
 
-const INTERVALS = [1, 5, 15, 30, 60] as const
+const INTERVALS = DASHBOARD_SCHEDULE_INTERVALS
 
 const KIND_LABEL: Record<DashboardScheduleKind, string> = {
   'slack-sync': 'Slack sync',

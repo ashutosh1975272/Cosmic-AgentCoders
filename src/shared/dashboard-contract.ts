@@ -130,7 +130,7 @@ export interface ProjectSource {
 
 export type ProjectWorkflowStatus = 'active' | 'stopped' | 'removed' | 'completed'
 
-export type ScrapeTrigger = 'scheduled' | 'manual'
+export type ScrapeTrigger = 'scheduled' | 'manual' | 'startup'
 export type ScrapeRunStatus = 'success' | 'partial' | 'error' | 'stopped'
 export type ScrapeChannelKind = 'public' | 'private' | 'dm' | 'group-dm'
 
@@ -445,7 +445,7 @@ export interface DashboardMarkViewedPayload {
 export type DashboardScheduleKind = 'slack-sync' | 'agent-analysis' | 'daily-recheck'
 
 /** The only intervals the selector offers; one minute is the floor. */
-export const DASHBOARD_SCHEDULE_INTERVALS = [1, 5, 15, 30, 60] as const
+export const DASHBOARD_SCHEDULE_INTERVALS = [1, 5, 10, 15, 30, 60] as const
 export type DashboardScheduleInterval = (typeof DASHBOARD_SCHEDULE_INTERVALS)[number]
 
 export interface DashboardScheduleSettings {
