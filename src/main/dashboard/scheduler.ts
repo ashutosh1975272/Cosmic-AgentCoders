@@ -164,7 +164,8 @@ export class DashboardScheduler {
   /** Per-source cadence: tick often, scrape only what is due. */
   private armSources(): void {
     if (this.sourceTimer) clearInterval(this.sourceTimer)
-    this.sourceTimer = setInterval(() => void this.tickSources(), 30_000)
+    // Check cadence every 10 seconds to promptly trigger sub-minute (10s, 30s) and standard intervals
+    this.sourceTimer = setInterval(() => void this.tickSources(), 10_000)
     void this.tickSources()
   }
 

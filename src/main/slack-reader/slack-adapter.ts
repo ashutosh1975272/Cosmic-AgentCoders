@@ -339,12 +339,21 @@ export class SlackAdapter {
                          document.querySelector('[role="list"]') ||
                          document.querySelector('.p-workspace__primary_view');
             if (!list) return false;
+            // Scroll immediately
             list.scrollTop = list.scrollHeight;
             if (typeof list.scrollTo === 'function') {
               try { list.scrollTo({ top: list.scrollHeight, behavior: 'instant' }); } catch(e) {}
             }
             try { list.dispatchEvent(new Event('scroll', { bubbles: true })); } catch(e) {}
             try { list.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, bubbles: true })); } catch(e) {}
+            // Schedule a second scroll after a rAF to handle Chromium background throttling
+            if (typeof requestAnimationFrame === 'function') {
+              requestAnimationFrame(function() {
+                list.scrollTop = list.scrollHeight;
+                try { list.scrollTo({ top: list.scrollHeight, behavior: 'instant' }); } catch(e) {}
+                try { list.dispatchEvent(new Event('scroll', { bubbles: true })); } catch(e) {}
+              });
+            }
             return true;
           })()`,
           true

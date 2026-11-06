@@ -120,6 +120,8 @@ export interface ProjectSource {
   allowDms?: ProjectSourceDmPolicy
   /** Persisted sender allow-list (display names). Empty = everyone. */
   selectedPeople?: string[]
+  /** Ingestion engine mode: 'direct_api' for fast token-based API polling, 'browser' for headless DOM scraping. Default 'direct_api'. */
+  engineMode?: 'direct_api' | 'browser'
   lastScrapeAt?: string
   lastScrapeStatus?: ScrapeRunStatus
   lastScrapeError?: string
@@ -184,6 +186,8 @@ export interface ScrapeRunLog {
   projectName: string
   sourceId: string
   sourceKind: 'token' | 'browser'
+  /** Ingestion engine used for this scrape run: direct Slack API or browser DOM scraper. */
+  engineMode?: 'direct_api' | 'browser'
   workspaceId: string
   workspaceName: string
   channelsRead: number
@@ -206,6 +210,7 @@ export interface ScrapeRunQuery {
   limit?: number
   status?: ScrapeRunStatus | 'all'
   trigger?: ScrapeTrigger | 'all'
+  engineMode?: 'direct_api' | 'browser' | 'all'
 }
 
 /** Per-run overrides. Never persisted unless the user saves them. */
@@ -444,8 +449,8 @@ export interface DashboardMarkViewedPayload {
 
 export type DashboardScheduleKind = 'slack-sync' | 'agent-analysis' | 'daily-recheck'
 
-/** The only intervals the selector offers; one minute is the floor. */
-export const DASHBOARD_SCHEDULE_INTERVALS = [1, 5, 10, 15, 30, 60] as const
+/** The only intervals the selector offers; sub-minute fast intervals (10s, 30s) down to 0.167m. */
+export const DASHBOARD_SCHEDULE_INTERVALS = [0.167, 0.5, 1, 5, 10, 15, 30, 60] as const
 export type DashboardScheduleInterval = (typeof DASHBOARD_SCHEDULE_INTERVALS)[number]
 
 export interface DashboardScheduleSettings {

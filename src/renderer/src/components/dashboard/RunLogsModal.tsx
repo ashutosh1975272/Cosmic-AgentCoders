@@ -53,6 +53,7 @@ export function ScrapeLogExplorer({
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<ScrapeRunStatus | 'all'>('all')
   const [triggerFilter, setTriggerFilter] = useState<ScrapeTrigger | 'all'>('all')
+  const [engineFilter, setEngineFilter] = useState<'all' | 'direct_api' | 'browser'>('all')
   const [busy, setBusy] = useState(false)
 
   const fetchRuns = useCallback(async () => {
@@ -87,9 +88,22 @@ export function ScrapeLogExplorer({
     return () => unsubscribe()
   }, [fetchRuns])
 
+  const displayedRuns = useMemo(() => {
+    return runs.filter((run) => {
+      if (engineFilter === 'all') return true
+      if (engineFilter === 'direct_api') {
+        return run.engineMode === 'direct_api' || (run as any).sourceKind === 'token'
+      }
+      if (engineFilter === 'browser') {
+        return run.engineMode === 'browser' || (!run.engineMode && (run as any).sourceKind === 'browser')
+      }
+      return true
+    })
+  }, [runs, engineFilter])
+
   const activeRun = useMemo(
-    () => runs.find((run) => run.runId === selectedRunId) ?? runs[0] ?? null,
-    [runs, selectedRunId]
+    () => displayedRuns.find((run) => run.runId === selectedRunId) ?? displayedRuns[0] ?? null,
+    [displayedRuns, selectedRunId]
   )
 
   const activeChannel = useMemo(() => {
@@ -164,6 +178,75 @@ export function ScrapeLogExplorer({
         ) : null}
       </div>
 
+      {/* Engine Filter Sub-Tabs */}
+      <div style={{ display: 'flex', gap: 6, borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: 6 }}>
+        <button
+          type="button"
+          onClick={() => {
+            setEngineFilter('all')
+            setSelectedRunId(null)
+          }}
+          style={{
+            background: engineFilter === 'all' ? 'rgba(99, 102, 241, 0.25)' : 'transparent',
+            border: engineFilter === 'all' ? '1px solid #6366f1' : '1px solid rgba(255,255,255,0.1)',
+            color: engineFilter === 'all' ? '#c7d2fe' : '#94a3b8',
+            borderRadius: 6,
+            padding: '4px 10px',
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer'
+          }}
+        >
+          All Runs ({runs.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setEngineFilter('direct_api')
+            setSelectedRunId(null)
+          }}
+          style={{
+            background: engineFilter === 'direct_api' ? 'rgba(16, 185, 129, 0.25)' : 'transparent',
+            border: engineFilter === 'direct_api' ? '1px solid #10b981' : '1px solid rgba(255,255,255,0.1)',
+            color: engineFilter === 'direct_api' ? '#a7f3d0' : '#94a3b8',
+            borderRadius: 6,
+            padding: '4px 10px',
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer'
+          }}
+        >
+          ⚡ Direct API Runs (
+          {runs.filter((r) => r.engineMode === 'direct_api' || (r as any).sourceKind === 'token').length}
+          )
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setEngineFilter('browser')
+            setSelectedRunId(null)
+          }}
+          style={{
+            background: engineFilter === 'browser' ? 'rgba(59, 130, 246, 0.25)' : 'transparent',
+            border: engineFilter === 'browser' ? '1px solid #3b82f6' : '1px solid rgba(255,255,255,0.1)',
+            color: engineFilter === 'browser' ? '#bfdbfe' : '#94a3b8',
+            borderRadius: 6,
+            padding: '4px 10px',
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer'
+          }}
+        >
+          🌐 Browser Scraper Runs (
+          {
+            runs.filter(
+              (r) => r.engineMode === 'browser' || (!r.engineMode && (r as any).sourceKind === 'browser')
+            ).length
+          }
+          )
+        </button>
+      </div>
+
       <div style={{ display: 'flex', flex: 1, minHeight: 0, gap: 12 }}>
         <div
           style={{
@@ -179,12 +262,12 @@ export function ScrapeLogExplorer({
             gap: 6
           }}
         >
-          {runs.length === 0 ? (
+          {displayedRuns.length === 0 ? (
             <div style={{ padding: 18, fontSize: 12, color: '#64748b', textAlign: 'center' }}>
-              No scrape runs yet.
+              No scrape runs matching filter.
             </div>
           ) : (
-            runs.map((run) => {
+            displayedRuns.map((run) => {
               const selected = activeRun?.runId === run.runId
               const colors = STATUS_COLOR[run.status]
               return (
@@ -208,17 +291,39 @@ export function ScrapeLogExplorer({
                   }}
                 >
                   <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                    <span
-                      style={{
-                        fontSize: 10,
-                        fontWeight: 700,
-                        padding: '1px 6px',
-                        borderRadius: 3,
-                        background: colors.bg,
-                        color: colors.fg
-                      }}
-                    >
-                      {STATUS_LABEL[run.status]}
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          padding: '1px 6px',
+                          borderRadius: 3,
+                          background: colors.bg,
+                          color: colors.fg
+                        }}
+                      >
+                        {STATUS_LABEL[run.status]}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 9,
+                          fontWeight: 700,
+                          padding: '1px 5px',
+                          borderRadius: 3,
+                          background:
+                            run.engineMode === 'direct_api' || (run as any).sourceKind === 'token'
+                              ? 'rgba(16, 185, 129, 0.2)'
+                              : 'rgba(59, 130, 246, 0.2)',
+                          color:
+                            run.engineMode === 'direct_api' || (run as any).sourceKind === 'token'
+                              ? '#34d399'
+                              : '#60a5fa'
+                        }}
+                      >
+                        {run.engineMode === 'direct_api' || (run as any).sourceKind === 'token'
+                          ? '⚡ Direct API'
+                          : '🌐 Browser'}
+                      </span>
                     </span>
                     <span style={{ fontSize: 11, color: '#94a3b8' }}>{timeOf(run.ts)}</span>
                   </span>
@@ -298,6 +403,23 @@ export function ScrapeLogExplorer({
                 </span>
                 <span>
                   Duration: <b>{(activeRun.durationMs / 1000).toFixed(1)}s</b>
+                </span>
+                <span>
+                  Engine:{' '}
+                  <b
+                    style={{
+                      color:
+                        activeRun.engineMode === 'direct_api' ||
+                        (activeRun as any).sourceKind === 'token'
+                          ? '#34d399'
+                          : '#60a5fa'
+                    }}
+                  >
+                    {activeRun.engineMode === 'direct_api' ||
+                    (activeRun as any).sourceKind === 'token'
+                      ? '⚡ Direct API'
+                      : '🌐 Browser DOM'}
+                  </b>
                 </span>
                 <span style={{ color: '#64748b' }}>Run {activeRun.runId}</span>
               </div>

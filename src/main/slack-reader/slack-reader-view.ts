@@ -372,40 +372,44 @@ export class SlackReaderView {
     const matchesTargetUrl = (url: string) =>
       url.includes(`/${this.workspaceId}/${channelId}`) || url.includes(`/${channelId}`)
 
-    if (isStandardSlackId && !matchesTargetUrl(currentUrl)) {
-      // First try switching channel instantly via sidebar link/treeitem to avoid slow full-page reload
+    if (isStandardSlackId) {
+      // Always (re-)click the sidebar link to trigger a fresh Slack SPA navigation that resets scroll position.
+      // This avoids the alternating-empty bug where Slack restores a stale virtual-list anchor when the channel
+      // was already the current view, causing scrollToBottom to fail to mount the newest messages.
       let switchedViaSidebar = false
-      try {
-        switchedViaSidebar = Boolean(
-          await this.view!.webContents.executeJavaScript(
-            `
-            (() => {
-              const el = document.querySelector('[data-qa-channel-sidebar-channel-id="${channelId}"], a[href*="/${channelId}"]');
-              if (el) {
-                const clickTarget = el.querySelector('a') || el.querySelector('button') || el;
-                clickTarget.click();
-                return true;
-              }
-              return false;
-            })()
-          `,
-            true
+      if (currentUrl.includes('slack.com')) {
+        try {
+          switchedViaSidebar = Boolean(
+            await this.view!.webContents.executeJavaScript(
+              `
+              (() => {
+                const el = document.querySelector('[data-qa-channel-sidebar-channel-id="${channelId}"], a[href*="/${channelId}"]');
+                if (el) {
+                  const clickTarget = el.querySelector('a') || el.querySelector('button') || el;
+                  clickTarget.click();
+                  return true;
+                }
+                return false;
+              })()
+            `,
+              true
+            )
           )
-        )
-        if (switchedViaSidebar) {
-          // Verify URL actually switched within 2 seconds
-          const startCheck = Date.now()
-          while (Date.now() - startCheck < 2000) {
-            const url = this.view!.webContents.getURL()
-            if (matchesTargetUrl(url)) break
-            await new Promise((r) => setTimeout(r, 150))
+          if (switchedViaSidebar) {
+            // Verify URL actually switched within 2 seconds
+            const startCheck = Date.now()
+            while (Date.now() - startCheck < 2000) {
+              const url = this.view!.webContents.getURL()
+              if (matchesTargetUrl(url)) break
+              await new Promise((r) => setTimeout(r, 150))
+            }
+            if (!matchesTargetUrl(this.view!.webContents.getURL())) {
+              switchedViaSidebar = false
+            }
           }
-          if (!matchesTargetUrl(this.view!.webContents.getURL())) {
-            switchedViaSidebar = false
-          }
+        } catch {
+          switchedViaSidebar = false
         }
-      } catch {
-        switchedViaSidebar = false
       }
 
       if (!switchedViaSidebar) {
@@ -489,22 +493,18 @@ export class SlackReaderView {
       // ignore
     }
 
-    // Scroll to bottom to mount newest messages in Slack's virtual list container
+    // Scroll to bottom to mount newest messages in Slack's virtual list container.
+    // Retry up to 4 times with progressive delays: Chromium throttles off-screen rendering in background
+    // tabs, so the virtual list may need multiple settle cycles to mount the bottom rows.
+    let rawMessages: Awaited<ReturnType<typeof this.adapter.readVisibleMessages>> = []
     if (isTargetConversation && this.view) {
-      await this.adapter.scrollToBottom(this.view)
-      await new Promise((resolve) => setTimeout(resolve, 800))
-    }
-
-    // Only read messages if we actually reached the target conversation (avoid polluting channels with wrong DM messages)
-    let rawMessages = isTargetConversation
-      ? await this.adapter.readVisibleMessages(this.view!)
-      : []
-
-    // If no messages found on first bottom scroll, retry with secondary settle to give virtual list time
-    if (isTargetConversation && rawMessages.length === 0 && this.view) {
-      await this.adapter.scrollToBottom(this.view)
-      await new Promise((resolve) => setTimeout(resolve, 800))
-      rawMessages = await this.adapter.readVisibleMessages(this.view!)
+      const scrollDelays = [800, 1200, 1600, 2000]
+      for (const delay of scrollDelays) {
+        await this.adapter.scrollToBottom(this.view)
+        await new Promise((resolve) => setTimeout(resolve, delay))
+        rawMessages = await this.adapter.readVisibleMessages(this.view!)
+        if (rawMessages.length > 0) break
+      }
     }
     const normalized: DashboardStoredMessage[] = []
 
@@ -572,7 +572,7 @@ export class SlackReaderView {
       if (atGenesis && oldest !== null) break
 
       // If channel is genuinely empty (no messages collected after bottom settling retries), break out
-      if (collected.size === 0 && ((atGenesis && scrolls >= 4) || scrolls >= 6)) {
+      if (collected.size === 0 && ((atGenesis && scrolls >= 6) || scrolls >= 10)) {
         break
       }
 
@@ -634,7 +634,7 @@ export class SlackReaderView {
       if (collected.size === 0) {
         zeroProgressRetries++
         const reachedGenesis = await this.adapter.isAtChannelGenesis(this.view!).catch(() => false)
-        if ((reachedGenesis && scrolls >= 4) || zeroProgressRetries >= 6 || scrolls >= 6) {
+        if ((reachedGenesis && scrolls >= 4) || zeroProgressRetries >= 10 || scrolls >= 10) {
           break
         }
       } else {

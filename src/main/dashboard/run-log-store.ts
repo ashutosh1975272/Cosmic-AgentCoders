@@ -93,6 +93,7 @@ function normalizeEntry(raw: unknown): ScrapeRunLog | null {
     projectName: typeof r.projectName === 'string' ? r.projectName : String(r.projectId ?? ''),
     sourceId: String(r.sourceId ?? ''),
     sourceKind: r.sourceKind === 'token' ? 'token' : 'browser',
+    engineMode: r.engineMode === 'browser' ? 'browser' : 'direct_api',
     workspaceId: String(r.workspaceId ?? ''),
     workspaceName:
       typeof r.workspaceName === 'string' ? r.workspaceName : String(r.workspaceId ?? ''),
@@ -134,6 +135,7 @@ function normalizeEntry(raw: unknown): ScrapeRunLog | null {
 function matchesQuery(entry: ScrapeRunLog, query: ScrapeRunQuery): boolean {
   if (query.status && query.status !== 'all' && entry.status !== query.status) return false
   if (query.trigger && query.trigger !== 'all' && entry.trigger !== query.trigger) return false
+  if (query.engineMode && query.engineMode !== 'all' && entry.engineMode !== query.engineMode) return false
   return true
 }
 
@@ -158,8 +160,9 @@ export class RunLogStore {
     }
   }
 
-  async read(projectId: string, limit = 50): Promise<ScrapeRunLog[]> {
-    return this.readFile(this.logFilePath(projectId), limit)
+  async read(projectId: string, limit = 50, query: ScrapeRunQuery = {}): Promise<ScrapeRunLog[]> {
+    const all = await this.readFile(this.logFilePath(projectId), limit * 2)
+    return all.filter((entry) => matchesQuery(entry, query)).slice(0, limit)
   }
 
   /** Read across cards (unified Scrape Logs surface). */

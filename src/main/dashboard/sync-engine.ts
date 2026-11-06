@@ -2,6 +2,8 @@ import { SlackPoller, isSlackAuthFailure } from './slack-poller'
 import { slackTokenKey } from './slack-throttle'
 import type { InsightEngine } from './insight-engine'
 import { SlackReaderView, type ScrapeStepEvent } from '../slack-reader/slack-reader-view'
+import { sessionTokenExtractor } from '../slack-reader/session-token-extractor'
+import { SlackApiClient } from './slack-api-client'
 import { resolveProjectMessageSources, type ResolvedChannel } from './message-sources'
 import { RunLogStore } from './run-log-store'
 import type {
@@ -824,6 +826,10 @@ export class DashboardSyncEngine {
       text: `Starting ${trigger} scrape for ${effectiveWorkspaceName}…`
     })
 
+    const requestedEngineMode = source.engineMode ?? 'direct_api'
+    let activeEngineMode: 'direct_api' | 'browser' = 'browser'
+    let directApiClient: SlackApiClient | null = null
+
     try {
       let targetChannels: ProjectSourceChannel[] = source.channels ?? []
 
@@ -867,6 +873,28 @@ export class DashboardSyncEngine {
         }
       } catch {
         targetChannels = source.channels ?? []
+      }
+
+      if (requestedEngineMode === 'direct_api') {
+        try {
+          await reader.initialize()
+          const creds = await sessionTokenExtractor.extractSlackSessionTokens(reader.getView())
+          if (creds) {
+            directApiClient = new SlackApiClient(creds)
+            activeEngineMode = 'direct_api'
+            this.logInfo(
+              `[sync-engine] direct API session credentials active for ${effectiveWorkspaceName}`
+            )
+          } else {
+            this.logInfo(
+              `[sync-engine] direct API credentials unavailable, falling back to browser DOM for ${effectiveWorkspaceName}`
+            )
+          }
+        } catch (tokenErr) {
+          this.logInfo(
+            `[sync-engine] direct API token probe failed, falling back to browser DOM: ${String(tokenErr)}`
+          )
+        }
       }
 
       for (const ch of targetChannels) {
@@ -985,16 +1013,70 @@ export class DashboardSyncEngine {
         windowStart = sinceTs === 0 ? 0 : Math.min(windowStart, sinceTs)
 
         try {
-          const result = await reader.readChannelWindow(ch.id, {
-            sinceTs,
-            maxScrolls,
-            maxMessages,
-            signal
-          })
-          gapSeconds = Math.max(gapSeconds, result.gapSeconds)
-          channelsRead++
+          let messages: DashboardStoredMessage[] = []
 
-          let messages = result.messages
+          if (directApiClient) {
+            try {
+              this.scrapeEventListener?.({
+                type: 'status',
+                channelName: name,
+                text: `Direct API fetching ${kind === 'dm' ? 'DM' : '#'}${name}…`
+              })
+              const apiResult = await directApiClient.fetchChannelMessages({
+                channelId: ch.id,
+                sinceTs,
+                maxMessages,
+                signal
+              })
+              messages = apiResult.messages
+              channelsRead++
+            } catch (apiErr: any) {
+              if (apiErr.slackError === 'not_authed' || apiErr.slackError === 'invalid_auth') {
+                this.logInfo(
+                  `[sync-engine] direct API session expired for ${ch.id}, attempting refresh...`
+                )
+                const refreshed = await sessionTokenExtractor.refreshSlackSessionTokens(
+                  reader.getView()
+                )
+                if (refreshed) {
+                  directApiClient = new SlackApiClient(refreshed)
+                  const retry = await directApiClient.fetchChannelMessages({
+                    channelId: ch.id,
+                    sinceTs,
+                    maxMessages,
+                    signal
+                  })
+                  messages = retry.messages
+                  channelsRead++
+                } else {
+                  this.logInfo(
+                    `[sync-engine] direct API token refresh failed, falling back to browser DOM for ${ch.id}`
+                  )
+                  const domResult = await reader.readChannelWindow(ch.id, {
+                    sinceTs,
+                    maxScrolls,
+                    maxMessages,
+                    signal
+                  })
+                  gapSeconds = Math.max(gapSeconds, domResult.gapSeconds)
+                  channelsRead++
+                  messages = domResult.messages
+                }
+              } else {
+                throw apiErr
+              }
+            }
+          } else {
+            const result = await reader.readChannelWindow(ch.id, {
+              sinceTs,
+              maxScrolls,
+              maxMessages,
+              signal
+            })
+            gapSeconds = Math.max(gapSeconds, result.gapSeconds)
+            channelsRead++
+            messages = result.messages
+          }
           if (peopleFilter.size > 0) {
             messages = messages.filter((m) => peopleFilter.has((m.user ?? '').trim().toLowerCase()))
           }
@@ -1103,6 +1185,7 @@ export class DashboardSyncEngine {
         projectName: project.name,
         sourceId: source.id,
         sourceKind: 'browser',
+        engineMode: activeEngineMode,
         workspaceId: source.workspaceId,
         workspaceName: effectiveWorkspaceName,
         channelsRead: readChannels.length,
@@ -1172,7 +1255,7 @@ export class DashboardSyncEngine {
             ? `Scrape stopped: ${runError ?? 'error'}`
             : status === 'stopped'
               ? `Scrape cancelled. ${totalMessagesRead} messages read (${newMessages} new kept from completed channels).`
-              : `Scraped ${readChannels.length} channels (${totalMessagesRead} read, ${newMessages} new).${
+              : `[${activeEngineMode === 'direct_api' ? '⚡ Direct API' : '🌐 Browser DOM'}] Scraped ${readChannels.length} channels (${totalMessagesRead} read, ${newMessages} new).${
                   gapSeconds > 0 ? ` History gap: ${gapSeconds}s.` : ''
                 }`
       })

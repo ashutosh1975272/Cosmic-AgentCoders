@@ -52,6 +52,9 @@ export function WorkspaceControlModal({
   const [intervalMinutes, setIntervalMinutes] = useState<number>(
     source.scheduleIntervalMinutes ?? 15
   )
+  const [engineMode, setEngineMode] = useState<'direct_api' | 'browser'>(
+    source.engineMode ?? 'direct_api'
+  )
   const [savingSchedule, setSavingSchedule] = useState(false)
   const [manualSyncing, setManualSyncing] = useState(false)
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null)
@@ -64,6 +67,7 @@ export function WorkspaceControlModal({
     setSelectionMode(source.selectionMode ?? 'include')
     setScheduleEnabled(source.scheduleEnabled ?? true)
     setIntervalMinutes(source.scheduleIntervalMinutes ?? 15)
+    setEngineMode(source.engineMode ?? 'direct_api')
 
     const existing = new Map(source.channels.map((c) => [c.id, c]))
     setSelected(
@@ -182,6 +186,27 @@ export function WorkspaceControlModal({
       setSyncFeedback(err instanceof Error ? err.message : 'Failed to update schedule')
     } finally {
       setSavingSchedule(false)
+    }
+  }
+
+  const handleUpdateEngineMode = async (mode: 'direct_api' | 'browser') => {
+    setEngineMode(mode)
+    try {
+      await updateSource({
+        projectId: project.id,
+        sourceId: source.id,
+        patch: {
+          engineMode: mode
+        }
+      })
+      await loadSnapshot()
+      onSaved?.()
+      setSyncFeedback(
+        `Engine switched to ${mode === 'direct_api' ? '⚡ Direct API' : '🌐 Browser DOM'}.`
+      )
+      setTimeout(() => setSyncFeedback(null), 3500)
+    } catch (err) {
+      setSyncFeedback(err instanceof Error ? err.message : 'Failed to update engine mode')
     }
   }
 
@@ -460,6 +485,113 @@ export function WorkspaceControlModal({
                 <span>Scrape Logs</span>
               </div>
             </button>
+
+            {/* Active Engine Switch */}
+            <div
+              style={{
+                marginTop: 14,
+                paddingTop: 14,
+                borderTop: '1px solid rgba(255, 255, 255, 0.08)'
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: '#64748b',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  padding: '0 8px 8px'
+                }}
+              >
+                Active Ingestion Engine
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '0 4px' }}>
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '8px 10px',
+                    borderRadius: 6,
+                    background:
+                      engineMode === 'direct_api'
+                        ? 'rgba(16, 185, 129, 0.15)'
+                        : 'rgba(255,255,255,0.02)',
+                    border:
+                      engineMode === 'direct_api'
+                        ? '1px solid rgba(16, 185, 129, 0.4)'
+                        : '1px solid rgba(255,255,255,0.06)',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="workspaceEngineMode"
+                    value="direct_api"
+                    checked={engineMode === 'direct_api'}
+                    onChange={() => void handleUpdateEngineMode('direct_api')}
+                    style={{ accentColor: '#10b981' }}
+                  />
+                  <div>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: engineMode === 'direct_api' ? '#a7f3d0' : '#cbd5e1'
+                      }}
+                    >
+                      ⚡ Direct API Engine
+                    </div>
+                    <div style={{ fontSize: 10, color: '#94a3b8' }}>
+                      ~150ms · Zero missed messages
+                    </div>
+                  </div>
+                </label>
+
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '8px 10px',
+                    borderRadius: 6,
+                    background:
+                      engineMode === 'browser'
+                        ? 'rgba(59, 130, 246, 0.15)'
+                        : 'rgba(255,255,255,0.02)',
+                    border:
+                      engineMode === 'browser'
+                        ? '1px solid rgba(59, 130, 246, 0.4)'
+                        : '1px solid rgba(255,255,255,0.06)',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="workspaceEngineMode"
+                    value="browser"
+                    checked={engineMode === 'browser'}
+                    onChange={() => void handleUpdateEngineMode('browser')}
+                    style={{ accentColor: '#3b82f6' }}
+                  />
+                  <div>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: engineMode === 'browser' ? '#bfdbfe' : '#cbd5e1'
+                      }}
+                    >
+                      🌐 Browser DOM Engine
+                    </div>
+                    <div style={{ fontSize: 10, color: '#94a3b8' }}>
+                      Headless WebContentsView
+                    </div>
+                  </div>
+                </label>
+              </div>
+            </div>
           </aside>
 
           {/* Right Main Content Panel */}

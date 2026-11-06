@@ -2,6 +2,7 @@ import type React from 'react'
 import { useCallback, useEffect, useState } from 'react'
 import {
   type DashboardScheduleKind,
+  type DashboardScheduleInterval,
   type DashboardScheduleRun,
   type DashboardScheduleRunSource,
   type DashboardSchedulesState,
@@ -216,13 +217,13 @@ export default function SchedulesPage(): React.ReactElement {
                       disabled={disabled}
                       onChange={(event) =>
                         void updateSource(source, {
-                          scheduleIntervalMinutes: Number(event.target.value) as 1 | 5 | 15 | 30 | 60
+                          scheduleIntervalMinutes: Number(event.target.value) as DashboardScheduleInterval
                         })
                       }
                     >
                       {INTERVALS.map((minutes) => (
                         <option key={minutes} value={minutes}>
-                          {minutes} min
+                          {minutes < 1 ? `${Math.round(minutes * 60)} sec` : `${minutes} min`}
                         </option>
                       ))}
                     </select>
@@ -271,7 +272,7 @@ export default function SchedulesPage(): React.ReactElement {
             >
               {INTERVALS.map((minutes) => (
                 <option key={minutes} value={minutes}>
-                  {minutes} min
+                  {minutes < 1 ? `${Math.round(minutes * 60)} sec` : `${minutes} min`}
                 </option>
               ))}
             </select>
