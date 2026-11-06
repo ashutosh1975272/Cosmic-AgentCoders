@@ -34,6 +34,8 @@ import {
   isGlobalWorkspaceId,
   isGuideId,
   isVisualId,
+  isSocialChatId,
+  socialSourceIdOf,
   navRowOf,
   slackSourceOf,
   visualKeyOf,
@@ -357,6 +359,45 @@ export default function WorkspaceContent({
   if (nav.openGroup === 'xomni') {
     if (xomniModeOf(nav) === 'schedules') {
       body = <SchedulesPage />
+    } else if (nav.selection && isSocialChatId(nav.selection)) {
+      const sourceId = socialSourceIdOf(nav.selection)
+      const targetSource = (project.sources ?? []).find((s) => s.id === sourceId) ?? null
+      body = (
+        <AgentChatPanel
+          key={`${summary.projectId}:${sourceId}`}
+          projectName={identity.name}
+          projectId={summary.projectId}
+          mode="social"
+          socialSource={targetSource}
+          sources={project.sources}
+          initialQuestion={chatDraft}
+          onConsumeInitial={onConsumeChatDraft}
+          onOpenSettings={onOpenSettings}
+          onOpenControl={() => {
+            if (targetSource) setControlSource(targetSource)
+            else if (primarySource) setControlSource(primarySource)
+          }}
+          onOpenLiveEmbed={() => {
+            if (targetSource?.profileId && targetSource?.workspaceId) {
+              onSelect(`w:${targetSource.profileId}:${targetSource.workspaceId}` as SelectionId)
+            } else {
+              onSelect('s:client')
+            }
+          }}
+          onOpenSource={(ref) => {
+            requestMessageJump({
+              projectId: summary.projectId,
+              source: ref.source,
+              channelId: ref.channelId,
+              ts: ref.ts
+            })
+            onSelect(
+              `c:${ref.source === 'ours' ? 'team' : 'client'}:${ref.channelId}` as SelectionId
+            )
+          }}
+        />
+      )
+      bare = true
     } else {
       body = (
         <AgentChatPanel
@@ -364,6 +405,7 @@ export default function WorkspaceContent({
           projectName={identity.name}
           projectId={summary.projectId}
           mode={xomniModeOf(nav)}
+          sources={project.sources}
           initialQuestion={chatDraft}
           onConsumeInitial={onConsumeChatDraft}
           onOpenSettings={onOpenSettings}

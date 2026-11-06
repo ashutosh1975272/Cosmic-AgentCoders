@@ -131,7 +131,10 @@ function renderPanel(
     onConsumeInitial?: () => void
     onOpenSettings?: () => void
     onOpenSource?: (ref: DashboardProjectChatSourceRef) => void
-    mode?: 'project' | 'agentwork' | 'schedules'
+    onOpenLiveEmbed?: () => void
+    mode?: 'project' | 'agentwork' | 'schedules' | 'social'
+    socialSource?: any
+    sources?: any[]
   } = {}
 ): void {
   render(
@@ -139,9 +142,12 @@ function renderPanel(
       projectName="Acme"
       projectId="p1"
       mode={options.mode ?? 'project'}
+      socialSource={options.socialSource}
+      sources={options.sources}
       initialQuestion={options.initialQuestion}
       onConsumeInitial={options.onConsumeInitial}
       onOpenSettings={options.onOpenSettings}
+      onOpenLiveEmbed={options.onOpenLiveEmbed}
       onOpenSource={options.onOpenSource}
     />
   )
@@ -446,5 +452,58 @@ describe('AgentChatPanel', () => {
 
     expect(screen.getByText('AgentWork is not connected yet')).toBeTruthy()
     expect(screen.queryByLabelText('Ask about this project')).toBeNull()
+  })
+
+  it('renders scoped platform header and Live Embed button in social mode', () => {
+    installApi()
+    const onOpenLiveEmbed = vi.fn()
+    renderPanel({
+      mode: 'social',
+      socialSource: {
+        id: 'src-teams',
+        kind: 'browser',
+        platform: 'teams',
+        workspaceId: 'T_TEAMS',
+        workspaceName: 'Engineering Teams',
+        channels: [],
+        role: 'client',
+        enabled: true,
+        backfillDays: 7
+      },
+      onOpenLiveEmbed
+    } as any)
+
+    expect(screen.getByText('Chat with Engineering Teams')).toBeTruthy()
+    expect(screen.getByText('teams')).toBeTruthy()
+    const embedBtn = screen.getByText('Live Embed')
+    expect(embedBtn).toBeTruthy()
+    fireEvent.click(embedBtn)
+    expect(onOpenLiveEmbed).toHaveBeenCalled()
+  })
+
+  it('renders connected platform chips in project master supervisor mode', () => {
+    installApi()
+    renderPanel({
+      mode: 'project',
+      sources: [
+        {
+          id: 'src-slack',
+          kind: 'browser',
+          platform: 'slack',
+          workspaceId: 'T_SLACK',
+          workspaceName: 'AgentWork Slack',
+          channels: [],
+          role: 'client',
+          enabled: true,
+          backfillDays: 7
+        }
+      ]
+    } as any)
+
+    expect(screen.getByText('Chat with project')).toBeTruthy()
+    expect(
+      screen.getByText(/CrewAI Master Supervisor · Cross-platform agent with direct dispatch/)
+    ).toBeTruthy()
+    expect(screen.getByText('⚡ Slack: AgentWork Slack')).toBeTruthy()
   })
 })

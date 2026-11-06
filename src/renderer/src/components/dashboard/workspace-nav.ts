@@ -38,11 +38,15 @@ export type ChannelSelectionId = `c:${ConnectorKey}:${string}`
 /** A live workspace embedded session selected from Global Accounts */
 export type GlobalWorkspaceSelectionId = `w:${string}:${string}`
 
+/** A scoped platform chat inside the Chat with Socials dropdown */
+export type SocialChatSelectionId = `m:social:${string}`
+
 export type SelectionId =
   | `v:${VisualKey}`
   | `d:${DetailKey}`
   | `g:${GuideSection}`
   | `m:${XomniModeKey}`
+  | SocialChatSelectionId
   | `s:${SlackSourceKey}`
   | ChannelSelectionId
   | GlobalWorkspaceSelectionId
@@ -492,6 +496,7 @@ export function channelSelectionId(key: ConnectorKey, channelId: string): Channe
 /** The section that owns a selection. */
 export function sectionOfSelection(id: SelectionId): SectionKey {
   if (isChannelId(id) || id.startsWith('s:') || isGlobalWorkspaceId(id)) return 'slack'
+  if (id.startsWith('m:')) return 'xomni'
   return NAV_SECTIONS.find((s) => s.rows.some((r) => r.id === id))?.key ?? 'info'
 }
 
@@ -518,8 +523,14 @@ export function isVisualId(id: SelectionId): id is `v:${VisualKey}` {
 export function visualKeyOf(id: SelectionId): VisualKey {
   return id.slice(2) as VisualKey
 }
+export function isSocialChatId(id: SelectionId): id is SocialChatSelectionId {
+  return typeof id === 'string' && id.startsWith('m:social:')
+}
+export function socialSourceIdOf(id: SelectionId): string {
+  return typeof id === 'string' && id.startsWith('m:social:') ? id.slice(9) : ''
+}
 export function isModeId(id: SelectionId): id is `m:${XomniModeKey}` {
-  return id.startsWith('m:')
+  return id.startsWith('m:') && !id.startsWith('m:social:')
 }
 export function modeKeyOf(id: SelectionId): XomniModeKey {
   return id.slice(2) as XomniModeKey

@@ -3,7 +3,8 @@ import type {
   DashboardProjectChatErrorCode,
   DashboardProjectChatMessage,
   DashboardProjectChatSourceRef,
-  DashboardProjectChatStatus
+  DashboardProjectChatStatus,
+  ProjectSource
 } from '../../../../shared/dashboard-contract'
 import ChatMarkdown from './ChatMarkdown'
 import type { XomniModeKey } from './workspace-nav'
@@ -11,12 +12,15 @@ import type { XomniModeKey } from './workspace-nav'
 interface AgentChatPanelProps {
   projectName: string
   projectId: string
-  mode: XomniModeKey
+  mode: XomniModeKey | 'social'
+  socialSource?: ProjectSource | null
+  sources?: ProjectSource[]
   /** Optional question handed to the project chat on mount. */
   initialQuestion?: string | null
   onConsumeInitial?: () => void
   onOpenSettings?: () => void
   onOpenControl?: (sourceId?: string) => void
+  onOpenLiveEmbed?: () => void
   onOpenSource?: (ref: DashboardProjectChatSourceRef) => void
 }
 
@@ -367,10 +371,13 @@ export default function AgentChatPanel({
   projectName,
   projectId,
   mode,
+  socialSource,
+  sources,
   initialQuestion,
   onConsumeInitial,
   onOpenSettings,
   onOpenControl,
+  onOpenLiveEmbed,
   onOpenSource
 }: AgentChatPanelProps): React.ReactElement {
   const [messages, setMessages] = useState<DashboardProjectChatMessage[]>([])
@@ -786,10 +793,114 @@ export default function AgentChatPanel({
     <section className="chat-panel" aria-label={`Chat with ${projectName}`}>
       <header className="chat-head">
         <div className="chat-head-main">
-          <h3 className="chat-head-title">Chat with project</h3>
-          <span className="chat-head-sub">Autonomous project agent · Answers questions, reads channels, posts to authorized Slack channels &amp; triggers scrapes</span>
+          {mode === 'social' && socialSource ? (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <h3 className="chat-head-title">
+                  Chat with {socialSource.workspaceName || (socialSource.platform === 'teams' ? 'Microsoft Teams' : socialSource.platform === 'whatsapp' ? 'WhatsApp' : 'Slack Workspace')}
+                </h3>
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    padding: '2px 7px',
+                    borderRadius: 4,
+                    background:
+                      socialSource.platform === 'teams'
+                        ? 'rgba(59, 130, 246, 0.2)'
+                        : socialSource.platform === 'whatsapp'
+                          ? 'rgba(34, 197, 94, 0.2)'
+                          : 'rgba(168, 85, 247, 0.2)',
+                    color:
+                      socialSource.platform === 'teams'
+                        ? '#93c5fd'
+                        : socialSource.platform === 'whatsapp'
+                          ? '#86efac'
+                          : '#c084fc',
+                    textTransform: 'uppercase'
+                  }}
+                >
+                  {socialSource.platform || 'slack'}
+                </span>
+              </div>
+              <span className="chat-head-sub">
+                Autonomous {socialSource.platform ? socialSource.platform.toUpperCase() : 'Social'} Agent · Scoped to {socialSource.workspaceName || 'connected account'} channels and direct messages
+              </span>
+            </>
+          ) : (
+            <>
+              <h3 className="chat-head-title">Chat with project</h3>
+              <span className="chat-head-sub">
+                CrewAI Master Supervisor · Cross-platform agent with direct dispatch to Slack, Teams &amp; WhatsApp
+              </span>
+              {sources && sources.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                  {sources
+                    .filter((s) => s.enabled !== false && (s.platform === 'slack' || s.platform === 'teams' || s.platform === 'whatsapp' || s.kind === 'token' || (s.kind === 'browser' && !s.url?.includes('google'))))
+                    .map((s) => {
+                      const plat = (s.platform || 'slack').toLowerCase()
+                      return (
+                        <span
+                          key={s.id}
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 650,
+                            padding: '1px 6px',
+                            borderRadius: 4,
+                            background:
+                              plat === 'slack'
+                                ? 'rgba(168, 85, 247, 0.15)'
+                                : plat === 'teams'
+                                  ? 'rgba(59, 130, 246, 0.15)'
+                                  : 'rgba(34, 197, 94, 0.15)',
+                            color:
+                              plat === 'slack'
+                                ? '#c084fc'
+                                : plat === 'teams'
+                                  ? '#93c5fd'
+                                  : '#86efac',
+                            border:
+                              plat === 'slack'
+                                ? '1px solid rgba(168, 85, 247, 0.3)'
+                                : plat === 'teams'
+                                  ? '1px solid rgba(59, 130, 246, 0.3)'
+                                  : '1px solid rgba(34, 197, 94, 0.3)'
+                          }}
+                        >
+                          {plat === 'slack' ? '⚡ Slack' : plat === 'teams' ? '👥 Teams' : '📱 WhatsApp'}: {s.workspaceName || 'Connected'}
+                        </span>
+                      )
+                    })}
+                </div>
+              )}
+            </>
+          )}
         </div>
         <div className="chat-head-actions">
+          {mode === 'social' && onOpenLiveEmbed && (
+            <button
+              type="button"
+              className="chat-action-btn"
+              style={{
+                background: 'rgba(255, 255, 255, 0.06)',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
+                borderRadius: 6,
+                padding: '4px 10px',
+                color: '#cbd5e1',
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5
+              }}
+              onClick={onOpenLiveEmbed}
+              title="Open live web embed view for this account"
+            >
+              <span>🌐</span>
+              <span>Live Embed</span>
+            </button>
+          )}
           {status ? (
             status.hasKey ? (
               <button

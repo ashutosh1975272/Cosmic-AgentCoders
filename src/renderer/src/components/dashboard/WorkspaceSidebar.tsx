@@ -298,6 +298,35 @@ export default function WorkspaceSidebar({
     appLook === 'basic'
   const isAddHidden = layout.custom.hideAddButton ?? true
   const [globalAccountsOpen, setGlobalAccountsOpen] = useState(true)
+  const [socialsDropdownOpen, setSocialsDropdownOpen] = useState(false)
+
+  // Filter connected social media accounts with active session tokens or authenticated cookies
+  const connectedSocialSources = useMemo(() => {
+    return (sources ?? []).filter((s) => {
+      if (s.enabled === false) return false
+      const p = (s.platform || '').toLowerCase()
+      const isSocial =
+        p === 'slack' ||
+        p === 'teams' ||
+        p === 'whatsapp' ||
+        s.kind === 'token' ||
+        (s.kind === 'browser' &&
+          !s.url?.toLowerCase().includes('google.com') &&
+          !s.url?.toLowerCase().includes('mail.google'))
+      if (!isSocial) return false
+
+      // Active session/token check
+      const hasToken = s.kind === 'token'
+      const hasSession = Boolean(s.workspaceId) || Boolean(s.profileId)
+      return hasToken || hasSession
+    })
+  }, [sources])
+
+  useEffect(() => {
+    if (nav.selection?.startsWith('m:social:')) {
+      setSocialsDropdownOpen(true)
+    }
+  }, [nav.selection])
 
   // Collect all globally available workspaces and links grouped across profiles
   const globalProfileGroups = useMemo(() => {
@@ -982,6 +1011,158 @@ export default function WorkspaceSidebar({
                       </div>
                     )
                   })}
+                  </>
+                ) : section.key === 'xomni' ? (
+                  <>
+                    {/* 1. Chat with project */}
+                    {section.rows.find((r) => r.id === 'm:project') && (() => {
+                      const row = section.rows.find((r) => r.id === 'm:project')!
+                      return (
+                        <Row
+                          key={row.id}
+                          icon={row.icon}
+                          label={row.label}
+                          title={row.desc}
+                          active={rowActive(row)}
+                          count={rowCount(view, row.id)}
+                          onClick={() => onSelect(row.id)}
+                        />
+                      )
+                    })()}
+
+                    {/* 2. Talk to AgentWork (Untouched standalone button) */}
+                    {section.rows.find((r) => r.id === 'm:agentwork') && (() => {
+                      const row = section.rows.find((r) => r.id === 'm:agentwork')!
+                      return (
+                        <Row
+                          key={row.id}
+                          icon={row.icon}
+                          label={row.label}
+                          title={row.desc}
+                          active={rowActive(row)}
+                          count={rowCount(view, row.id)}
+                          onClick={() => onSelect(row.id)}
+                        />
+                      )
+                    })()}
+
+                    {/* 3. Chat with Socials (Collapsible dropdown - collapsed by default) */}
+                    <div className="ws-nav-group" style={{ marginBottom: 4 }}>
+                      <button
+                        type="button"
+                        className={`ws-nav-groupbtn ws-nav-connector${socialsDropdownOpen ? ' is-open' : ''}`}
+                        aria-expanded={socialsDropdownOpen}
+                        title="Chat with connected social and team accounts"
+                        onClick={() => setSocialsDropdownOpen((prev) => !prev)}
+                      >
+                        <span className="ws-nav-icon">
+                          <NavIcon name="users" />
+                        </span>
+                        <span className="ws-nav-label" style={{ fontWeight: 600 }}>Chat with Socials</span>
+                        {connectedSocialSources.length > 0 && (
+                          <span className="ws-nav-count">{connectedSocialSources.length}</span>
+                        )}
+                        <Chevron open={socialsDropdownOpen} />
+                      </button>
+
+                      {socialsDropdownOpen && (
+                        <div className="ws-nav-sublist" style={{ paddingLeft: 6, marginTop: 2 }}>
+                          {connectedSocialSources.length === 0 ? (
+                            <p className="ws-nav-note" style={{ paddingLeft: 22, fontStyle: 'italic', color: '#64748b' }}>
+                              No active social sessions. Connect Slack, Teams or WhatsApp in Settings.
+                            </p>
+                          ) : (
+                            connectedSocialSources.map((source) => {
+                              const selId = `m:social:${source.id}` as SelectionId
+                              const isSelected = nav.selection === selId
+                              const platform = (source.platform || 'slack').toLowerCase()
+                              const iconName = platform === 'teams' ? 'users' : platform === 'whatsapp' ? 'message' : 'slack'
+                              const displayName = source.workspaceName || (platform === 'teams' ? 'Microsoft Teams' : platform === 'whatsapp' ? 'WhatsApp' : 'Slack Workspace')
+                              return (
+                                <button
+                                  key={source.id}
+                                  type="button"
+                                  className={`ws-nav-item ws-nav-leaf${isSelected ? ' is-active' : ''}`}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 8,
+                                    padding: '5px 8px 5px 24px',
+                                    width: '100%',
+                                    textAlign: 'left',
+                                    border: 'none',
+                                    background: isSelected ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
+                                    color: isSelected ? '#a5b4fc' : 'inherit',
+                                    cursor: 'pointer',
+                                    borderRadius: 6,
+                                    fontSize: 12
+                                  }}
+                                  title={`Chat with ${displayName}`}
+                                  onClick={() => onSelect(selId)}
+                                >
+                                  <span className="ws-nav-icon" style={{ fontSize: 13, flexShrink: 0 }}>
+                                    <NavIcon name={iconName} />
+                                  </span>
+                                  <span
+                                    className="ws-nav-label"
+                                    style={{
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap',
+                                      flex: 1,
+                                      fontWeight: isSelected ? 600 : 400
+                                    }}
+                                  >
+                                    {displayName}
+                                  </span>
+                                  <span
+                                    className="ws-nav-tag"
+                                    style={{
+                                      fontSize: 9,
+                                      fontWeight: 700,
+                                      padding: '1px 5px',
+                                      borderRadius: 3,
+                                      background:
+                                        platform === 'slack'
+                                          ? 'rgba(168, 85, 247, 0.15)'
+                                          : platform === 'teams'
+                                            ? 'rgba(59, 130, 246, 0.15)'
+                                            : 'rgba(34, 197, 94, 0.15)',
+                                      color:
+                                        platform === 'slack'
+                                          ? '#c084fc'
+                                          : platform === 'teams'
+                                            ? '#93c5fd'
+                                            : '#86efac',
+                                      textTransform: 'uppercase',
+                                      flexShrink: 0
+                                    }}
+                                  >
+                                    {platform}
+                                  </span>
+                                </button>
+                              )
+                            })
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 4. Schedules (if scheduled) */}
+                    {section.rows.find((r) => r.id === 'm:schedules') && (() => {
+                      const row = section.rows.find((r) => r.id === 'm:schedules')!
+                      return (
+                        <Row
+                          key={row.id}
+                          icon={row.icon}
+                          label={row.label}
+                          title={row.desc}
+                          active={rowActive(row)}
+                          count={rowCount(view, row.id)}
+                          onClick={() => onSelect(row.id)}
+                        />
+                      )
+                    })()}
                   </>
                 ) : (
                   section.rows.map((row) => (
