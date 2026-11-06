@@ -330,7 +330,7 @@ async function autoConfirmWhenSignedIn(
   isCancelled: () => boolean,
   confirm: () => void
 ): Promise<void> {
-  const graceMs = phase === 'google' ? 3000 : 2000
+  const graceMs = phase === 'google' ? 3000 : 4000
   const started = Date.now()
   const deadline = started + 10 * 60 * 1000
   while (Date.now() < deadline) {

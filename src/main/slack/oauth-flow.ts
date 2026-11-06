@@ -62,6 +62,7 @@ function waitForRedirect(
 
     const cleanup = (): void => {
       contents.removeListener('will-redirect', onRedirect)
+      contents.removeListener('will-navigate', onWillNavigate)
       contents.removeListener('did-navigate', onNavigate)
       authWindow.removeListener('closed', onClosed)
     }
@@ -81,6 +82,13 @@ function waitForRedirect(
       }
     }
 
+    const onWillNavigate = (event: Electron.Event, url: string): void => {
+      if (url.startsWith(redirectUri)) {
+        event.preventDefault()
+        tryParse(url)
+      }
+    }
+
     const onNavigate = (_event: Electron.Event, url: string): void => {
       tryParse(url)
     }
@@ -91,6 +99,7 @@ function waitForRedirect(
     }
 
     contents.on('will-redirect', onRedirect)
+    contents.on('will-navigate', onWillNavigate)
     contents.on('did-navigate', onNavigate)
     authWindow.on('closed', onClosed)
   })
@@ -138,6 +147,13 @@ export async function connectWorkspaceForProfile(
       contextIsolation: true,
       nodeIntegration: false
     }
+  })
+
+  authWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (!authWindow.isDestroyed()) {
+      void authWindow.loadURL(url)
+    }
+    return { action: 'deny' }
   })
 
   try {
