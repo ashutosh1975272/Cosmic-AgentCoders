@@ -131,3 +131,4 @@ describe('SlackApiClient', () => {
     ).rejects.toThrow('slack conversations.history failed: not_authed')
   })
 })
+

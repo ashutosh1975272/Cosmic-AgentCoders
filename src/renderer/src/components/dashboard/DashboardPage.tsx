@@ -260,9 +260,11 @@ function FreshnessLine({
       ? null
       : seconds <= 0
         ? 'any moment'
-        : seconds < 3600
-          ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
-          : `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
+        : seconds < 60
+          ? `${seconds}s`
+          : seconds < 3600
+            ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+            : `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
 
   return (
     <div className="dash-fresh">

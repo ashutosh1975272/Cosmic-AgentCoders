@@ -164,8 +164,8 @@ export class DashboardScheduler {
   /** Per-source cadence: tick often, scrape only what is due. */
   private armSources(): void {
     if (this.sourceTimer) clearInterval(this.sourceTimer)
-    // Check cadence every 10 seconds to promptly trigger sub-minute (10s, 30s) and standard intervals
-    this.sourceTimer = setInterval(() => void this.tickSources(), 10_000)
+    // Check cadence every 2 seconds to promptly trigger fast 3s, 5s, 10s, and standard intervals
+    this.sourceTimer = setInterval(() => void this.tickSources(), 2_000)
     void this.tickSources()
   }
 
@@ -186,7 +186,7 @@ export class DashboardScheduler {
           activeIds.push(source.id)
           if (this.engine.isSourceRunning(source.id)) continue
 
-          const intervalMs = (source.scheduleIntervalMinutes ?? 15) * 60_000
+          const intervalMs = Math.round((source.scheduleIntervalMinutes ?? 15) * 60_000)
           const last =
             stored.sourceLastRunAt?.[source.id] ??
             source.lastScrapeAt ??

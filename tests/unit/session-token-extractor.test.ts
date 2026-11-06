@@ -87,3 +87,4 @@ describe('SessionTokenExtractor', () => {
     expect(EXTRACT_TOKEN_SCRIPT).toContain('localConfig_v2')
   })
 })
+

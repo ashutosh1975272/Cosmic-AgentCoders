@@ -108,3 +108,4 @@ export class SessionTokenExtractor {
 }
 
 export const sessionTokenExtractor = new SessionTokenExtractor()
+

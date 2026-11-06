@@ -1504,6 +1504,7 @@ export class DashboardSyncEngine {
  */
 export class DashboardInsightSyncEngine extends DashboardSyncEngine {
   private insightEngine: InsightEngine | null
+  private readonly lastAiAnalysisAt = new Map<string, number>()
 
   constructor(deps: DashboardSyncEngineDeps & { insightEngine?: InsightEngine | null }) {
     super(deps)
@@ -1565,9 +1566,39 @@ export class DashboardInsightSyncEngine extends DashboardSyncEngine {
     error?: string
   }> {
     const result = await super.syncProjectSource(projectId, sourceId, extra)
-    await this.refreshInsightForProject(projectId, { force: true }).catch((err) => {
-      this.logInfo(`[dashboard] post-scrape insight refresh failed (${projectId}): ${String(err)}`)
-    })
+
+    // Decoupled AI Token Optimization:
+    // Raw Slack messages are polled rapidly (3s, 5s, 10s, 30s) at ZERO AI token cost ($0).
+    // The expensive LLM analysis is ONLY triggered when:
+    // 1. Genuine new messages were captured (result.newMessages > 0), OR
+    // 2. Startup catch-up was run (trigger === 'startup' after laptop sleep/boot), OR
+    // 3. User clicked manual scrape, OR
+    // 4. Over 5 minutes elapsed since last AI analysis and force was requested
+    const now = Date.now()
+    const lastAiTime = this.lastAiAnalysisAt.get(projectId) ?? 0
+    const fiveMinutesMs = 5 * 60 * 1000
+    const hasNewMessages = (result.newMessages ?? 0) > 0
+    const isStartup = extra.trigger === 'startup'
+    const isManual = extra.trigger === 'manual'
+    const isCooldownElapsed = now - lastAiTime >= fiveMinutesMs
+
+    if (
+      hasNewMessages ||
+      isStartup ||
+      isManual ||
+      (extra.options?.forceGenesis && isCooldownElapsed)
+    ) {
+      this.lastAiAnalysisAt.set(projectId, now)
+      await this.refreshInsightForProject(projectId, { force: true }).catch((err) => {
+        this.logInfo(
+          `[dashboard] post-scrape insight refresh failed (${projectId}): ${String(err)}`
+        )
+      })
+    } else {
+      this.logInfo(
+        `[dashboard] skipping LLM analysis for ${projectId}: 0 new messages, saving 100% of AI tokens`
+      )
+    }
     return result
   }
 
