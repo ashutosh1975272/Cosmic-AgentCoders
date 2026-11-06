@@ -122,6 +122,8 @@ export interface ProjectSource {
   backfillHours?: number
   /** DM scraping override; effective policy = this, else global AppSettings. */
   allowDms?: ProjectSourceDmPolicy
+  /** Engine used for ingestion & dispatch: direct_api (~150ms zero-DOM) or browser_dom. Defaults to direct_api. */
+  engine?: 'direct_api' | 'browser_dom'
   /** Persisted sender allow-list (display names). Empty = everyone. */
   selectedPeople?: string[]
   /** Ingestion engine mode: 'direct_api' for fast token-based API polling, 'browser' for headless DOM scraping. Default 'direct_api'. */

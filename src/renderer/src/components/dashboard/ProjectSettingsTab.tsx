@@ -24,6 +24,7 @@ import { useProfileStore } from '../../hooks/useProfiles'
 import type { ProjectSource } from '../../../../shared/dashboard-contract'
 import { CardAddModal } from './CardAddModal'
 import { SourceChannelPicker } from './SourceChannelPicker'
+import { WorkspaceControlModal } from './WorkspaceControlModal'
 
 export type SettingsTabKey = 'general' | 'ai' | 'documents' | 'sources' | 'channels' | 'schedule' | 'sidebar' | 'danger'
 
@@ -49,6 +50,7 @@ export default function ProjectSettingsTab({
   const [cardAddModalOpen, setCardAddModalOpen] = useState(false)
   const [cardAddModalTab, setCardAddModalTab] = useState<'global' | 'my' | 'client'>('my')
   const [pickerSourceId, setPickerSourceId] = useState<string | null>(null)
+  const [controlSourceId, setControlSourceId] = useState<string | null>(null)
 
   // Schedule state
   const [startDate, setStartDate] = useState(project.startDate ?? '')
@@ -114,12 +116,12 @@ export default function ProjectSettingsTab({
   }, [project.id])
 
   useEffect(() => {
-    if (pickerSourceId) {
+    if (pickerSourceId || controlSourceId) {
       void window.api?.profiles?.setEmbedVisible?.(false)
     } else {
       void window.api?.profiles?.setEmbedVisible?.(true)
     }
-  }, [pickerSourceId])
+  }, [pickerSourceId, controlSourceId])
 
   const closeChannelPicker = (): void => {
     setPickerSourceId(null)
@@ -288,20 +290,31 @@ export default function ProjectSettingsTab({
     setTimeout(() => setSourceNotice(null), 3000)
   }
 
-  const handleToggleChannelEnabled = async (sourceId: string, channelId: string, currentEnabled: boolean): Promise<void> => {
+  const handleToggleChannelPermission = async (
+    sourceId: string,
+    channelId: string,
+    tier: 'dash' | 'read' | 'write',
+    currentValue: boolean
+  ): Promise<void> => {
     const source = (project.sources ?? []).find((item) => item.id === sourceId)
     if (!source) return
+    const nextValue = !currentValue
     await useDashboardStore.getState().updateSource({
       projectId: project.id,
       sourceId,
       patch: {
-        channels: source.channels.map((channel) =>
-          channel.id === channelId ? { ...channel, enabled: !currentEnabled } : channel
-        ),
+        channels: source.channels.map((channel) => {
+          if (channel.id !== channelId) return channel
+          if (tier === 'dash') return { ...channel, enabled: nextValue }
+          if (tier === 'read') return { ...channel, agentRead: nextValue }
+          if (tier === 'write') return { ...channel, agentWrite: nextValue }
+          return channel
+        }),
         channelsReviewedAt: source.channelsReviewedAt ?? new Date().toISOString()
       }
     })
-    setSourceNotice(`Channel ${currentEnabled ? 'deselected' : 'selected'} for monitoring`)
+    const label = tier === 'dash' ? 'Dashboard Scrape' : tier === 'read' ? 'Agent Read' : 'Agent Write'
+    setSourceNotice(`${label} ${nextValue ? 'enabled' : 'disabled'} for channel`)
     setTimeout(() => setSourceNotice(null), 3000)
   }
 
@@ -1222,6 +1235,15 @@ export default function ProjectSettingsTab({
                                 >
                                   ☑ Channels ({src.channels.filter((c) => c.enabled !== false).length})
                                 </button>
+                                <button
+                                  type="button"
+                                  className="dash-subtle"
+                                  style={{ fontSize: 12, padding: '4px 10px' }}
+                                  onClick={() => setControlSourceId(src.id)}
+                                  title="Open 3-tier Channel Matrix & Permissions"
+                                >
+                                  ⚙️ Matrix &amp; Agent
+                                </button>
                               </>
                             ) : null}
                             {/* Capability Gating: ONLY show Scrape on Slack browser workspaces where our scraper is implemented */}
@@ -1291,6 +1313,21 @@ export default function ProjectSettingsTab({
                               fontSize: 12
                             }}
                           >
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              Engine
+                              <select
+                                value={src.engine ?? 'direct_api'}
+                                onChange={(e) =>
+                                  void handleUpdateSourceSettings(src.id, {
+                                    engine: e.target.value as 'direct_api' | 'browser_dom'
+                                  })
+                                }
+                                style={{ background: '#0f172a', color: '#fff', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 6px' }}
+                              >
+                                <option value="direct_api">⚡ Direct API (~150ms)</option>
+                                <option value="browser_dom">🌐 Browser DOM</option>
+                              </select>
+                            </label>
                             <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                               DMs
                               <select
@@ -1393,54 +1430,129 @@ export default function ProjectSettingsTab({
                             }}
                           >
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
-                                Monitored Channels ({src.channels.filter((c) => c.enabled !== false).length}/{src.channels.length} active)
-                              </span>
-                              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                                Auto-discovered public &amp; private locked channels
-                              </span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+                                  Monitored Channels ({src.channels.filter((c) => c.enabled !== false).length}/{src.channels.length} active)
+                                </span>
+                                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                  Auto-discovered public &amp; private locked channels
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setControlSourceId(src.id)}
+                                style={{
+                                  fontSize: 11,
+                                  padding: '3px 8px',
+                                  background: 'rgba(99, 102, 241, 0.15)',
+                                  border: '1px solid rgba(99, 102, 241, 0.4)',
+                                  color: '#a5b4fc',
+                                  borderRadius: 4,
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 4
+                                }}
+                              >
+                                <span>⚙️</span>
+                                <span>Full Matrix &amp; Permissions</span>
+                              </button>
                             </div>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 6 }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 6 }}>
                               {src.channels.map((ch) => (
-                                <label
+                                <div
                                   key={ch.id}
                                   style={{
                                     display: 'flex',
                                     alignItems: 'center',
+                                    justifyContent: 'space-between',
                                     gap: 6,
                                     fontSize: 12,
-                                    padding: '4px 8px',
-                                    background: ch.enabled !== false ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                                    border: `1px solid ${ch.enabled !== false ? 'rgba(99, 102, 241, 0.3)' : 'var(--border)'}`,
-                                    borderRadius: 4,
-                                    cursor: 'pointer',
-                                    color: ch.enabled !== false ? 'var(--text)' : 'var(--text-muted)'
+                                    padding: '5px 8px',
+                                    background: 'rgba(255, 255, 255, 0.03)',
+                                    border: '1px solid var(--border)',
+                                    borderRadius: 6
                                   }}
                                 >
-                                  <input
-                                    type="checkbox"
-                                    checked={ch.enabled !== false}
-                                    onChange={() => void handleToggleChannelEnabled(src.id, ch.id, ch.enabled !== false)}
-                                  />
-                                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {ch.isDm || ch.kind === 'dm'
-                                      ? '💬'
-                                      : ch.isPrivate || ch.kind === 'private'
-                                        ? '🔒'
-                                        : '#'}{' '}
-                                    {ch.name || ch.id}
-                                  </span>
-                                  <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, opacity: 0.75, flexShrink: 0 }}>
-                                    {ch.memberCount !== undefined && (
-                                      <span title={`${ch.memberCount} members`}>👥{ch.memberCount}</span>
-                                    )}
-                                    {ch.created ? (
-                                      <span title={`Created ${new Date(ch.created * 1000).toLocaleDateString()}`}>
-                                        📅{new Date(ch.created * 1000).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' })}
-                                      </span>
-                                    ) : null}
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, flex: 1 }}>
+                                    <span style={{ fontSize: 11, opacity: 0.8 }}>
+                                      {ch.isDm || ch.kind === 'dm'
+                                        ? '💬'
+                                        : ch.isPrivate || ch.kind === 'private'
+                                          ? '🔒'
+                                          : '#'}
+                                    </span>
+                                    <span
+                                      style={{
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        whiteSpace: 'nowrap',
+                                        fontWeight: 500,
+                                        color:
+                                          ch.enabled !== false || ch.agentRead || ch.agentWrite
+                                            ? 'var(--text)'
+                                            : 'var(--text-muted)'
+                                      }}
+                                      title={ch.name || ch.id}
+                                    >
+                                      {ch.name || ch.id}
+                                    </span>
                                   </div>
-                                </label>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleToggleChannelPermission(src.id, ch.id, 'dash', ch.enabled !== false)}
+                                      title="Toggle Dashboard Scrape monitoring"
+                                      style={{
+                                        padding: '2px 5px',
+                                        fontSize: 10,
+                                        borderRadius: 3,
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        border: `1px solid ${ch.enabled !== false ? '#8b5cf6' : 'rgba(255,255,255,0.1)'}`,
+                                        background: ch.enabled !== false ? 'rgba(139, 92, 246, 0.25)' : 'transparent',
+                                        color: ch.enabled !== false ? '#c4b5fd' : 'var(--text-muted)'
+                                      }}
+                                    >
+                                      📊 Dash
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleToggleChannelPermission(src.id, ch.id, 'read', Boolean(ch.agentRead))}
+                                      title="Toggle Agent Read context permission"
+                                      style={{
+                                        padding: '2px 5px',
+                                        fontSize: 10,
+                                        borderRadius: 3,
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        border: `1px solid ${ch.agentRead ? '#10b981' : 'rgba(255,255,255,0.1)'}`,
+                                        background: ch.agentRead ? 'rgba(16, 185, 129, 0.25)' : 'transparent',
+                                        color: ch.agentRead ? '#6ee7b7' : 'var(--text-muted)'
+                                      }}
+                                    >
+                                      🤖 Read
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleToggleChannelPermission(src.id, ch.id, 'write', Boolean(ch.agentWrite))}
+                                      title="Toggle Agent Write permission (autonomous Slack posting)"
+                                      style={{
+                                        padding: '2px 5px',
+                                        fontSize: 10,
+                                        borderRadius: 3,
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        border: `1px solid ${ch.agentWrite ? '#f59e0b' : 'rgba(255,255,255,0.1)'}`,
+                                        background: ch.agentWrite ? 'rgba(245, 158, 11, 0.25)' : 'transparent',
+                                        color: ch.agentWrite ? '#fcd34d' : 'var(--text-muted)'
+                                      }}
+                                    >
+                                      ✍️ Write
+                                    </button>
+                                  </div>
+                                </div>
                               ))}
                             </div>
                           </div>
@@ -2307,6 +2419,21 @@ export default function ProjectSettingsTab({
                   setSourceNotice('Channel selection saved')
                   setTimeout(() => setSourceNotice(null), 3000)
                 }}
+              />
+            )
+          })()
+        : null}
+
+      {controlSourceId
+        ? (() => {
+            const ctrlSource = (project.sources ?? []).find((s) => s.id === controlSourceId)
+            if (!ctrlSource) return null
+            return (
+              <WorkspaceControlModal
+                open
+                project={project}
+                source={ctrlSource}
+                onClose={() => setControlSourceId(null)}
               />
             )
           })()

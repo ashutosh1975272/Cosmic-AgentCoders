@@ -520,6 +520,9 @@ if (!gotSingleInstanceLock) {
       monitorStore: dashboardMonitorStore,
       configService,
       insightEngine,
+      chatService: dashboardChatService,
+      syncEngine: dashboardEngine,
+      scheduleStore: dashboardScheduleStore,
       retriever: new DashboardChatRetriever({
         monitorStore: dashboardMonitorStore,
         configService,

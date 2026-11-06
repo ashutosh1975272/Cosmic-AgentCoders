@@ -367,6 +367,9 @@ export default function WorkspaceContent({
           initialQuestion={chatDraft}
           onConsumeInitial={onConsumeChatDraft}
           onOpenSettings={onOpenSettings}
+          onOpenControl={() => {
+            if (primarySource) setControlSource(primarySource)
+          }}
           onOpenSource={(ref) => {
             // Always navigate to the channel; the Slack tab consumes this
             // target and scrolls/flashes when the message is loaded.

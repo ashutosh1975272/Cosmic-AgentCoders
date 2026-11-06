@@ -26,6 +26,10 @@ import { SourceStreamFilter, resolveSourceRefs } from './chat-sources'
 import type { ConfigService } from './config-service'
 import type { InsightEngine } from './insight-engine'
 import type { MonitorStore } from './monitor-store'
+import type { DashboardChatService } from './chat-service'
+import type { DashboardSyncEngine } from './sync-engine'
+import type { DashboardScheduleStore } from './schedule-store'
+import { detectAgentAction, executeAgentAction } from './agent-action-engine'
 
 const MAX_HISTORY = 200
 const PROJECT_ID_RE = /^[A-Za-z0-9_-]{1,100}$/
@@ -44,12 +48,15 @@ export interface ProjectChatSink {
 
 export interface ProjectChatDeps {
   rootDir: string
-  monitorStore: Pick<MonitorStore, 'listProjects'>
+  monitorStore: Pick<MonitorStore, 'listProjects'> & Partial<Pick<MonitorStore, 'upsertProject'>>
   configService: Pick<ConfigService, 'resolveSettings'>
   insightEngine: Pick<InsightEngine, 'existingInsight'>
   retriever: ProjectChatRetriever
   /** Tests inject a provider; production builds a NimProvider per run. */
   providerFactory?: ChatProviderFactory
+  chatService?: DashboardChatService
+  syncEngine?: DashboardSyncEngine
+  scheduleStore?: DashboardScheduleStore
 }
 
 export class ProjectChatError extends Error {
@@ -148,6 +155,9 @@ export class ProjectChatService {
   private readonly insightEngine: ProjectChatDeps['insightEngine']
   private readonly retriever: ProjectChatRetriever
   private readonly providerFactory: ChatProviderFactory
+  private readonly chatService?: DashboardChatService
+  private readonly syncEngine?: DashboardSyncEngine
+  private readonly scheduleStore?: DashboardScheduleStore
   private readonly runs = new Map<string, ActiveRun>()
 
   constructor(deps: ProjectChatDeps) {
@@ -156,6 +166,9 @@ export class ProjectChatService {
     this.configService = deps.configService
     this.insightEngine = deps.insightEngine
     this.retriever = deps.retriever
+    this.chatService = deps.chatService
+    this.syncEngine = deps.syncEngine
+    this.scheduleStore = deps.scheduleStore
     this.providerFactory =
       deps.providerFactory ??
       ((input) =>
@@ -319,6 +332,31 @@ export class ProjectChatService {
           atIso: new Date().toISOString()
         })
       }
+
+      // Check if user prompt is an autonomous agent command (e.g. Slack post, read channel, scrape, schedule)
+      const project = (await this.monitorStore.listProjects()).find((p) => p.id === projectId)
+      const directAction = project ? detectAgentAction(question, project) : null
+      if (directAction && project) {
+        const actionRes = await executeAgentAction(directAction, {
+          projectId,
+          project,
+          chatService: this.chatService,
+          syncEngine: this.syncEngine,
+          scheduleStore: this.scheduleStore,
+          monitorStore: this.monitorStore
+        })
+        if (actionRes.handled) {
+          sink.chunk({ projectId, runId, chunk: actionRes.replyMarkdown })
+          await this.appendMessage(projectId, {
+            role: 'assistant',
+            content: actionRes.replyMarkdown,
+            atIso: new Date().toISOString()
+          })
+          sink.done({ projectId, runId, content: actionRes.replyMarkdown, sources: [], stopped: false })
+          return
+        }
+      }
+
       const last = history.at(-1)
       const contextHistory =
         retry && last?.role === 'user' && last.content === question ? history.slice(0, -1) : history
@@ -382,6 +420,31 @@ export class ProjectChatService {
       if (!content.trim()) {
         throw new ProjectChatError('INTERNAL', 'The model returned an empty answer.', true)
       }
+
+      // Check if LLM emitted an action block that needs execution
+      const modelAction = project ? detectAgentAction(content, project) : null
+      if (modelAction && project) {
+        const actionRes = await executeAgentAction(modelAction, {
+          projectId,
+          project,
+          chatService: this.chatService,
+          syncEngine: this.syncEngine,
+          scheduleStore: this.scheduleStore,
+          monitorStore: this.monitorStore
+        })
+        if (actionRes.handled) {
+          const combined = `${content}\n\n${actionRes.replyMarkdown}`
+          sink.chunk({ projectId, runId, chunk: `\n\n${actionRes.replyMarkdown}` })
+          await this.appendMessage(projectId, {
+            role: 'assistant',
+            content: combined,
+            atIso: new Date().toISOString()
+          })
+          sink.done({ projectId, runId, content: combined, sources: [], stopped: false })
+          return
+        }
+      }
+
       const sources =
         content === PROJECT_CHAT_NO_ANSWER ? [] : resolveSourceRefs(finished.ids, built.refs)
       await this.appendMessage(projectId, {

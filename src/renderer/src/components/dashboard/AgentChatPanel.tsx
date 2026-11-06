@@ -16,6 +16,7 @@ interface AgentChatPanelProps {
   initialQuestion?: string | null
   onConsumeInitial?: () => void
   onOpenSettings?: () => void
+  onOpenControl?: (sourceId?: string) => void
   onOpenSource?: (ref: DashboardProjectChatSourceRef) => void
 }
 
@@ -26,6 +27,171 @@ interface ChatFailure {
   retryable: boolean
   mode: RetryMode
   question: string
+}
+
+function parseActionCard(content: string): { cleanContent: string; card: { type: string; ok: boolean; data?: any } | null } {
+  const match = content.match(/<!-- ACTION_CARD:\s*([\s\S]*?)\s*-->/)
+  if (!match) return { cleanContent: content, card: null }
+  try {
+    const card = JSON.parse(match[1])
+    const cleanContent = content.replace(/<!-- ACTION_CARD:\s*[\s\S]*?\s*-->/, '').trim()
+    return { cleanContent, card }
+  } catch {
+    return { cleanContent: content, card: null }
+  }
+}
+
+function ActionCard({
+  card,
+  onOpenControl
+}: {
+  card: { type: string; ok: boolean; data?: any }
+  onOpenControl?: () => void
+}): React.ReactElement | null {
+  if (card.type === 'permission_denied') {
+    return (
+      <div
+        style={{
+          marginTop: 10,
+          padding: '12px 14px',
+          background: 'rgba(245, 158, 11, 0.1)',
+          border: '1px solid rgba(245, 158, 11, 0.35)',
+          borderRadius: 8,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#fcd34d', fontWeight: 600, fontSize: 13 }}>
+          <span>⚠️</span>
+          <span>Agent Write Permission Required</span>
+        </div>
+        <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.4 }}>
+          Channel <strong style={{ color: 'var(--text)' }}>#{card.data?.channelName}</strong> is not authorized for autonomous posting.
+        </p>
+        {onOpenControl ? (
+          <button
+            type="button"
+            onClick={onOpenControl}
+            style={{
+              alignSelf: 'flex-start',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              background: 'rgba(245, 158, 11, 0.2)',
+              border: '1px solid rgba(245, 158, 11, 0.5)',
+              color: '#fbbf24',
+              borderRadius: 6,
+              padding: '6px 12px',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer'
+            }}
+          >
+            <span>⚙️</span>
+            <span>Grant Write Permission in Workspace Control</span>
+          </button>
+        ) : null}
+      </div>
+    )
+  }
+
+  if (card.type === 'slack_dispatch') {
+    return (
+      <div
+        style={{
+          marginTop: 10,
+          padding: '10px 14px',
+          background: 'rgba(34, 197, 94, 0.08)',
+          border: '1px solid rgba(34, 197, 94, 0.25)',
+          borderRadius: 8,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#4ade80', fontWeight: 600, fontSize: 12 }}>
+            <span>⚡</span>
+            <span>Slack Message Dispatched</span>
+            <span
+              style={{
+                fontSize: 10,
+                background: 'rgba(34, 197, 94, 0.2)',
+                color: '#86efac',
+                padding: '1px 6px',
+                borderRadius: 4,
+                fontWeight: 600
+              }}
+            >
+              Direct API (~150ms)
+            </span>
+          </div>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{card.data?.time}</span>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text)', background: 'rgba(0,0,0,0.2)', padding: '6px 10px', borderRadius: 4 }}>
+          <span style={{ color: '#93c5fd', fontWeight: 600 }}>#{card.data?.channelName}: </span>
+          <span>"{card.data?.text}"</span>
+        </div>
+      </div>
+    )
+  }
+
+  if (card.type === 'scrape_trigger') {
+    return (
+      <div
+        style={{
+          marginTop: 10,
+          padding: '10px 14px',
+          background: 'rgba(139, 92, 246, 0.08)',
+          border: '1px solid rgba(139, 92, 246, 0.25)',
+          borderRadius: 8,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          fontSize: 12
+        }}
+      >
+        <span style={{ fontSize: 16 }}>🕷️</span>
+        <div>
+          <strong style={{ color: '#c4b5fd' }}>Scrape &amp; Delta Sync Complete: </strong>
+          <span style={{ color: 'var(--text)' }}>
+            Captured {card.data?.newMessagesCount ?? 0} new message(s) across monitored channels.
+          </span>
+        </div>
+      </div>
+    )
+  }
+
+  if (card.type === 'schedule_set') {
+    const mins = card.data?.intervalMinutes ?? 15
+    const label = mins < 1 ? `${Math.round(mins * 60)}s` : `${mins}m`
+    return (
+      <div
+        style={{
+          marginTop: 10,
+          padding: '10px 14px',
+          background: 'rgba(6, 182, 212, 0.08)',
+          border: '1px solid rgba(6, 182, 212, 0.25)',
+          borderRadius: 8,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          fontSize: 12
+        }}
+      >
+        <span style={{ fontSize: 16 }}>⏱️</span>
+        <div>
+          <strong style={{ color: '#67e8f9' }}>Automated Scrape Schedule: </strong>
+          <span style={{ color: 'var(--text)' }}>
+            {card.data?.enabled ? `Active · Polling every ${label}` : 'Paused'}
+          </span>
+        </div>
+      </div>
+    )
+  }
+
+  return null
 }
 
 const SUGGESTIONS = [
@@ -104,6 +270,7 @@ export default function AgentChatPanel({
   initialQuestion,
   onConsumeInitial,
   onOpenSettings,
+  onOpenControl,
   onOpenSource
 }: AgentChatPanelProps): React.ReactElement {
   const [messages, setMessages] = useState<DashboardProjectChatMessage[]>([])
@@ -520,7 +687,7 @@ export default function AgentChatPanel({
       <header className="chat-head">
         <div className="chat-head-main">
           <h3 className="chat-head-title">Chat with project</h3>
-          <span className="chat-head-sub">Answers come only from this card’s stored context.</span>
+          <span className="chat-head-sub">Autonomous project agent · Answers questions, reads channels, posts to authorized Slack channels &amp; triggers scrapes</span>
         </div>
         <div className="chat-head-actions">
           {status ? (
@@ -633,7 +800,15 @@ export default function AgentChatPanel({
                 </div>
                 <div className="chat-bubble">
                   {message.role === 'assistant' ? (
-                    <ChatMarkdown text={message.content} />
+                    (() => {
+                      const { cleanContent, card } = parseActionCard(message.content)
+                      return (
+                        <>
+                          {cleanContent ? <ChatMarkdown text={cleanContent} /> : null}
+                          {card ? <ActionCard card={card} onOpenControl={onOpenControl} /> : null}
+                        </>
+                      )
+                    })()
                   ) : (
                     message.content
                   )}
@@ -676,7 +851,15 @@ export default function AgentChatPanel({
               </div>
               <div className="chat-bubble">
                 {streamText ? (
-                  <ChatMarkdown text={streamText} />
+                  (() => {
+                    const { cleanContent, card } = parseActionCard(streamText)
+                    return (
+                      <>
+                        {cleanContent ? <ChatMarkdown text={cleanContent} /> : null}
+                        {card ? <ActionCard card={card} onOpenControl={onOpenControl} /> : null}
+                      </>
+                    )
+                  })()
                 ) : (
                   <span className="chat-thinking" aria-label="Thinking">
                     <span className="chat-dot" />
@@ -748,8 +931,7 @@ export default function AgentChatPanel({
         )}
       </form>
       <p className="chat-hint">
-        Enter sends, Shift+Enter adds a line. Answers use only this project’s stored Slack history
-        and state — no messages are posted to Slack.
+        Enter sends, Shift+Enter adds a line. Cosmic can execute Slack dispatches, read channels, and trigger scrapes on command.
       </p>
       <p className="chat-visually-hidden" role="status" aria-live="polite">
         {liveMessage}
