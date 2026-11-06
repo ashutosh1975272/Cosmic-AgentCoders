@@ -37,9 +37,12 @@ export function WorkspaceControlModal({
 
   const [activeTab, setActiveTab] = useState<ControlTab>('channels')
 
-  // Channels state
+  // Channels 3-tier stacked permissions state
   const [channels, setChannels] = useState<ProjectSourceChannel[]>([])
-  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [selectedDashboard, setSelectedDashboard] = useState<Set<string>>(new Set())
+  const [selectedAgentRead, setSelectedAgentRead] = useState<Set<string>>(new Set())
+  const [selectedAgentWrite, setSelectedAgentWrite] = useState<Set<string>>(new Set())
+  const [channelSearch, setChannelSearch] = useState('')
   const [selectionMode, setSelectionMode] = useState<ProjectSourceSelectionMode>(
     source.selectionMode ?? 'include'
   )
@@ -69,12 +72,18 @@ export function WorkspaceControlModal({
     setIntervalMinutes(source.scheduleIntervalMinutes ?? 0.333)
     setEngineMode(source.engineMode ?? 'direct_api')
 
-    const existing = new Map(source.channels.map((c) => [c.id, c]))
-    setSelected(
-      new Set(
-        source.channels.filter((c) => c.enabled !== false).map((c) => c.id)
-      )
-    )
+    const existing = new Map((source.channels ?? []).map((c) => [c.id, c]))
+    const dashSet = new Set<string>()
+    const agentReadSet = new Set<string>()
+    const agentWriteSet = new Set<string>()
+    for (const c of source.channels ?? []) {
+      if (c.enabled === true) dashSet.add(c.id)
+      if (c.agentRead === true) agentReadSet.add(c.id)
+      if (c.agentWrite === true) agentWriteSet.add(c.id)
+    }
+    setSelectedDashboard(dashSet)
+    setSelectedAgentRead(agentReadSet)
+    setSelectedAgentWrite(agentWriteSet)
 
     void window.api.dashboard
       .discoverSourceChannels({
@@ -87,7 +96,7 @@ export function WorkspaceControlModal({
         if (!alive) return
         if (result.error) setChannelsError(result.error)
         if (result.channels.length === 0) {
-          setChannels(source.channels)
+          setChannels(source.channels ?? [])
           return
         }
         setChannels(
@@ -95,7 +104,9 @@ export function WorkspaceControlModal({
             const previous = existing.get(channel.id)
             return {
               ...channel,
-              enabled: previous ? previous.enabled !== false : false
+              enabled: previous ? previous.enabled === true : false,
+              agentRead: previous ? previous.agentRead === true : false,
+              agentWrite: previous ? previous.agentWrite === true : false
             }
           })
         )
@@ -103,7 +114,7 @@ export function WorkspaceControlModal({
       .catch((err) => {
         if (!alive) return
         setChannelsError(err instanceof Error ? err.message : 'Channel discovery failed')
-        setChannels(source.channels)
+        setChannels(source.channels ?? [])
       })
       .finally(() => {
         if (alive) setChannelsLoading(false)
@@ -114,22 +125,28 @@ export function WorkspaceControlModal({
     }
   }, [open, project.id, source])
 
+  const filteredChannels = useMemo(() => {
+    const q = channelSearch.trim().toLowerCase()
+    if (!q) return channels
+    return channels.filter((c) => c.name.toLowerCase().includes(q) || c.id.toLowerCase().includes(q))
+  }, [channels, channelSearch])
+
   const grouped = useMemo(() => {
     const publicChannels: ProjectSourceChannel[] = []
     const privateChannels: ProjectSourceChannel[] = []
     const dms: ProjectSourceChannel[] = []
-    for (const channel of channels) {
+    for (const channel of filteredChannels) {
       if (channel.isDm || channel.kind === 'dm') dms.push(channel)
       else if (channel.isPrivate || channel.kind === 'private') privateChannels.push(channel)
       else publicChannels.push(channel)
     }
     return { publicChannels, privateChannels, dms }
-  }, [channels])
+  }, [filteredChannels])
 
   if (!open) return null
 
-  const toggleChannel = (id: string) => {
-    setSelected((prev) => {
+  const toggleDashboard = (id: string) => {
+    setSelectedDashboard((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
@@ -137,12 +154,50 @@ export function WorkspaceControlModal({
     })
   }
 
+  const toggleAgentRead = (id: string) => {
+    setSelectedAgentRead((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const toggleAgentWrite = (id: string) => {
+    setSelectedAgentWrite((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const clearAllPermissions = () => {
+    setSelectedDashboard(new Set())
+    setSelectedAgentRead(new Set())
+    setSelectedAgentWrite(new Set())
+  }
+
+  const selectAllDashboard = () => {
+    setSelectedDashboard(new Set(channels.map((c) => c.id)))
+  }
+
+  const selectAllAgentRead = () => {
+    setSelectedAgentRead(new Set(channels.map((c) => c.id)))
+  }
+
+  const selectAllAgentWrite = () => {
+    setSelectedAgentWrite(new Set(channels.map((c) => c.id)))
+  }
+
   const handleSaveChannels = async () => {
     setSavingChannels(true)
     try {
       const updatedChannels: ProjectSourceChannel[] = channels.map((channel) => ({
         ...channel,
-        enabled: selected.has(channel.id)
+        enabled: selectedDashboard.has(channel.id),
+        agentRead: selectedAgentRead.has(channel.id),
+        agentWrite: selectedAgentWrite.has(channel.id)
       }))
 
       await updateSource({
@@ -156,7 +211,7 @@ export function WorkspaceControlModal({
       })
       await loadSnapshot()
       onSaved?.()
-      setSyncFeedback('Channel selection saved successfully.')
+      setSyncFeedback('Channel permissions saved successfully.')
       setTimeout(() => setSyncFeedback(null), 3000)
     } catch (err) {
       setChannelsError(err instanceof Error ? err.message : 'Failed to save channels')
@@ -245,59 +300,182 @@ export function WorkspaceControlModal({
 
     return (
       <div style={{ marginTop: 16 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
-          {label} ({items.length})
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#cbd5e1', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span>{label} ({items.length})</span>
         </div>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-            gap: 8,
-            maxHeight: 280,
-            overflowY: 'auto',
-            paddingRight: 6
-          }}
-        >
-          {items.map((channel) => {
-            const isChecked = selected.has(channel.id)
-            return (
-              <label
-                key={channel.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  padding: '8px 12px',
-                  borderRadius: 8,
-                  background: isChecked ? 'rgba(99, 102, 241, 0.14)' : 'rgba(255, 255, 255, 0.03)',
-                  border: isChecked ? '1px solid rgba(99, 102, 241, 0.45)' : '1px solid rgba(255, 255, 255, 0.08)',
-                  cursor: 'pointer',
-                  transition: 'all 0.12s ease'
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={isChecked}
-                  onChange={() => toggleChannel(channel.id)}
-                  style={{ cursor: 'pointer', accentColor: '#6366f1' }}
-                />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: isChecked ? '#fff' : '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {channel.isDm ? '👤 ' : '# '}
-                    {channel.name}
-                  </div>
-                  {channel.topic && (
-                    <div style={{ fontSize: 11, color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {channel.topic}
+
+        <div style={{ borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255, 255, 255, 0.08)', background: 'rgba(255, 255, 255, 0.02)' }}>
+          {/* Stacked Matrix Table Header */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(240px, 1fr) 140px 140px 140px',
+              padding: '8px 16px',
+              background: 'rgba(255, 255, 255, 0.04)',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+              fontSize: 11,
+              fontWeight: 700,
+              color: '#94a3b8',
+              letterSpacing: '0.04em'
+            }}
+          >
+            <div>Channel / Person</div>
+            <div style={{ textAlign: 'center' }}>📊 Dashboard Scrape</div>
+            <div style={{ textAlign: 'center' }}>🤖 Agent Read</div>
+            <div style={{ textAlign: 'center' }}>✍️ Agent Write</div>
+          </div>
+
+          <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+            {items.map((channel) => {
+              const isDash = selectedDashboard.has(channel.id)
+              const isRead = selectedAgentRead.has(channel.id)
+              const isWrite = selectedAgentWrite.has(channel.id)
+              return (
+                <div
+                  key={channel.id}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'minmax(240px, 1fr) 140px 140px 140px',
+                    alignItems: 'center',
+                    padding: '8px 16px',
+                    borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
+                    background:
+                      isDash || isRead || isWrite
+                        ? 'rgba(99, 102, 241, 0.05)'
+                        : 'transparent',
+                    transition: 'background 0.12s ease'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, paddingRight: 12 }}>
+                    <span style={{ fontSize: 14, color: channel.isDm ? '#38bdf8' : channel.isPrivate ? '#f59e0b' : '#a855f7' }}>
+                      {channel.isDm ? '👤' : channel.isPrivate ? '🔒' : '#'}
+                    </span>
+                    <div style={{ minWidth: 0, overflow: 'hidden' }}>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: '#f8fafc',
+                          textOverflow: 'ellipsis',
+                          overflow: 'hidden',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        {channel.name}
+                      </div>
+                      {channel.topic && (
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: '#64748b',
+                            textOverflow: 'ellipsis',
+                            overflow: 'hidden',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          {channel.topic}
+                        </div>
+                      )}
                     </div>
-                  )}
+                    <span
+                      style={{
+                        fontSize: 10,
+                        color: '#94a3b8',
+                        background: 'rgba(255, 255, 255, 0.06)',
+                        padding: '2px 6px',
+                        borderRadius: 4,
+                        marginLeft: 'auto',
+                        flexShrink: 0
+                      }}
+                    >
+                      {kindLabel(channel)}
+                    </span>
+                  </div>
+
+                  {/* Dashboard Scrape Toggle */}
+                  <div style={{ display: 'flex', justifyContent: 'center' }}>
+                    <label
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        cursor: 'pointer',
+                        padding: '4px 10px',
+                        borderRadius: 6,
+                        background: isDash ? 'rgba(99, 102, 241, 0.18)' : 'rgba(255, 255, 255, 0.03)',
+                        border: isDash ? '1px solid rgba(99, 102, 241, 0.5)' : '1px solid rgba(255, 255, 255, 0.08)',
+                        transition: 'all 0.12s ease'
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isDash}
+                        onChange={() => toggleDashboard(channel.id)}
+                        style={{ cursor: 'pointer', accentColor: '#6366f1' }}
+                      />
+                      <span style={{ fontSize: 11, fontWeight: 600, color: isDash ? '#a5b4fc' : '#64748b' }}>
+                        {isDash ? 'Enabled' : 'Off'}
+                      </span>
+                    </label>
+                  </div>
+
+                  {/* Agent Read Toggle */}
+                  <div style={{ display: 'flex', justifyContent: 'center' }}>
+                    <label
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        cursor: 'pointer',
+                        padding: '4px 10px',
+                        borderRadius: 6,
+                        background: isRead ? 'rgba(16, 185, 129, 0.18)' : 'rgba(255, 255, 255, 0.03)',
+                        border: isRead ? '1px solid rgba(16, 185, 129, 0.5)' : '1px solid rgba(255, 255, 255, 0.08)',
+                        transition: 'all 0.12s ease'
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isRead}
+                        onChange={() => toggleAgentRead(channel.id)}
+                        style={{ cursor: 'pointer', accentColor: '#10b981' }}
+                      />
+                      <span style={{ fontSize: 11, fontWeight: 600, color: isRead ? '#6ee7b7' : '#64748b' }}>
+                        {isRead ? 'Read' : 'Off'}
+                      </span>
+                    </label>
+                  </div>
+
+                  {/* Agent Write Toggle */}
+                  <div style={{ display: 'flex', justifyContent: 'center' }}>
+                    <label
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        cursor: 'pointer',
+                        padding: '4px 10px',
+                        borderRadius: 6,
+                        background: isWrite ? 'rgba(245, 158, 11, 0.18)' : 'rgba(255, 255, 255, 0.03)',
+                        border: isWrite ? '1px solid rgba(245, 158, 11, 0.5)' : '1px solid rgba(255, 255, 255, 0.08)',
+                        transition: 'all 0.12s ease'
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isWrite}
+                        onChange={() => toggleAgentWrite(channel.id)}
+                        style={{ cursor: 'pointer', accentColor: '#f59e0b' }}
+                      />
+                      <span style={{ fontSize: 11, fontWeight: 600, color: isWrite ? '#fcd34d' : '#64748b' }}>
+                        {isWrite ? 'Write' : 'Off'}
+                      </span>
+                    </label>
+                  </div>
                 </div>
-                <span style={{ fontSize: 10, color: '#94a3b8', background: 'rgba(255, 255, 255, 0.06)', padding: '2px 6px', borderRadius: 4 }}>
-                  {kindLabel(channel)}
-                </span>
-              </label>
-            )
-          })}
+              )
+            })}
+          </div>
         </div>
       </div>
     )
@@ -428,8 +606,8 @@ export function WorkspaceControlModal({
                 <span style={{ fontSize: 16 }}>📋</span>
                 <span>Select Channels</span>
               </div>
-              <span style={{ fontSize: 11, color: '#4ade80', background: 'rgba(74, 222, 128, 0.12)', padding: '2px 6px', borderRadius: 4 }}>
-                {selected.size} active
+              <span style={{ fontSize: 10, color: '#4ade80', background: 'rgba(74, 222, 128, 0.12)', padding: '2px 6px', borderRadius: 4 }}>
+                {selectedDashboard.size} Dash · {selectedAgentRead.size} Read · {selectedAgentWrite.size} Write
               </span>
             </button>
 
@@ -611,32 +789,86 @@ export function WorkspaceControlModal({
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
                   <div>
                     <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#f8fafc' }}>
-                      Select Channels to Scrape
+                      Stacked Channel Matrix &amp; Permissions
                     </h3>
                     <p style={{ margin: '4px 0 0', fontSize: 12, color: '#94a3b8' }}>
-                      Discovery reads visible public &amp; private channels directly from your session. Only checked channels are scraped.
+                      Configure independent permissions for Dashboard Analytics, Agent Read Context, and Agent Write Dispatch. Unchecked channels remain inactive by default.
                     </p>
                   </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                     <button
                       type="button"
                       className="btn ghost btn-sm"
-                      onClick={() => setSelected(new Set())}
-                      disabled={selected.size === 0}
-                      style={{ fontSize: 12, padding: '5px 12px' }}
+                      onClick={clearAllPermissions}
+                      disabled={selectedDashboard.size === 0 && selectedAgentRead.size === 0 && selectedAgentWrite.size === 0}
+                      style={{ fontSize: 12, padding: '5px 10px' }}
                     >
                       Clear all
+                    </button>
+                    <button
+                      type="button"
+                      className="btn ghost btn-sm"
+                      onClick={selectAllDashboard}
+                      style={{ fontSize: 11, padding: '5px 10px', color: '#818cf8', borderColor: 'rgba(129, 140, 248, 0.3)' }}
+                    >
+                      All to Dashboard
+                    </button>
+                    <button
+                      type="button"
+                      className="btn ghost btn-sm"
+                      onClick={selectAllAgentRead}
+                      style={{ fontSize: 11, padding: '5px 10px', color: '#34d399', borderColor: 'rgba(52, 211, 153, 0.3)' }}
+                    >
+                      All to Agent Read
+                    </button>
+                    <button
+                      type="button"
+                      className="btn ghost btn-sm"
+                      onClick={selectAllAgentWrite}
+                      style={{ fontSize: 11, padding: '5px 10px', color: '#fbbf24', borderColor: 'rgba(251, 191, 36, 0.3)' }}
+                    >
+                      All to Agent Write
                     </button>
                     <button
                       type="button"
                       className="btn btn-primary btn-sm"
                       onClick={() => void handleSaveChannels()}
                       disabled={savingChannels || channelsLoading}
-                      style={{ fontSize: 12, fontWeight: 650, padding: '5px 16px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 6 }}
+                      style={{ fontSize: 12, fontWeight: 650, padding: '6px 16px', background: '#6366f1', color: '#fff', border: 'none', borderRadius: 6 }}
                     >
-                      {savingChannels ? 'Saving…' : 'Save Channel Selection'}
+                      {savingChannels
+                        ? 'Saving…'
+                        : `Save Permissions (${selectedDashboard.size} Dash · ${selectedAgentRead.size} Read · ${selectedAgentWrite.size} Write)`}
                     </button>
                   </div>
+                </div>
+
+                {/* Search Bar */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: 8, padding: '6px 12px' }}>
+                  <span style={{ fontSize: 13, color: '#94a3b8' }}>🔍</span>
+                  <input
+                    type="text"
+                    value={channelSearch}
+                    onChange={(e) => setChannelSearch(e.target.value)}
+                    placeholder="Search channels or DMs…"
+                    style={{
+                      flex: 1,
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#f8fafc',
+                      fontSize: 13,
+                      outline: 'none'
+                    }}
+                  />
+                  {channelSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setChannelSearch('')}
+                      style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 12 }}
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
 
                 {channelsLoading ? (

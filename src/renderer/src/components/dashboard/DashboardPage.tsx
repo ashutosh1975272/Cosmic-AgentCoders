@@ -15,6 +15,7 @@ import type { CardSummary, CardView } from './card-view'
 import { requestMessageJump } from './jump-to-message'
 import type { SelectionId } from './workspace-nav'
 import { DecisionVaultCard } from './DecisionVaultCard'
+import { AgentCockpitCard } from './AgentCockpitCard'
 import { classifyMessageIntent } from './message-reasoning'
 
 interface DashboardPageProps {
@@ -26,6 +27,7 @@ interface DashboardPageProps {
   onSync: () => void
   onOpenSettings: () => void
   onSelect: (selection: SelectionId) => void
+  onOpenControl?: () => void
 }
 
 const STATUS_LABEL: Record<InsightStatus, string> = {
@@ -341,7 +343,8 @@ export default function DashboardPage({
   syncing,
   onSync,
   onOpenSettings,
-  onSelect
+  onSelect,
+  onOpenControl
 }: DashboardPageProps): React.ReactElement {
   const { centre, leftSidebar, rightSidebar } = view
   const [hasKey, setHasKey] = useState<boolean | null>(null)
@@ -718,6 +721,13 @@ export default function DashboardPage({
                   </p>
                 ) : null}
               </section>
+
+              <AgentCockpitCard
+                project={project}
+                nextStep={centre.nextStep}
+                situationLine={centre.situationLine}
+                onOpenControl={onOpenControl}
+              />
 
               {hasDaily ? (
                 <section className="dash-panel" aria-label="Activity">

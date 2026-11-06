@@ -95,7 +95,8 @@ export class AgentSlackTool {
         projectId,
         channelId,
         text,
-        source
+        source,
+        isAgent: true
       })
 
       if (!result.ok) {

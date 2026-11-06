@@ -29,6 +29,8 @@ import type {
   DashboardProjectChatStartResult,
   DashboardProjectChatStatus,
   DashboardSendMessageResult,
+  DashboardSendAgentMessagePayload,
+  DashboardSendAgentMessageResult,
   DashboardSchedulesState,
   DashboardSnapshot,
   DashboardSyncProgressPayload,
@@ -299,6 +301,11 @@ const api: IpcApi = {
         IpcChannels.DashboardSendMessage,
         payload
       ) as Promise<DashboardSendMessageResult>,
+    sendAgentMessage: (payload: DashboardSendAgentMessagePayload) =>
+      ipcRenderer.invoke(
+        IpcChannels.DashboardSendAgentMessage,
+        payload
+      ) as Promise<DashboardSendAgentMessageResult>,
     getChatTokenStatus: (projectId) =>
       ipcRenderer.invoke(
         IpcChannels.DashboardChatTokenStatus,

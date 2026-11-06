@@ -310,6 +310,23 @@ export default function WorkspaceContent({
     }
   }
 
+  const primarySource =
+    (project.sources ?? []).find((s) => s.platform === 'slack' && s.enabled !== false) ||
+    project.sources?.[0] ||
+    null
+
+  const controlModalElement = controlSource ? (
+    <WorkspaceControlModal
+      open={Boolean(controlSource)}
+      project={project}
+      source={controlSource}
+      onClose={() => setControlSource(null)}
+      onSaved={() => {
+        void useDashboardStore.getState().loadSnapshot()
+      }}
+    />
+  ) : null
+
   // Dashboard brings its own scroll surface and width; the generic panel header
   // would repeat the project name above the freshness line.
   if (nav.openGroup === 'dash') {
@@ -324,7 +341,12 @@ export default function WorkspaceContent({
           onSync={onSync}
           onOpenSettings={onOpenSettings}
           onSelect={onSelect}
+          onOpenControl={() => {
+            if (primarySource) setControlSource(primarySource)
+            else onOpenSettings()
+          }}
         />
+        {controlModalElement}
       </section>
     )
   }
@@ -1151,18 +1173,6 @@ export default function WorkspaceContent({
         )
       })()
     : null
-
-  const controlModalElement = controlSource ? (
-    <WorkspaceControlModal
-      open={Boolean(controlSource)}
-      project={project}
-      source={controlSource}
-      onClose={() => setControlSource(null)}
-      onSaved={() => {
-        void useDashboardStore.getState().loadSnapshot()
-      }}
-    />
-  ) : null
 
   if (bare) {
     return (

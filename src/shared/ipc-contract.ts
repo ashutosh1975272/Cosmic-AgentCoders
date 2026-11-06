@@ -30,6 +30,8 @@ import type {
   DashboardSendErrorCode,
   DashboardSendMessagePayload,
   DashboardSendMessageResult,
+  DashboardSendAgentMessagePayload,
+  DashboardSendAgentMessageResult,
   InsightHistoryEntryContract,
   DashboardManualToken,
   DashboardMarkViewedPayload,
@@ -191,6 +193,7 @@ export const IpcChannels = {
   DashboardSidebarUpdate: 'dashboard:sidebar-update',
   DashboardGetMessages: 'dashboard:get-messages',
   DashboardSendMessage: 'dashboard:send-message',
+  DashboardSendAgentMessage: 'dashboard:send-agent-message',
   DashboardChatTokenStatus: 'dashboard:chat-token-status',
   DashboardProjectActivity: 'dashboard:project-activity',
   DashboardProjectChat: 'dashboard:project-chat',
@@ -485,6 +488,9 @@ export interface IpcApi {
     ) => Promise<SidebarState>
     getMessages: (payload: DashboardChatQueryPayload) => Promise<DashboardChatPage>
     sendMessage: (payload: DashboardSendMessagePayload) => Promise<DashboardSendMessageResult>
+    sendAgentMessage: (
+      payload: DashboardSendAgentMessagePayload
+    ) => Promise<DashboardSendAgentMessageResult>
     getChatTokenStatus: (projectId: string) => Promise<DashboardChatTokenStatus>
     getProjectActivity: (projectId: string) => Promise<DashboardProjectActivity>
     projectChat: (payload: DashboardProjectChatPayload) => Promise<DashboardProjectChatStartResult>
@@ -658,6 +664,8 @@ export type {
   DashboardSendErrorCode,
   DashboardSendMessagePayload,
   DashboardSendMessageResult,
+  DashboardSendAgentMessagePayload,
+  DashboardSendAgentMessageResult,
   DashboardSnapshot,
   DashboardSyncProgressPayload,
   DashboardTeamWorkspace,

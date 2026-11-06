@@ -79,6 +79,10 @@ export interface ProjectSourceChannel {
   /** Explicit kind; kept optional so older stored sources stay valid. */
   kind?: ProjectSourceChannelKind
   enabled?: boolean
+  /** Context read for AI agents (defaults to false) */
+  agentRead?: boolean
+  /** Write permission for AI agents / schedules to post messages (defaults to false) */
+  agentWrite?: boolean
   created?: number
   memberCount?: number
   topic?: string
@@ -922,6 +926,7 @@ export interface DashboardSendMessagePayload {
   source?: DashboardSource
   channelId: string
   text: string
+  isAgent?: boolean
 }
 
 export type DashboardSendErrorCode =
@@ -929,9 +934,24 @@ export type DashboardSendErrorCode =
   | 'not_connected'
   | 'channel_not_found'
   | 'invalid_text'
+  | 'permission_denied'
   | 'slack_error'
   | 'browser_error'
   | 'unknown'
+
+export interface DashboardSendAgentMessagePayload {
+  projectId: string
+  channelId: string
+  text: string
+  source?: DashboardSource
+}
+
+export interface DashboardSendAgentMessageResult {
+  ok: boolean
+  ts?: string
+  error?: string
+  code?: DashboardSendErrorCode
+}
 
 export interface DashboardSendMessageResult {
   ok: boolean

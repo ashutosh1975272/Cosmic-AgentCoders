@@ -322,10 +322,11 @@ export class DashboardChatService {
     source: DashboardSource
   ): DashboardChatMessage {
     const rawUser = msg.user ?? ''
-    const isSlackId = /^U[A-Z0-9]+$/.test(rawUser)
+    const isSlackId = /^U[A-Z0-9_]+$/.test(rawUser)
     const selfUserId = project.selfUserId ?? context?.selfUserId ?? null
     const resolved =
-      (isSlackId ? (context?.names.get(rawUser) || slackUserCache.get(rawUser)) : undefined) ||
+      context?.names.get(rawUser) ||
+      slackUserCache.get(rawUser) ||
       (!isSlackId && rawUser ? rawUser : undefined)
     const isMine = Boolean(selfUserId && (rawUser === selfUserId || rawUser === 'You' || rawUser === 'me'))
     const fallbackName = project.name?.includes('Ashutosh') ? 'Ashutosh' : (rawUser || 'Unknown')
@@ -454,9 +455,10 @@ export class DashboardChatService {
 
         for (const msg of messages) {
           const rawUser = msg.user ?? ''
-          const isSlackId = /^U[A-Z0-9]+$/.test(rawUser)
+          const isSlackId = /^U[A-Z0-9_]+$/.test(rawUser)
           const resolved =
-            (isSlackId ? (context?.names.get(rawUser) || slackUserCache.get(rawUser)) : undefined) ||
+            context?.names.get(rawUser) ||
+            slackUserCache.get(rawUser) ||
             (!isSlackId && rawUser ? rawUser : undefined)
           const isMine = Boolean(selfUserId && (rawUser === selfUserId || rawUser === 'You' || rawUser === 'me'))
           const fallbackName = project.name?.includes('Ashutosh') ? 'Ashutosh' : (rawUser || 'Unknown')
@@ -528,17 +530,72 @@ export class DashboardChatService {
       }
     }
 
+    // Security check: if this is an automated agent dispatch, verify agentWrite permission
+    if (payload.isAgent) {
+      const allChannels = (project.sources ?? []).flatMap((s) => s.channels ?? [])
+      const matched = allChannels.find((c) => c.id === payload.channelId)
+      if (!matched || !matched.agentWrite) {
+        return {
+          ok: false,
+          code: 'permission_denied',
+          error: `Agent write permission is disabled for #${monitor.channelName}. Enable it in Workspace Control.`
+        }
+      }
+    }
+
     const token = workspace.token
     const browserSource = (project.sources ?? []).find(
       (s) => s.kind === 'browser' && s.enabled !== false && s.workspaceId === workspace.teamId
     )
 
-    // Helper for browser DOM posting fallback
-    const tryPostViaBrowser = async (): Promise<DashboardSendMessageResult> => {
+    // Helper for Direct API + browser DOM posting fallback
+    const tryPostViaDirectApiOrBrowser = async (): Promise<DashboardSendMessageResult> => {
       if (!browserSource?.profileId || !browserSource?.workspaceId) {
         return { ok: false, code: 'missing_scope', error: MISSING_SCOPE_MESSAGE }
       }
       try {
+        // Fast path: Zero-DOM Direct API posting
+        const cacheKey = `slack:${project.id}:${browserSource.workspaceId}`
+        try {
+          const { sessionTokenExtractor } = await import('../slack-reader/session-token-extractor')
+          const { partitionForCard, partitionForProfile } = await import('../profiles/session-partition')
+          const { SlackApiClient } = await import('./slack-api-client')
+
+          const partitions = [
+            partitionForCard(project.id, 'slack'),
+            partitionForProfile(browserSource.profileId, 'slack')
+          ]
+          const creds = await sessionTokenExtractor.extractSlackSessionTokens([], cacheKey, { partitions })
+          if (creds) {
+            const client = new SlackApiClient(creds)
+            const res = await client.postChannelMessage(monitor.channelId, text)
+            if (res.ok) {
+              const nowTs = res.ts || `${(Date.now() / 1000).toFixed(6)}`
+              await this.deltaStore.appendMessages({
+                profileId: workspace.profileId,
+                teamId: workspace.teamId,
+                channelId: monitor.channelId,
+                channelName: monitor.channelName,
+                source,
+                messages: [{ ts: nowTs, user: project.selfUserId || 'me', text }]
+              })
+
+              return {
+                ok: true,
+                message: this.toChatMessage(
+                  project,
+                  { channelId: monitor.channelId, channelName: monitor.channelName },
+                  { ts: nowTs, user: project.selfUserId || 'me', text },
+                  null,
+                  source
+                )
+              }
+            }
+          }
+        } catch {
+          // Direct API failed or unavailable; fall through to browser view
+        }
+
         const { SlackReaderView } = await import('../slack-reader/slack-reader-view')
         const reader = new SlackReaderView({
           profileId: browserSource.profileId,
@@ -577,7 +634,7 @@ export class DashboardChatService {
 
     if (!token) {
       if (browserSource) {
-        return tryPostViaBrowser()
+        return tryPostViaDirectApiOrBrowser()
       }
       return { ok: false, code: 'not_connected', error: NOT_CONNECTED_MESSAGE }
     }
@@ -587,7 +644,7 @@ export class DashboardChatService {
       const scopes = await this.scopesFor(project, token)
       if (scopes && scopes.length > 0 && !scopes.includes('chat:write')) {
         if (browserSource) {
-          return tryPostViaBrowser()
+          return tryPostViaDirectApiOrBrowser()
         }
         return {
           ok: false,

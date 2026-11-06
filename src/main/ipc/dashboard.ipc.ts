@@ -28,6 +28,8 @@ import type {
   DashboardRunSchedulePayload,
   DashboardSendMessagePayload,
   DashboardSendMessageResult,
+  DashboardSendAgentMessagePayload,
+  DashboardSendAgentMessageResult,
   DashboardSnapshot,
   DashboardSyncProgressPayload,
   DashboardUpdateSchedulePayload,
@@ -808,6 +810,26 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
       IpcChannels.DashboardSendMessage,
       async (payload: DashboardSendMessagePayload): Promise<DashboardSendMessageResult> =>
         deps.chatService!.sendMessage(payload)
+    )
+    handleInvoke(
+      IpcChannels.DashboardSendAgentMessage,
+      async (
+        payload: DashboardSendAgentMessagePayload
+      ): Promise<DashboardSendAgentMessageResult> => {
+        const res = await deps.chatService!.sendMessage({
+          projectId: payload.projectId,
+          channelId: payload.channelId,
+          text: payload.text,
+          source: payload.source,
+          isAgent: true
+        })
+        return {
+          ok: res.ok,
+          ts: res.message?.ts,
+          error: res.error,
+          code: res.code
+        }
+      }
     )
     handleInvoke(
       IpcChannels.DashboardChatTokenStatus,

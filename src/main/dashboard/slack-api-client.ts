@@ -447,5 +447,33 @@ export class SlackApiClient {
       return []
     }
   }
+
+  /**
+   * Posts a message to a Slack channel or DM via direct chat.postMessage API.
+   * Runs in ~150ms with Zero-DOM.
+   */
+  async postChannelMessage(
+    channelId: string,
+    text: string,
+    signal?: AbortSignal
+  ): Promise<{ ok: boolean; ts?: string; error?: string }> {
+    try {
+      const body = await this.fetchApi(
+        'chat.postMessage',
+        { channel: channelId, text: text.trim(), as_user: 'true' },
+        signal
+      )
+      return {
+        ok: true,
+        ts: body.ts ? String(body.ts) : undefined
+      }
+    } catch (err: any) {
+      log.info('[slack-api-client] postChannelMessage error:', { channelId, error: err?.message })
+      return {
+        ok: false,
+        error: err?.slackError || err?.message || 'unknown_error'
+      }
+    }
+  }
 }
 
