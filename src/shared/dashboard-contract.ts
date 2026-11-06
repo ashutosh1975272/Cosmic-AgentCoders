@@ -1008,9 +1008,21 @@ export interface DashboardProjectChatPayload {
   message: string
   /** Reserved for multiple threads; the current build stores one thread. */
   conversationId?: string
+  /** Optional channel scope (e.g. C0CF72BSYKT) */
+  channelId?: string
+  /** Optional social source scope (e.g. src-browser-123) */
+  sourceId?: string
   /** Re-run after an error without appending the user turn twice. */
   retry?: boolean
 }
+
+export type DashboardProjectChatHistoryQuery =
+  | string
+  | {
+      projectId: string
+      channelId?: string
+      sourceId?: string
+    }
 
 export type DashboardProjectChatErrorCode =
   | 'PROJECT_NOT_FOUND'

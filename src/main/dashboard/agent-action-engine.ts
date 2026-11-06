@@ -46,6 +46,21 @@ export function cleanChannel(name: string): string {
   return name.trim().replace(/^[#@]+/, '').toLowerCase()
 }
 
+function levenshteinDistance(a: string, b: string): number {
+  const m = a.length
+  const n = b.length
+  const d: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0))
+  for (let i = 0; i <= m; i++) d[i][0] = i
+  for (let j = 0; j <= n; j++) d[0][j] = j
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost)
+    }
+  }
+  return d[m][n]
+}
+
 /**
  * Fuzzy score between query and channel name (0 to 1).
  */
@@ -61,28 +76,11 @@ function channelScore(query: string, candidate: string): number {
   const cWords = c.split(/\s+/)
   if (qWords.some((w) => w.length > 2 && cWords.includes(w))) return 0.85
 
-  // Levenshtein / letter overlap distance
-  const lenDiff = Math.abs(q.length - c.length)
-  if (lenDiff > 3) return 0
-  let diff = 0
-  let i = 0
-  let j = 0
-  while (i < q.length && j < c.length) {
-    if (q[i] === c[j]) {
-      i++
-      j++
-    } else {
-      diff++
-      if (q.length > c.length) i++
-      else if (c.length > q.length) j++
-      else {
-        i++
-        j++
-      }
-    }
-  }
-  diff += (q.length - i) + (c.length - j)
-  return diff <= 2 ? 0.75 : 0
+  const maxLen = Math.max(q.length, c.length)
+  if (maxLen === 0) return 1.0
+  const dist = levenshteinDistance(q, c)
+  const similarity = 1 - dist / maxLen
+  return similarity >= 0.7 ? similarity : 0
 }
 
 /**
@@ -210,7 +208,11 @@ export function shouldAutoReplyToMessage(
 /**
  * Analyzes user prompts to identify if an action is requested.
  */
-export function detectAgentAction(prompt: string, project?: DashboardProject): AgentAction | null {
+export function detectAgentAction(
+  prompt: string,
+  project?: DashboardProject,
+  activeChannelId?: string
+): AgentAction | null {
   const p = prompt.trim()
   if (!p) return null
 
@@ -281,6 +283,7 @@ export function detectAgentAction(prompt: string, project?: DashboardProject): A
   // - "@utkarsh send 'hii ' message"
   // - "#manjeet singh send him message - hiii bro how are you ??"
   // - "send message in agentworkprojecttesting channel hiii"
+  // - "here try to send the message in the agentworkprojecttesting channel you try to send the message properly see that all proeprly and ten send the message thier hiii or hlw as yyou want in thier"
   if (/\b(?:send|post|write)\b/i.test(p)) {
     // 5A. Extract message text
     let messageText = ''
@@ -289,12 +292,12 @@ export function detectAgentAction(prompt: string, project?: DashboardProject): A
       messageText = quoteMatch[1].trim()
     } else {
       const textMatch = p.match(
-        /(?:send\s+(?:the\s+|that\s+|him\s+|her\s+)?message\s+(?:thier|there)?\s*[:,-]?\s*|\s+(?:message|text)\s*[:,-]\s*|\s+saying\s+)(.+)$/i
+        /(?:(?:and\s+)?t(?:h)?en\s+)?(?:send\s+(?:the\s+|that\s+|him\s+|her\s+)?message\s+(?:thier|there)?\s*[:,-]?\s*|\s+(?:message|text)\s*[:,-]\s*|\s+saying\s+)(.+)$/i
       )
       if (textMatch) {
         messageText = textMatch[1]
           .trim()
-          .replace(/\s*(?:as\s+(?:y?you|u)\s+want)?\s*(?:in\s+thier|in\s+there)?$/i, '')
+          .replace(/\s*(?:as\s+(?:y+ou|u)\s+want)?\s*(?:in\s+thier|in\s+there)?$/i, '')
           .trim()
       }
     }
@@ -311,7 +314,8 @@ export function detectAgentAction(prompt: string, project?: DashboardProject): A
         const firstName = cleanName.split(/\s+/)[0]
         if (
           pLower.includes(cleanName) ||
-          (firstName.length > 2 && new RegExp(`\\b${firstName}\\b`, 'i').test(pLower))
+          (firstName.length > 2 && new RegExp(`\\b${firstName}\\b`, 'i').test(pLower)) ||
+          channelScore(pLower, ch.name) >= 0.75
         ) {
           targetSet.add(ch.name)
         }
@@ -345,6 +349,13 @@ export function detectAgentAction(prompt: string, project?: DashboardProject): A
         targetChannels: detectedTargets,
         text: messageText || 'Hello'
       }
+    } else if (activeChannelId) {
+      return {
+        type: 'send_slack',
+        channelNameOrId: activeChannelId,
+        targetChannels: [activeChannelId],
+        text: messageText || 'Hello'
+      }
     }
   }
 
@@ -353,15 +364,17 @@ export function detectAgentAction(prompt: string, project?: DashboardProject): A
   // "tell me what are the last 3 message in the newtestinggroup tell me last 3 messages"
   // "read last 5 messages from #general"
   // "what are the messages in #channel"
+  // "tell me the last 3 messages" (when scoped to a channel)
   const readPatterns = [
     /(?:what\s+are\s+)?(?:the\s+)?(?:last|latest)?\s*(\d+)?\s*(?:message|messages)\s+(?:in|from|of)\s+(?:the\s+)?(?:#)?([a-zA-Z0-9_-]+)/i,
-    /(?:read|tell|show|get)\s+(?:me\s+)?(?:what\s+are\s+)?(?:the\s+)?(?:last|latest)?\s*(\d+)?\s*(?:message|messages)\s+(?:in|from|of)\s+(?:the\s+)?(?:#)?([a-zA-Z0-9_-]+)/i
+    /(?:read|tell|show|get)\s+(?:me\s+)?(?:what\s+are\s+)?(?:the\s+)?(?:last|latest)?\s*(\d+)?\s*(?:message|messages)\s+(?:in|from|of)\s+(?:the\s+)?(?:#)?([a-zA-Z0-9_-]+)/i,
+    /(?:read|tell|show|get)\s+(?:me\s+)?(?:the\s+)?(?:last|latest)\s*(\d+)?\s*(?:message|messages)/i
   ]
-  for (const re of readPatterns) {
-    const m = p.match(re)
+  for (let i = 0; i < readPatterns.length; i++) {
+    const m = p.match(readPatterns[i])
     if (m) {
       const count = m[1] ? Number(m[1]) : 3
-      const channel = m[2].trim()
+      const channel = m[2] ? m[2].trim() : activeChannelId
       if (channel) {
         return { type: 'read_channel', channelNameOrId: channel, count }
       }

@@ -139,6 +139,18 @@ describe('agent-action-engine', () => {
         enabled: true
       })
     })
+
+    it('defaults to activeChannelId when sender is scoped to a specific channel', () => {
+      const sendAction = detectAgentAction("send 'hello there'", project, 'C_WORK')
+      expect(sendAction?.type).toBe('send_slack')
+      expect(sendAction?.channelNameOrId).toBe('C_WORK')
+      expect(sendAction?.text).toBe('hello there')
+
+      const readAction = detectAgentAction('tell me the last 5 messages', project, 'C_WORK')
+      expect(readAction?.type).toBe('read_channel')
+      expect(readAction?.channelNameOrId).toBe('C_WORK')
+      expect(readAction?.count).toBe(5)
+    })
   })
 
   describe('resolveProjectChannel', () => {

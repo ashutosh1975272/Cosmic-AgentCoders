@@ -321,17 +321,26 @@ const api: IpcApi = {
         IpcChannels.DashboardProjectChat,
         payload
       ) as Promise<DashboardProjectChatStartResult>,
-    cancelProjectChat: (payload: { projectId: string; runId?: string }) =>
+    cancelProjectChat: (payload: {
+      projectId: string
+      runId?: string
+      channelId?: string
+      sourceId?: string
+    }) =>
       ipcRenderer.invoke(IpcChannels.DashboardProjectChatCancel, payload) as Promise<{
         ok: boolean
       }>,
-    getProjectChatHistory: (projectId: string) =>
+    getProjectChatHistory: (
+      query: string | { projectId: string; channelId?: string; sourceId?: string }
+    ) =>
       ipcRenderer.invoke(
         IpcChannels.DashboardProjectChatHistory,
-        projectId
+        query
       ) as Promise<DashboardProjectChatHistoryResult>,
-    clearProjectChat: (projectId: string) =>
-      ipcRenderer.invoke(IpcChannels.DashboardProjectChatClear, projectId) as Promise<{
+    clearProjectChat: (
+      query: string | { projectId: string; channelId?: string; sourceId?: string }
+    ) =>
+      ipcRenderer.invoke(IpcChannels.DashboardProjectChatClear, query) as Promise<{
         ok: boolean
       }>,
     getProjectChatStatus: (projectId: string) =>

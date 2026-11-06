@@ -454,7 +454,7 @@ describe('AgentChatPanel', () => {
     expect(screen.queryByLabelText('Ask about this project')).toBeNull()
   })
 
-  it('renders scoped platform header and Live Embed button in social mode', () => {
+  it('renders scoped platform header, inner channel sidebar, and Live Embed button in social mode', () => {
     installApi()
     const onOpenLiveEmbed = vi.fn()
     renderPanel({
@@ -465,7 +465,24 @@ describe('AgentChatPanel', () => {
         platform: 'teams',
         workspaceId: 'T_TEAMS',
         workspaceName: 'Engineering Teams',
-        channels: [],
+        channels: [
+          {
+            id: 'C_DEV',
+            name: 'dev',
+            isPrivate: false,
+            isDm: false,
+            enabled: true,
+            agentWrite: true
+          },
+          {
+            id: 'D_ASH',
+            name: '@Ashutosh',
+            isPrivate: false,
+            isDm: true,
+            enabled: true,
+            agentWrite: false
+          }
+        ],
         role: 'client',
         enabled: true,
         backfillDays: 7
@@ -473,8 +490,18 @@ describe('AgentChatPanel', () => {
       onOpenLiveEmbed
     } as any)
 
-    expect(screen.getByText('Chat with Engineering Teams')).toBeTruthy()
+    expect(screen.getByText(/Chat with Engineering Teams/)).toBeTruthy()
     expect(screen.getByText('teams')).toBeTruthy()
+
+    // Inner channel sidebar renders categorized channels
+    expect(screen.getByText('Public Channels')).toBeTruthy()
+    expect(screen.getByText('Direct Messages')).toBeTruthy()
+    expect(screen.getByText('dev')).toBeTruthy()
+    expect(screen.getByText('Ashutosh')).toBeTruthy()
+
+    // By default, first enabled channel ('dev') is active with WRITE ENABLED
+    expect(screen.getByText('WRITE ENABLED')).toBeTruthy()
+
     const embedBtn = screen.getByText('Live Embed')
     expect(embedBtn).toBeTruthy()
     fireEvent.click(embedBtn)

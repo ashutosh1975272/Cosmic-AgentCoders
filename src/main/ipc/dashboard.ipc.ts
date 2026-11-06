@@ -882,20 +882,44 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
     )
     handleInvoke(
       IpcChannels.DashboardProjectChatCancel,
-      async (payload: { projectId: string; runId?: string }) => ({
-        ok: service.cancel(String(payload?.projectId ?? ''), payload?.runId)
+      async (payload: {
+        projectId: string
+        runId?: string
+        channelId?: string
+        sourceId?: string
+      }) => ({
+        ok: service.cancel(
+          String(payload?.projectId ?? ''),
+          payload?.runId,
+          payload?.channelId,
+          payload?.sourceId
+        )
       })
     )
-    handleInvoke(IpcChannels.DashboardProjectChatHistory, async (projectId: string) => ({
-      messages: await service.loadHistory(String(projectId ?? ''))
-    }))
+    handleInvoke(
+      IpcChannels.DashboardProjectChatHistory,
+      async (query: string | { projectId: string; channelId?: string; sourceId?: string }) => {
+        const pId = typeof query === 'string' ? query : query?.projectId ?? ''
+        const chId = typeof query === 'object' ? query?.channelId : undefined
+        const sId = typeof query === 'object' ? query?.sourceId : undefined
+        return {
+          messages: await service.loadHistory(String(pId), chId, sId)
+        }
+      }
+    )
     handleInvoke(IpcChannels.DashboardProjectChatStatus, async (projectId: string) =>
       service.status(String(projectId ?? ''))
     )
-    handleInvoke(IpcChannels.DashboardProjectChatClear, async (projectId: string) => {
-      await service.clearHistory(String(projectId ?? ''))
-      return { ok: true }
-    })
+    handleInvoke(
+      IpcChannels.DashboardProjectChatClear,
+      async (query: string | { projectId: string; channelId?: string; sourceId?: string }) => {
+        const pId = typeof query === 'string' ? query : query?.projectId ?? ''
+        const chId = typeof query === 'object' ? query?.channelId : undefined
+        const sId = typeof query === 'object' ? query?.sourceId : undefined
+        await service.clearHistory(String(pId), chId, sId)
+        return { ok: true }
+      }
+    )
   }
 
   // v3 — our team workspace: connect once, pin its channels, every card reads it.

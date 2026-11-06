@@ -1,12 +1,14 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   DashboardProjectChatErrorCode,
   DashboardProjectChatMessage,
+  DashboardProjectChatPayload,
   DashboardProjectChatSourceRef,
   DashboardProjectChatStatus,
   ProjectSource
 } from '../../../../shared/dashboard-contract'
 import ChatMarkdown from './ChatMarkdown'
+import SocialChannelSidebar from './SocialChannelSidebar'
 import type { XomniModeKey } from './workspace-nav'
 
 interface AgentChatPanelProps {
@@ -393,6 +395,30 @@ export default function AgentChatPanel({
   const [showJump, setShowJump] = useState(false)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
 
+  // Track active channel when in social mode
+  const [activeChannelId, setActiveChannelId] = useState<string | null>(() => {
+    if (mode === 'social' && socialSource?.channels && socialSource.channels.length > 0) {
+      const firstEnabled = socialSource.channels.find((c) => c.enabled !== false)
+      return firstEnabled ? firstEnabled.id : null
+    }
+    return null
+  })
+
+  // Synchronize active channel when switching sources or mode
+  useEffect(() => {
+    if (mode === 'social' && socialSource?.channels && socialSource.channels.length > 0) {
+      const firstEnabled = socialSource.channels.find((c) => c.enabled !== false)
+      setActiveChannelId(firstEnabled ? firstEnabled.id : null)
+    } else {
+      setActiveChannelId(null)
+    }
+  }, [mode, socialSource?.id])
+
+  const activeChannel = useMemo(() => {
+    if (!activeChannelId || !socialSource?.channels) return null
+    return socialSource.channels.find((c) => c.id === activeChannelId) ?? null
+  }, [activeChannelId, socialSource])
+
   const runIdRef = useRef<string | null>(null)
   const completedRef = useRef<Set<string>>(new Set())
   const pendingInitialRef = useRef<string | null>(null)
@@ -443,8 +469,15 @@ export default function AgentChatPanel({
   // ---- history + status -------------------------------------------------
   useEffect(() => {
     let cancelled = false
+    setLoadingHistory(true)
+    const query = activeChannelId
+      ? { projectId, channelId: activeChannelId, sourceId: socialSource?.id }
+      : mode === 'social' && socialSource?.id
+        ? { projectId, sourceId: socialSource.id }
+        : projectId
+
     void window.api.dashboard
-      .getProjectChatHistory(projectId)
+      .getProjectChatHistory(query)
       .then((result) => {
         if (cancelled) return
         setMessages(result.messages)
@@ -467,7 +500,7 @@ export default function AgentChatPanel({
     return () => {
       cancelled = true
     }
-  }, [projectId, scrollToBottom])
+  }, [projectId, activeChannelId, mode, socialSource?.id, scrollToBottom])
 
   const refreshStatus = useCallback((): void => {
     void window.api.dashboard
@@ -603,7 +636,13 @@ export default function AgentChatPanel({
         { role: 'user', content: text, atIso: new Date().toISOString() }
       ])
       try {
-        const result = await window.api.dashboard.projectChat({ projectId, message: text })
+        const payload: DashboardProjectChatPayload = {
+          projectId,
+          message: text,
+          channelId: activeChannelId ?? undefined,
+          sourceId: socialSource?.id
+        }
+        const result = await window.api.dashboard.projectChat(payload)
         if (!result.ok) {
           setStreaming(false)
           setMessages((previous) => dropOptimisticUser(previous, text))
@@ -633,7 +672,7 @@ export default function AgentChatPanel({
         })
       }
     },
-    [draft, streaming, keyMissing, projectId, refreshStatus]
+    [draft, streaming, keyMissing, projectId, activeChannelId, socialSource?.id, refreshStatus]
   )
 
   // A question handed over from the Dashboard sends once the key state is known.
@@ -652,21 +691,28 @@ export default function AgentChatPanel({
     try {
       const result = await window.api.dashboard.cancelProjectChat({
         projectId,
-        runId: runIdRef.current ?? undefined
+        runId: runIdRef.current ?? undefined,
+        channelId: activeChannelId ?? undefined,
+        sourceId: socialSource?.id
       })
       if (!result.ok) {
         // The run had already finished; the done event may have been missed.
         setStopping(false)
         setStreaming(false)
         setStreamText('')
-        void window.api.dashboard.getProjectChatHistory(projectId).then((history) => {
+        const query = activeChannelId
+          ? { projectId, channelId: activeChannelId, sourceId: socialSource?.id }
+          : mode === 'social' && socialSource?.id
+            ? { projectId, sourceId: socialSource.id }
+            : projectId
+        void window.api.dashboard.getProjectChatHistory(query).then((history) => {
           setMessages(history.messages)
         })
       }
     } catch {
       setStopping(false)
     }
-  }, [streaming, projectId])
+  }, [streaming, projectId, activeChannelId, socialSource?.id, mode])
 
   const retry = useCallback(async (): Promise<void> => {
     if (!failure || !failure.retryable || failure.mode === 'none' || streaming) return
@@ -685,11 +731,14 @@ export default function AgentChatPanel({
       ])
     }
     try {
-      const result = await window.api.dashboard.projectChat({
+      const payload: DashboardProjectChatPayload = {
         projectId,
         message: question,
+        channelId: activeChannelId ?? undefined,
+        sourceId: socialSource?.id,
         retry: retryMode === 'retry'
-      })
+      }
+      const result = await window.api.dashboard.projectChat(payload)
       if (!result.ok) {
         setStreaming(false)
         if (retryMode === 'append')
@@ -717,13 +766,18 @@ export default function AgentChatPanel({
         question
       })
     }
-  }, [failure, streaming, projectId])
+  }, [failure, streaming, projectId, activeChannelId, socialSource?.id])
 
   const clearChat = useCallback(async (): Promise<void> => {
     if (streaming) return
     setConfirmClear(false)
+    const query = activeChannelId
+      ? { projectId, channelId: activeChannelId, sourceId: socialSource?.id }
+      : mode === 'social' && socialSource?.id
+        ? { projectId, sourceId: socialSource.id }
+        : projectId
     try {
-      await window.api.dashboard.clearProjectChat(projectId)
+      await window.api.dashboard.clearProjectChat(query)
       setMessages([])
       setFailure(null)
       setNotice(null)
@@ -790,44 +844,69 @@ export default function AgentChatPanel({
   const canSend = !streaming && !keyMissing && draft.trim().length > 0
 
   return (
-    <section className="chat-panel" aria-label={`Chat with ${projectName}`}>
-      <header className="chat-head">
-        <div className="chat-head-main">
-          {mode === 'social' && socialSource ? (
-            <>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <h3 className="chat-head-title">
-                  Chat with {socialSource.workspaceName || (socialSource.platform === 'teams' ? 'Microsoft Teams' : socialSource.platform === 'whatsapp' ? 'WhatsApp' : 'Slack Workspace')}
-                </h3>
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    padding: '2px 7px',
-                    borderRadius: 4,
-                    background:
-                      socialSource.platform === 'teams'
-                        ? 'rgba(59, 130, 246, 0.2)'
-                        : socialSource.platform === 'whatsapp'
-                          ? 'rgba(34, 197, 94, 0.2)'
-                          : 'rgba(168, 85, 247, 0.2)',
-                    color:
-                      socialSource.platform === 'teams'
-                        ? '#93c5fd'
-                        : socialSource.platform === 'whatsapp'
-                          ? '#86efac'
-                          : '#c084fc',
-                    textTransform: 'uppercase'
-                  }}
-                >
-                  {socialSource.platform || 'slack'}
+    <div style={{ display: 'flex', width: '100%', height: '100%', overflow: 'hidden' }}>
+      {mode === 'social' && socialSource && (
+        <SocialChannelSidebar
+          source={socialSource}
+          activeChannelId={activeChannelId}
+          onSelectChannel={(chId) => setActiveChannelId(chId)}
+        />
+      )}
+      <section className="chat-panel" style={{ flex: 1, minWidth: 0, height: '100%' }} aria-label={`Chat with ${projectName}`}>
+        <header className="chat-head">
+          <div className="chat-head-main">
+            {mode === 'social' && socialSource ? (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <h3 className="chat-head-title">
+                    Chat with {socialSource.workspaceName || (socialSource.platform === 'teams' ? 'Microsoft Teams' : socialSource.platform === 'whatsapp' ? 'WhatsApp' : 'Slack Workspace')}
+                    {activeChannel ? ` · ${activeChannel.name.startsWith('@') ? '' : '#'}${activeChannel.name}` : ' · All Channels'}
+                  </h3>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: '2px 7px',
+                      borderRadius: 4,
+                      background:
+                        socialSource.platform === 'teams'
+                          ? 'rgba(59, 130, 246, 0.2)'
+                          : socialSource.platform === 'whatsapp'
+                            ? 'rgba(34, 197, 94, 0.2)'
+                            : 'rgba(168, 85, 247, 0.2)',
+                      color:
+                        socialSource.platform === 'teams'
+                          ? '#93c5fd'
+                          : socialSource.platform === 'whatsapp'
+                            ? '#86efac'
+                            : '#c084fc',
+                      textTransform: 'uppercase'
+                    }}
+                  >
+                    {socialSource.platform || 'slack'}
+                  </span>
+                  {activeChannel && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        padding: '2px 7px',
+                        borderRadius: 4,
+                        background: activeChannel.agentWrite ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255, 255, 255, 0.08)',
+                        color: activeChannel.agentWrite ? '#4ade80' : '#94a3b8'
+                      }}
+                    >
+                      {activeChannel.agentWrite ? 'WRITE ENABLED' : 'READ MONITORED'}
+                    </span>
+                  )}
+                </div>
+                <span className="chat-head-sub">
+                  {activeChannel
+                    ? `Autonomous ${socialSource.platform ? socialSource.platform.toUpperCase() : 'Social'} Agent · Scoped to ${activeChannel.name.startsWith('@') ? '' : '#'}${activeChannel.name} messages and actions`
+                    : `Autonomous ${socialSource.platform ? socialSource.platform.toUpperCase() : 'Social'} Agent · Scoped to ${socialSource.workspaceName || 'connected account'} channels and direct messages`}
                 </span>
-              </div>
-              <span className="chat-head-sub">
-                Autonomous {socialSource.platform ? socialSource.platform.toUpperCase() : 'Social'} Agent · Scoped to {socialSource.workspaceName || 'connected account'} channels and direct messages
-              </span>
-            </>
-          ) : (
+              </>
+            ) : (
             <>
               <h3 className="chat-head-title">Chat with project</h3>
               <span className="chat-head-sub">
@@ -1196,7 +1275,13 @@ export default function AgentChatPanel({
           value={draft}
           rows={1}
           aria-label="Ask about this project"
-          placeholder={keyMissing ? 'Add an AI key to start chatting' : 'Ask about this project…'}
+          placeholder={
+            keyMissing
+              ? 'Add an AI key to start chatting'
+              : activeChannel
+                ? `Ask or instruct agent in #${activeChannel.name.replace(/^[#@]+/, '')}…`
+                : 'Ask about this project…'
+          }
           disabled={streaming || keyMissing}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={handleComposerKeyDown}
@@ -1229,5 +1314,6 @@ export default function AgentChatPanel({
         {liveMessage}
       </p>
     </section>
+  </div>
   )
 }

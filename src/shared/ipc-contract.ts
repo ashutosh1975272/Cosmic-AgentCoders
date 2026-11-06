@@ -494,9 +494,18 @@ export interface IpcApi {
     getChatTokenStatus: (projectId: string) => Promise<DashboardChatTokenStatus>
     getProjectActivity: (projectId: string) => Promise<DashboardProjectActivity>
     projectChat: (payload: DashboardProjectChatPayload) => Promise<DashboardProjectChatStartResult>
-    cancelProjectChat: (payload: { projectId: string; runId?: string }) => Promise<{ ok: boolean }>
-    getProjectChatHistory: (projectId: string) => Promise<DashboardProjectChatHistoryResult>
-    clearProjectChat: (projectId: string) => Promise<{ ok: boolean }>
+    cancelProjectChat: (payload: {
+      projectId: string
+      runId?: string
+      channelId?: string
+      sourceId?: string
+    }) => Promise<{ ok: boolean }>
+    getProjectChatHistory: (
+      query: string | { projectId: string; channelId?: string; sourceId?: string }
+    ) => Promise<DashboardProjectChatHistoryResult>
+    clearProjectChat: (
+      query: string | { projectId: string; channelId?: string; sourceId?: string }
+    ) => Promise<{ ok: boolean }>
     getProjectChatStatus: (projectId: string) => Promise<DashboardProjectChatStatus>
     onProjectChatChunk: (callback: (event: DashboardProjectChatChunkEvent) => void) => () => void
     onProjectChatDone: (callback: (event: DashboardProjectChatDoneEvent) => void) => () => void

@@ -175,11 +175,20 @@ export class ProjectChatService {
         new NimProvider({ apiKey: input.apiKey, modelPrimary: input.model, timeoutMs: 120_000 }))
   }
 
-  private filePath(projectId: string): string {
+  private runKey(projectId: string, channelId?: string, sourceId?: string): string {
+    const cleanCh = channelId?.trim().replace(/[^a-zA-Z0-9_-]/g, '_')
+    const cleanSrc = sourceId?.trim().replace(/[^a-zA-Z0-9_-]/g, '_')
+    return cleanCh ? `${projectId}:ch:${cleanCh}` : cleanSrc ? `${projectId}:src:${cleanSrc}` : projectId
+  }
+
+  private filePath(projectId: string, channelId?: string, sourceId?: string): string {
     if (!PROJECT_ID_RE.test(projectId)) {
       throw new ProjectChatError('PROJECT_NOT_FOUND', 'Invalid project id.')
     }
-    return join(this.rootDir, `${projectId}.json`)
+    const cleanCh = channelId?.trim().replace(/[^a-zA-Z0-9_-]/g, '_')
+    const cleanSrc = sourceId?.trim().replace(/[^a-zA-Z0-9_-]/g, '_')
+    const suffix = cleanCh ? `_ch_${cleanCh}` : cleanSrc ? `_src_${cleanSrc}` : ''
+    return join(this.rootDir, `${projectId}${suffix}.json`)
   }
 
   /** Chat files are per project: an id with no project must not touch them. */
@@ -193,10 +202,14 @@ export class ProjectChatService {
     }
   }
 
-  async loadHistory(projectId: string): Promise<DashboardProjectChatMessage[]> {
+  async loadHistory(
+    projectId: string,
+    channelId?: string,
+    sourceId?: string
+  ): Promise<DashboardProjectChatMessage[]> {
     await this.assertProjectKnown(projectId)
     try {
-      const raw = await readFile(this.filePath(projectId), 'utf8')
+      const raw = await readFile(this.filePath(projectId, channelId, sourceId), 'utf8')
       const parsed: unknown = JSON.parse(raw)
       if (!Array.isArray(parsed)) return []
       return parsed
@@ -208,18 +221,20 @@ export class ProjectChatService {
     }
   }
 
-  async clearHistory(projectId: string): Promise<void> {
+  async clearHistory(projectId: string, channelId?: string, sourceId?: string): Promise<void> {
     await this.assertProjectKnown(projectId)
     await mkdir(this.rootDir, { recursive: true })
-    await writeFile(this.filePath(projectId), '[]', 'utf8')
+    await writeFile(this.filePath(projectId, channelId, sourceId), '[]', 'utf8')
   }
 
   private async saveHistory(
     projectId: string,
-    messages: DashboardProjectChatMessage[]
+    messages: DashboardProjectChatMessage[],
+    channelId?: string,
+    sourceId?: string
   ): Promise<void> {
     await mkdir(this.rootDir, { recursive: true })
-    const target = this.filePath(projectId)
+    const target = this.filePath(projectId, channelId, sourceId)
     const tmp = `${target}.tmp`
     await writeFile(tmp, JSON.stringify(messages.slice(-MAX_HISTORY)), 'utf8')
     await rename(tmp, target)
@@ -227,16 +242,19 @@ export class ProjectChatService {
 
   private async appendMessage(
     projectId: string,
-    message: DashboardProjectChatMessage
+    message: DashboardProjectChatMessage,
+    channelId?: string,
+    sourceId?: string
   ): Promise<void> {
     await this.assertProjectKnown(projectId)
-    const history = await this.loadHistory(projectId)
+    const history = await this.loadHistory(projectId, channelId, sourceId)
     history.push(message)
-    await this.saveHistory(projectId, history)
+    await this.saveHistory(projectId, history, channelId, sourceId)
   }
 
-  isRunning(projectId: string): boolean {
-    return this.runs.has(projectId)
+  isRunning(projectId: string, channelId?: string, sourceId?: string): boolean {
+    const key = this.runKey(projectId, channelId, sourceId)
+    return this.runs.has(key) || this.runs.has(projectId)
   }
 
   async status(projectId: string): Promise<DashboardProjectChatStatus> {
@@ -271,7 +289,11 @@ export class ProjectChatService {
     if (!project) {
       return { ok: false, code: 'PROJECT_NOT_FOUND', error: 'This project no longer exists.' }
     }
-    if (this.runs.has(projectId)) {
+    const channelId = typeof payload?.channelId === 'string' && payload.channelId.trim() ? payload.channelId.trim() : undefined
+    const sourceId = typeof payload?.sourceId === 'string' && payload.sourceId.trim() ? payload.sourceId.trim() : undefined
+    const rKey = this.runKey(projectId, channelId, sourceId)
+
+    if (this.runs.has(rKey) || this.runs.has(projectId)) {
       return {
         ok: false,
         code: 'RUN_ACTIVE',
@@ -297,7 +319,7 @@ export class ProjectChatService {
     const runId = randomUUID()
     const controller = new AbortController()
     const apiKey = settings.ai.apiKey
-    this.runs.set(projectId, { runId, controller })
+    this.runs.set(rKey, { runId, controller })
     void this.execute(
       projectId,
       runId,
@@ -307,7 +329,9 @@ export class ProjectChatService {
       settings.ai,
       project.manualCompletion,
       controller,
-      sink
+      sink,
+      channelId,
+      sourceId
     )
     return { ok: true, runId }
   }
@@ -321,21 +345,29 @@ export class ProjectChatService {
     settings: ResolvedAiSettings,
     manualCompletion: number | undefined,
     controller: AbortController,
-    sink: ProjectChatSink
+    sink: ProjectChatSink,
+    channelId?: string,
+    sourceId?: string
   ): Promise<void> {
+    const rKey = this.runKey(projectId, channelId, sourceId)
     try {
-      const history = await this.loadHistory(projectId)
+      const history = await this.loadHistory(projectId, channelId, sourceId)
       if (!retry) {
-        await this.appendMessage(projectId, {
-          role: 'user',
-          content: question,
-          atIso: new Date().toISOString()
-        })
+        await this.appendMessage(
+          projectId,
+          {
+            role: 'user',
+            content: question,
+            atIso: new Date().toISOString()
+          },
+          channelId,
+          sourceId
+        )
       }
 
       // Check if user prompt is an autonomous agent command (e.g. Slack post, read channel, scrape, schedule)
       const project = (await this.monitorStore.listProjects()).find((p) => p.id === projectId)
-      const directAction = project ? detectAgentAction(question, project) : null
+      const directAction = project ? detectAgentAction(question, project, channelId) : null
       if (directAction && project) {
         const actionRes = await executeAgentAction(directAction, {
           projectId,
@@ -347,11 +379,16 @@ export class ProjectChatService {
         })
         if (actionRes.handled) {
           sink.chunk({ projectId, runId, chunk: actionRes.replyMarkdown })
-          await this.appendMessage(projectId, {
-            role: 'assistant',
-            content: actionRes.replyMarkdown,
-            atIso: new Date().toISOString()
-          })
+          await this.appendMessage(
+            projectId,
+            {
+              role: 'assistant',
+              content: actionRes.replyMarkdown,
+              atIso: new Date().toISOString()
+            },
+            channelId,
+            sourceId
+          )
           sink.done({ projectId, runId, content: actionRes.replyMarkdown, sources: [], stopped: false })
           return
         }
@@ -363,7 +400,35 @@ export class ProjectChatService {
 
       const insight = await this.insightEngine.existingInsight(projectId)
       const retrieval = await this.retriever.retrieve(projectId, question)
-      const channelPermissionsContext = project ? formatChannelPermissionsContext(project) : undefined
+      let channelPermissionsContext = project ? formatChannelPermissionsContext(project) : undefined
+
+      // If scoped to a channel, inject recent scraped channel messages directly into the context!
+      if (channelId && this.chatService) {
+        try {
+          const page = await this.chatService.loadMessages({
+            projectId,
+            channelId,
+            source: 'client',
+            limit: 15
+          })
+          if (page.messages && page.messages.length > 0) {
+            const chName = page.messages[0].channelName || channelId
+            const recentLines = page.messages
+              .slice(-10)
+              .map(
+                (m) =>
+                  `  - [${m.atIso ? new Date(m.atIso).toLocaleTimeString() : ''}] ${m.userName || m.userId}: "${m.text}"`
+              )
+              .join('\n')
+            const activeChannelInfo = `\n\nCURRENT SCOPED VIEW: User is directly inside channel #${chName} (id: ${channelId}).\nLATEST MESSAGES IN THIS CHANNEL:\n${recentLines}`
+            channelPermissionsContext = channelPermissionsContext
+              ? `${channelPermissionsContext}\n${activeChannelInfo}`
+              : activeChannelInfo
+          }
+        } catch {
+          // fallback silently
+        }
+      }
       const built = buildChatMessages({
         insight,
         manualCompletion,
@@ -407,12 +472,17 @@ export class ProjectChatService {
       if (aborted) {
         const content = finished.content
         if (content.trim()) {
-          await this.appendMessage(projectId, {
-            role: 'assistant',
-            content,
-            atIso: new Date().toISOString(),
-            stopped: true
-          })
+          await this.appendMessage(
+            projectId,
+            {
+              role: 'assistant',
+              content,
+              atIso: new Date().toISOString(),
+              stopped: true
+            },
+            channelId,
+            sourceId
+          )
         }
         sink.done({ projectId, runId, content, sources: [], stopped: true })
         return
@@ -424,7 +494,7 @@ export class ProjectChatService {
       }
 
       // Check if LLM emitted an action block that needs execution
-      const modelAction = project ? detectAgentAction(content, project) : null
+      const modelAction = project ? detectAgentAction(content, project, channelId) : null
       if (modelAction && project) {
         const actionRes = await executeAgentAction(modelAction, {
           projectId,
@@ -444,11 +514,16 @@ export class ProjectChatService {
             .trim()
           const combined = cleanText ? `${cleanText}\n\n${actionRes.replyMarkdown}` : actionRes.replyMarkdown
           sink.chunk({ projectId, runId, chunk: `\n\n${actionRes.replyMarkdown}` })
-          await this.appendMessage(projectId, {
-            role: 'assistant',
-            content: combined,
-            atIso: new Date().toISOString()
-          })
+          await this.appendMessage(
+            projectId,
+            {
+              role: 'assistant',
+              content: combined,
+              atIso: new Date().toISOString()
+            },
+            channelId,
+            sourceId
+          )
           sink.done({ projectId, runId, content: combined, sources: [], stopped: false })
           return
         }
@@ -456,12 +531,17 @@ export class ProjectChatService {
 
       const sources =
         content === PROJECT_CHAT_NO_ANSWER ? [] : resolveSourceRefs(finished.ids, built.refs)
-      await this.appendMessage(projectId, {
-        role: 'assistant',
-        content,
-        atIso: new Date().toISOString(),
-        sources
-      })
+      await this.appendMessage(
+        projectId,
+        {
+          role: 'assistant',
+          content,
+          atIso: new Date().toISOString(),
+          sources
+        },
+        channelId,
+        sourceId
+      )
       sink.done({ projectId, runId, content, sources, stopped: false })
     } catch (err) {
       const mapped = mapChatError(err)
@@ -473,13 +553,14 @@ export class ProjectChatService {
         retryable: mapped.retryable
       })
     } finally {
-      const current = this.runs.get(projectId)
-      if (current?.runId === runId) this.runs.delete(projectId)
+      const current = this.runs.get(rKey)
+      if (current?.runId === runId) this.runs.delete(rKey)
     }
   }
 
-  cancel(projectId: string, runId?: string): boolean {
-    const run = this.runs.get(projectId)
+  cancel(projectId: string, runId?: string, channelId?: string, sourceId?: string): boolean {
+    const rKey = this.runKey(projectId, channelId, sourceId)
+    const run = this.runs.get(rKey) || this.runs.get(projectId)
     if (!run) return false
     if (runId && run.runId !== runId) return false
     run.controller.abort()
