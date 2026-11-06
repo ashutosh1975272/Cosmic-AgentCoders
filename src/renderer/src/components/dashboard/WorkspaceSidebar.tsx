@@ -301,9 +301,17 @@ export default function WorkspaceSidebar({
   const [socialsDropdownOpen, setSocialsDropdownOpen] = useState(false)
 
   // Filter connected social media accounts with active session tokens or authenticated cookies
+  // Note: AgentWork is our internal workspace, accessed via the dedicated "Talk to AgentWork" button above
   const connectedSocialSources = useMemo(() => {
     return (sources ?? []).filter((s) => {
       if (s.enabled === false) return false
+      if (
+        s.role === 'ours' ||
+        s.workspaceName?.trim().toLowerCase() === 'agentwork' ||
+        s.id?.toLowerCase().includes('agentwork')
+      ) {
+        return false
+      }
       const p = (s.platform || '').toLowerCase()
       const isSocial =
         p === 'slack' ||

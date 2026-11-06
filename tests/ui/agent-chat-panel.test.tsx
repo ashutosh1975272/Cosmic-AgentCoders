@@ -481,17 +481,28 @@ describe('AgentChatPanel', () => {
     expect(onOpenLiveEmbed).toHaveBeenCalled()
   })
 
-  it('renders connected platform chips in project master supervisor mode', () => {
+  it('renders connected platform chips in project master supervisor mode, excluding internal AgentWork', () => {
     installApi()
     renderPanel({
       mode: 'project',
       sources: [
         {
+          id: 'src-agentwork',
+          kind: 'browser',
+          platform: 'slack',
+          workspaceId: 'T_AGENTWORK',
+          workspaceName: 'AgentWork',
+          channels: [],
+          role: 'ours',
+          enabled: true,
+          backfillDays: 7
+        },
+        {
           id: 'src-slack',
           kind: 'browser',
           platform: 'slack',
           workspaceId: 'T_SLACK',
-          workspaceName: 'AgentWork Slack',
+          workspaceName: 'Acme Slack',
           channels: [],
           role: 'client',
           enabled: true,
@@ -504,6 +515,7 @@ describe('AgentChatPanel', () => {
     expect(
       screen.getByText(/CrewAI Master Supervisor · Cross-platform agent with direct dispatch/)
     ).toBeTruthy()
-    expect(screen.getByText('⚡ Slack: AgentWork Slack')).toBeTruthy()
+    expect(screen.getByText('⚡ Slack: Acme Slack')).toBeTruthy()
+    expect(screen.queryByText(/AgentWork/)).toBeNull()
   })
 })

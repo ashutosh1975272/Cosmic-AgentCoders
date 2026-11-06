@@ -836,7 +836,18 @@ export default function AgentChatPanel({
               {sources && sources.length > 0 && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
                   {sources
-                    .filter((s) => s.enabled !== false && (s.platform === 'slack' || s.platform === 'teams' || s.platform === 'whatsapp' || s.kind === 'token' || (s.kind === 'browser' && !s.url?.includes('google'))))
+                    .filter(
+                      (s) =>
+                        s.enabled !== false &&
+                        s.role !== 'ours' &&
+                        s.workspaceName?.trim().toLowerCase() !== 'agentwork' &&
+                        !s.id?.toLowerCase().includes('agentwork') &&
+                        (s.platform === 'slack' ||
+                          s.platform === 'teams' ||
+                          s.platform === 'whatsapp' ||
+                          s.kind === 'token' ||
+                          (s.kind === 'browser' && !s.url?.includes('google')))
+                    )
                     .map((s) => {
                       const plat = (s.platform || 'slack').toLowerCase()
                       return (

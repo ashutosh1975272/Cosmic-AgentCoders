@@ -11,12 +11,28 @@ import type { ProjectSource } from '../../src/shared/dashboard-contract'
 describe('WorkspaceSidebar: Chat with Socials Dropdown', () => {
   const mockSources: ProjectSource[] = [
     {
+      id: 'src-agentwork',
+      kind: 'browser',
+      platform: 'slack',
+      profileId: 'prof-internal',
+      workspaceId: 'T_AGENTWORK',
+      workspaceName: 'AgentWork',
+      channels: [{ id: 'C_INT', name: 'team-ops', enabled: true }],
+      role: 'ours',
+      enabled: true,
+      backfillDays: 7,
+      status: 'connected',
+      scheduleEnabled: true,
+      createdAt: '2026-11-06T10:00:00Z',
+      updatedAt: '2026-11-06T10:00:00Z'
+    },
+    {
       id: 'src-slack-1',
       kind: 'browser',
       platform: 'slack',
       profileId: 'prof-1',
-      workspaceId: 'T_AGENTWORK',
-      workspaceName: 'AgentWork Slack',
+      workspaceId: 'T_CLIENT_SLACK',
+      workspaceName: 'Slack Workspace',
       channels: [{ id: 'C1', name: 'general', enabled: true }],
       role: 'client',
       enabled: true,
@@ -138,11 +154,12 @@ describe('WorkspaceSidebar: Chat with Socials Dropdown', () => {
     expect(screen.getByText('Schedules')).toBeDefined()
 
     // By default, Chat with Socials dropdown is COLLAPSED (chat items are not rendered)
-    expect(screen.queryByTitle('Chat with AgentWork Slack')).toBeNull()
+    expect(screen.queryByTitle('Chat with Slack Workspace')).toBeNull()
     expect(screen.queryByTitle('Chat with Engineering Teams')).toBeNull()
+    expect(screen.queryByTitle('Chat with AgentWork')).toBeNull()
   })
 
-  it('expands dropdown on click to reveal only active social media accounts with sessions', () => {
+  it('expands dropdown on click to reveal only active client social accounts, excluding AgentWork', () => {
     const onSelect = vi.fn()
     render(
       <WorkspaceSidebar
@@ -165,11 +182,14 @@ describe('WorkspaceSidebar: Chat with Socials Dropdown', () => {
     const socialsBtn = screen.getByText('Chat with Socials')
     fireEvent.click(socialsBtn)
 
-    // Now social accounts should be visible
-    const slackItem = screen.getByTitle('Chat with AgentWork Slack')
+    // Now client social accounts should be visible
+    const slackItem = screen.getByTitle('Chat with Slack Workspace')
     const teamsItem = screen.getByTitle('Chat with Engineering Teams')
     expect(slackItem).toBeDefined()
     expect(teamsItem).toBeDefined()
+
+    // AgentWork must NOT be shown under Chat with Socials (it is dedicated to Talk to AgentWork)
+    expect(screen.queryByTitle('Chat with AgentWork')).toBeNull()
 
     // Pure Google link should NOT be shown in social chat dropdown
     expect(screen.queryByTitle('Chat with Google Doc Link')).toBeNull()
