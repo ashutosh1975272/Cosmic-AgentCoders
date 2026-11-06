@@ -83,6 +83,8 @@ export interface ProjectSourceChannel {
   agentRead?: boolean
   /** Write permission for AI agents / schedules to post messages (defaults to false) */
   agentWrite?: boolean
+  /** Real-time autonomous auto-reply authorization (defaults to false) */
+  autoReply?: boolean
   created?: number
   memberCount?: number
   topic?: string

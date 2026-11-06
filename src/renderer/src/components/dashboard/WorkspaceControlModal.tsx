@@ -37,11 +37,12 @@ export function WorkspaceControlModal({
 
   const [activeTab, setActiveTab] = useState<ControlTab>('channels')
 
-  // Channels 3-tier stacked permissions state
+  // Channels 4-tier stacked permissions state
   const [channels, setChannels] = useState<ProjectSourceChannel[]>([])
   const [selectedDashboard, setSelectedDashboard] = useState<Set<string>>(new Set())
   const [selectedAgentRead, setSelectedAgentRead] = useState<Set<string>>(new Set())
   const [selectedAgentWrite, setSelectedAgentWrite] = useState<Set<string>>(new Set())
+  const [selectedAutoReply, setSelectedAutoReply] = useState<Set<string>>(new Set())
   const [channelSearch, setChannelSearch] = useState('')
   const [selectionMode, setSelectionMode] = useState<ProjectSourceSelectionMode>(
     source.selectionMode ?? 'include'
@@ -76,14 +77,17 @@ export function WorkspaceControlModal({
     const dashSet = new Set<string>()
     const agentReadSet = new Set<string>()
     const agentWriteSet = new Set<string>()
+    const autoReplySet = new Set<string>()
     for (const c of source.channels ?? []) {
       if (c.enabled === true) dashSet.add(c.id)
       if (c.agentRead === true) agentReadSet.add(c.id)
       if (c.agentWrite === true) agentWriteSet.add(c.id)
+      if (c.autoReply === true) autoReplySet.add(c.id)
     }
     setSelectedDashboard(dashSet)
     setSelectedAgentRead(agentReadSet)
     setSelectedAgentWrite(agentWriteSet)
+    setSelectedAutoReply(autoReplySet)
 
     void window.api.dashboard
       .discoverSourceChannels({
@@ -106,7 +110,8 @@ export function WorkspaceControlModal({
               ...channel,
               enabled: previous ? previous.enabled === true : false,
               agentRead: previous ? previous.agentRead === true : false,
-              agentWrite: previous ? previous.agentWrite === true : false
+              agentWrite: previous ? previous.agentWrite === true : false,
+              autoReply: previous ? previous.autoReply === true : false
             }
           })
         )
@@ -172,10 +177,20 @@ export function WorkspaceControlModal({
     })
   }
 
+  const toggleAutoReply = (id: string) => {
+    setSelectedAutoReply((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
   const clearAllPermissions = () => {
     setSelectedDashboard(new Set())
     setSelectedAgentRead(new Set())
     setSelectedAgentWrite(new Set())
+    setSelectedAutoReply(new Set())
   }
 
   const selectAllDashboard = () => {
@@ -190,6 +205,10 @@ export function WorkspaceControlModal({
     setSelectedAgentWrite(new Set(channels.map((c) => c.id)))
   }
 
+  const selectAllAutoReply = () => {
+    setSelectedAutoReply(new Set(channels.map((c) => c.id)))
+  }
+
   const handleSaveChannels = async () => {
     setSavingChannels(true)
     try {
@@ -197,7 +216,8 @@ export function WorkspaceControlModal({
         ...channel,
         enabled: selectedDashboard.has(channel.id),
         agentRead: selectedAgentRead.has(channel.id),
-        agentWrite: selectedAgentWrite.has(channel.id)
+        agentWrite: selectedAgentWrite.has(channel.id),
+        autoReply: selectedAutoReply.has(channel.id)
       }))
 
       await updateSource({
@@ -309,7 +329,7 @@ export function WorkspaceControlModal({
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'minmax(240px, 1fr) 140px 140px 140px',
+              gridTemplateColumns: 'minmax(220px, 1fr) 125px 125px 125px 125px',
               padding: '8px 16px',
               background: 'rgba(255, 255, 255, 0.04)',
               borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
@@ -323,6 +343,9 @@ export function WorkspaceControlModal({
             <div style={{ textAlign: 'center' }}>📊 Dashboard Scrape</div>
             <div style={{ textAlign: 'center' }}>🤖 Agent Read</div>
             <div style={{ textAlign: 'center' }}>✍️ Agent Write</div>
+            <div style={{ textAlign: 'center' }} title="Real-time automated reply in 1-on-1 DMs and when mentioned in channels">
+              ⚡ Auto-Reply
+            </div>
           </div>
 
           <div style={{ maxHeight: 300, overflowY: 'auto' }}>
@@ -330,17 +353,18 @@ export function WorkspaceControlModal({
               const isDash = selectedDashboard.has(channel.id)
               const isRead = selectedAgentRead.has(channel.id)
               const isWrite = selectedAgentWrite.has(channel.id)
+              const isAutoReply = selectedAutoReply.has(channel.id)
               return (
                 <div
                   key={channel.id}
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: 'minmax(240px, 1fr) 140px 140px 140px',
+                    gridTemplateColumns: 'minmax(220px, 1fr) 125px 125px 125px 125px',
                     alignItems: 'center',
                     padding: '8px 16px',
                     borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
                     background:
-                      isDash || isRead || isWrite
+                      isDash || isRead || isWrite || isAutoReply
                         ? 'rgba(99, 102, 241, 0.05)'
                         : 'transparent',
                     transition: 'background 0.12s ease'
@@ -469,6 +493,34 @@ export function WorkspaceControlModal({
                       />
                       <span style={{ fontSize: 11, fontWeight: 600, color: isWrite ? '#fcd34d' : '#64748b' }}>
                         {isWrite ? 'Write' : 'Off'}
+                      </span>
+                    </label>
+                  </div>
+
+                  {/* Real-Time Auto-Reply Toggle */}
+                  <div style={{ display: 'flex', justifyContent: 'center' }}>
+                    <label
+                      title="Real-time automated reply in 1-on-1 DMs and when mentioned in channels"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        cursor: 'pointer',
+                        padding: '4px 10px',
+                        borderRadius: 6,
+                        background: isAutoReply ? 'rgba(6, 182, 212, 0.18)' : 'rgba(255, 255, 255, 0.03)',
+                        border: isAutoReply ? '1px solid rgba(6, 182, 212, 0.5)' : '1px solid rgba(255, 255, 255, 0.08)',
+                        transition: 'all 0.12s ease'
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isAutoReply}
+                        onChange={() => toggleAutoReply(channel.id)}
+                        style={{ cursor: 'pointer', accentColor: '#06b6d4' }}
+                      />
+                      <span style={{ fontSize: 11, fontWeight: 600, color: isAutoReply ? '#67e8f9' : '#64748b' }}>
+                        {isAutoReply ? 'Auto' : 'Off'}
                       </span>
                     </label>
                   </div>
@@ -607,7 +659,7 @@ export function WorkspaceControlModal({
                 <span>Select Channels</span>
               </div>
               <span style={{ fontSize: 10, color: '#4ade80', background: 'rgba(74, 222, 128, 0.12)', padding: '2px 6px', borderRadius: 4 }}>
-                {selectedDashboard.size} Dash · {selectedAgentRead.size} Read · {selectedAgentWrite.size} Write
+                {selectedDashboard.size} Dash · {selectedAgentRead.size} Read · {selectedAgentWrite.size} Write · {selectedAutoReply.size} Auto-Reply
               </span>
             </button>
 
@@ -800,7 +852,7 @@ export function WorkspaceControlModal({
                       type="button"
                       className="btn ghost btn-sm"
                       onClick={clearAllPermissions}
-                      disabled={selectedDashboard.size === 0 && selectedAgentRead.size === 0 && selectedAgentWrite.size === 0}
+                      disabled={selectedDashboard.size === 0 && selectedAgentRead.size === 0 && selectedAgentWrite.size === 0 && selectedAutoReply.size === 0}
                       style={{ fontSize: 12, padding: '5px 10px' }}
                     >
                       Clear all
@@ -831,6 +883,14 @@ export function WorkspaceControlModal({
                     </button>
                     <button
                       type="button"
+                      className="btn ghost btn-sm"
+                      onClick={selectAllAutoReply}
+                      style={{ fontSize: 11, padding: '5px 10px', color: '#67e8f9', borderColor: 'rgba(6, 182, 212, 0.3)' }}
+                    >
+                      All to Auto-Reply
+                    </button>
+                    <button
+                      type="button"
                       className="btn btn-primary btn-sm"
                       onClick={() => void handleSaveChannels()}
                       disabled={savingChannels || channelsLoading}
@@ -838,7 +898,7 @@ export function WorkspaceControlModal({
                     >
                       {savingChannels
                         ? 'Saving…'
-                        : `Save Permissions (${selectedDashboard.size} Dash · ${selectedAgentRead.size} Read · ${selectedAgentWrite.size} Write)`}
+                        : `Save Permissions (${selectedDashboard.size} Dash · ${selectedAgentRead.size} Read · ${selectedAgentWrite.size} Write · ${selectedAutoReply.size} Auto-Reply)`}
                     </button>
                   </div>
                 </div>

@@ -29,7 +29,7 @@ import type { MonitorStore } from './monitor-store'
 import type { DashboardChatService } from './chat-service'
 import type { DashboardSyncEngine } from './sync-engine'
 import type { DashboardScheduleStore } from './schedule-store'
-import { detectAgentAction, executeAgentAction } from './agent-action-engine'
+import { detectAgentAction, executeAgentAction, formatChannelPermissionsContext } from './agent-action-engine'
 
 const MAX_HISTORY = 200
 const PROJECT_ID_RE = /^[A-Za-z0-9_-]{1,100}$/
@@ -363,12 +363,14 @@ export class ProjectChatService {
 
       const insight = await this.insightEngine.existingInsight(projectId)
       const retrieval = await this.retriever.retrieve(projectId, question)
+      const channelPermissionsContext = project ? formatChannelPermissionsContext(project) : undefined
       const built = buildChatMessages({
         insight,
         manualCompletion,
         retrieval,
         history: contextHistory,
-        question
+        question,
+        channelPermissionsContext
       })
 
       if (controller.signal.aborted) {
@@ -433,7 +435,14 @@ export class ProjectChatService {
           monitorStore: this.monitorStore
         })
         if (actionRes.handled) {
-          const combined = `${content}\n\n${actionRes.replyMarkdown}`
+          // Cleanly replace or wrap raw action JSON block:
+          // Strip the raw {"action": ...} or ```action ... ``` block so it doesn't duplicate!
+          const cleanText = content
+            .replace(/```action[\s\S]*?```/gi, '')
+            .replace(/\{[\s\r\n]*"action"[\s\S]*?\}/gi, '')
+            .replace(/<!--\s*ACTION_?CARD[\s\S]*?-->/gi, '')
+            .trim()
+          const combined = cleanText ? `${cleanText}\n\n${actionRes.replyMarkdown}` : actionRes.replyMarkdown
           sink.chunk({ projectId, runId, chunk: `\n\n${actionRes.replyMarkdown}` })
           await this.appendMessage(projectId, {
             role: 'assistant',

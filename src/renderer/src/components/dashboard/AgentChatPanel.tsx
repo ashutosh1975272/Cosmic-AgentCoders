@@ -29,16 +29,43 @@ interface ChatFailure {
   question: string
 }
 
-function parseActionCard(content: string): { cleanContent: string; card: { type: string; ok: boolean; data?: any } | null } {
-  const match = content.match(/<!-- ACTION_CARD:\s*([\s\S]*?)\s*-->/)
-  if (!match) return { cleanContent: content, card: null }
-  try {
-    const card = JSON.parse(match[1])
-    const cleanContent = content.replace(/<!-- ACTION_CARD:\s*[\s\S]*?\s*-->/, '').trim()
-    return { cleanContent, card }
-  } catch {
-    return { cleanContent: content, card: null }
+function parseActionCard(content: string): {
+  cleanContent: string
+  card: { type: string; ok: boolean; data?: any } | null
+  rawAction?: { action: string; [key: string]: any } | null
+} {
+  let card: { type: string; ok: boolean; data?: any } | null = null
+  let rawAction: { action: string; [key: string]: any } | null = null
+
+  // 1. Match <!-- ACTION_CARD: ... --> or <!-- ACTIONCARD: ... -->
+  const cardMatch = content.match(/<!--\s*ACTION_?CARD:\s*([\s\S]*?)\s*-->/i)
+  if (cardMatch) {
+    try {
+      card = JSON.parse(cardMatch[1])
+    } catch {
+      card = null
+    }
   }
+
+  // Strip all ACTION_CARD comments
+  let cleanContent = content.replace(/<!--\s*ACTION_?CARD:\s*[\s\S]*?\s*-->/gi, '').trim()
+
+  // 2. Detect raw action JSON: {"action": "send_slack", ...} or ```action ... ``` or ```json {"action": ...}
+  const actionJsonMatch =
+    cleanContent.match(/```(?:action|json)?\s*(\{\s*"action"[\s\S]*?\})\s*```/i) ||
+    cleanContent.match(/(\{\s*"action"\s*:\s*"[^"]+"[\s\S]*?\})/)
+
+  if (actionJsonMatch) {
+    try {
+      rawAction = JSON.parse(actionJsonMatch[1])
+      // Remove raw JSON from clean content so it does not clutter the bubble
+      cleanContent = cleanContent.replace(actionJsonMatch[0], '').trim()
+    } catch {
+      rawAction = null
+    }
+  }
+
+  return { cleanContent, card, rawAction }
 }
 
 function ActionCard({
@@ -49,6 +76,10 @@ function ActionCard({
   onOpenControl?: () => void
 }): React.ReactElement | null {
   if (card.type === 'permission_denied') {
+    const lockedNames = card.data?.lockedChannels
+      ? card.data.lockedChannels.map((c: any) => `#${c.name}`).join(', ')
+      : `#${card.data?.channelName}`
+
     return (
       <div
         style={{
@@ -67,7 +98,7 @@ function ActionCard({
           <span>Agent Write Permission Required</span>
         </div>
         <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.4 }}>
-          Channel <strong style={{ color: 'var(--text)' }}>#{card.data?.channelName}</strong> is not authorized for autonomous posting.
+          Channel/contact <strong style={{ color: 'var(--text)' }}>{lockedNames}</strong> is not authorized for autonomous posting.
         </p>
         {onOpenControl ? (
           <button
@@ -97,6 +128,15 @@ function ActionCard({
   }
 
   if (card.type === 'slack_dispatch') {
+    const deliveredList: Array<{ id: string; name: string; ts?: string }> =
+      card.data?.delivered && Array.isArray(card.data.delivered) && card.data.delivered.length > 0
+        ? card.data.delivered
+        : card.data?.channelName
+          ? [{ id: card.data.channelId, name: card.data.channelName, ts: card.data.ts }]
+          : []
+    const lockedList: Array<{ id: string; name: string }> =
+      card.data?.locked && Array.isArray(card.data.locked) ? card.data.locked : []
+
     return (
       <div
         style={{
@@ -107,10 +147,10 @@ function ActionCard({
           borderRadius: 8,
           display: 'flex',
           flexDirection: 'column',
-          gap: 6
+          gap: 8
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#4ade80', fontWeight: 600, fontSize: 12 }}>
             <span>⚡</span>
             <span>Slack Message Dispatched</span>
@@ -129,10 +169,70 @@ function ActionCard({
           </div>
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{card.data?.time}</span>
         </div>
+
+        {deliveredList.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {deliveredList.map((item) => (
+              <span
+                key={item.id}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  fontSize: 11,
+                  background: 'rgba(59, 130, 246, 0.2)',
+                  color: '#93c5fd',
+                  padding: '2px 8px',
+                  borderRadius: 4,
+                  fontWeight: 600
+                }}
+              >
+                <span>#{item.name}</span>
+                {item.ts && <span style={{ opacity: 0.6, fontSize: 9 }}>ts:{item.ts.slice(-6)}</span>}
+              </span>
+            ))}
+          </div>
+        )}
+
         <div style={{ fontSize: 12, color: 'var(--text)', background: 'rgba(0,0,0,0.2)', padding: '6px 10px', borderRadius: 4 }}>
-          <span style={{ color: '#93c5fd', fontWeight: 600 }}>#{card.data?.channelName}: </span>
           <span>"{card.data?.text}"</span>
         </div>
+
+        {lockedList.length > 0 && onOpenControl && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+              padding: '6px 10px',
+              borderRadius: 4,
+              background: 'rgba(245, 158, 11, 0.1)',
+              border: '1px solid rgba(245, 158, 11, 0.25)',
+              fontSize: 11
+            }}
+          >
+            <span style={{ color: '#fbbf24' }}>
+              ⚠️ Write locked for {lockedList.map((c) => `#${c.name}`).join(', ')}
+            </span>
+            <button
+              type="button"
+              onClick={onOpenControl}
+              style={{
+                background: 'rgba(245, 158, 11, 0.2)',
+                border: '1px solid rgba(245, 158, 11, 0.4)',
+                color: '#fcd34d',
+                borderRadius: 4,
+                padding: '2px 8px',
+                fontSize: 10,
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              ⚙️ Unlock in Control
+            </button>
+          </div>
+        )}
       </div>
     )
   }
@@ -801,9 +901,44 @@ export default function AgentChatPanel({
                 <div className="chat-bubble">
                   {message.role === 'assistant' ? (
                     (() => {
-                      const { cleanContent, card } = parseActionCard(message.content)
+                      const { cleanContent, card, rawAction } = parseActionCard(message.content)
                       return (
                         <>
+                          {rawAction ? (
+                            <details
+                              style={{
+                                margin: '0 0 8px',
+                                padding: '4px 8px',
+                                borderRadius: 6,
+                                background: 'rgba(255, 255, 255, 0.04)',
+                                border: '1px solid rgba(255, 255, 255, 0.08)',
+                                fontSize: 11,
+                                color: '#94a3b8'
+                              }}
+                            >
+                              <summary
+                                style={{
+                                  cursor: 'pointer',
+                                  fontWeight: 600,
+                                  color: '#a5b4fc',
+                                  outline: 'none',
+                                  userSelect: 'none'
+                                }}
+                              >
+                                ⚡ Action: {rawAction.action || 'dispatched'} (expand details)
+                              </summary>
+                              <pre
+                                style={{
+                                  margin: '6px 0 2px',
+                                  fontSize: 10,
+                                  overflowX: 'auto',
+                                  color: '#cbd5e1'
+                                }}
+                              >
+                                {JSON.stringify(rawAction, null, 2)}
+                              </pre>
+                            </details>
+                          ) : null}
                           {cleanContent ? <ChatMarkdown text={cleanContent} /> : null}
                           {card ? <ActionCard card={card} onOpenControl={onOpenControl} /> : null}
                         </>
@@ -852,9 +987,44 @@ export default function AgentChatPanel({
               <div className="chat-bubble">
                 {streamText ? (
                   (() => {
-                    const { cleanContent, card } = parseActionCard(streamText)
+                    const { cleanContent, card, rawAction } = parseActionCard(streamText)
                     return (
                       <>
+                        {rawAction ? (
+                          <details
+                            style={{
+                              margin: '0 0 8px',
+                              padding: '4px 8px',
+                              borderRadius: 6,
+                              background: 'rgba(255, 255, 255, 0.04)',
+                              border: '1px solid rgba(255, 255, 255, 0.08)',
+                              fontSize: 11,
+                              color: '#94a3b8'
+                            }}
+                          >
+                            <summary
+                              style={{
+                                cursor: 'pointer',
+                                fontWeight: 600,
+                                color: '#a5b4fc',
+                                outline: 'none',
+                                userSelect: 'none'
+                              }}
+                            >
+                              ⚡ Action: {rawAction.action || 'dispatched'} (expand details)
+                            </summary>
+                            <pre
+                              style={{
+                                margin: '6px 0 2px',
+                                fontSize: 10,
+                                overflowX: 'auto',
+                                color: '#cbd5e1'
+                              }}
+                            >
+                              {JSON.stringify(rawAction, null, 2)}
+                            </pre>
+                          </details>
+                        ) : null}
                         {cleanContent ? <ChatMarkdown text={cleanContent} /> : null}
                         {card ? <ActionCard card={card} onOpenControl={onOpenControl} /> : null}
                       </>

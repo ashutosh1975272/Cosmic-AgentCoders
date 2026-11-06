@@ -293,7 +293,7 @@ export default function ProjectSettingsTab({
   const handleToggleChannelPermission = async (
     sourceId: string,
     channelId: string,
-    tier: 'dash' | 'read' | 'write',
+    tier: 'dash' | 'read' | 'write' | 'auto_reply',
     currentValue: boolean
   ): Promise<void> => {
     const source = (project.sources ?? []).find((item) => item.id === sourceId)
@@ -308,12 +308,20 @@ export default function ProjectSettingsTab({
           if (tier === 'dash') return { ...channel, enabled: nextValue }
           if (tier === 'read') return { ...channel, agentRead: nextValue }
           if (tier === 'write') return { ...channel, agentWrite: nextValue }
+          if (tier === 'auto_reply') return { ...channel, autoReply: nextValue }
           return channel
         }),
         channelsReviewedAt: source.channelsReviewedAt ?? new Date().toISOString()
       }
     })
-    const label = tier === 'dash' ? 'Dashboard Scrape' : tier === 'read' ? 'Agent Read' : 'Agent Write'
+    const label =
+      tier === 'dash'
+        ? 'Dashboard Scrape'
+        : tier === 'read'
+          ? 'Agent Read'
+          : tier === 'write'
+            ? 'Agent Write'
+            : 'Auto-Reply'
     setSourceNotice(`${label} ${nextValue ? 'enabled' : 'disabled'} for channel`)
     setTimeout(() => setSourceNotice(null), 3000)
   }
@@ -1550,6 +1558,23 @@ export default function ProjectSettingsTab({
                                       }}
                                     >
                                       ✍️ Write
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleToggleChannelPermission(src.id, ch.id, 'auto_reply', Boolean(ch.autoReply))}
+                                      title="Toggle Real-Time Auto-Reply authorization"
+                                      style={{
+                                        padding: '2px 5px',
+                                        fontSize: 10,
+                                        borderRadius: 3,
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        border: `1px solid ${ch.autoReply ? '#06b6d4' : 'rgba(255,255,255,0.1)'}`,
+                                        background: ch.autoReply ? 'rgba(6, 182, 212, 0.25)' : 'transparent',
+                                        color: ch.autoReply ? '#67e8f9' : 'var(--text-muted)'
+                                      }}
+                                    >
+                                      ⚡ Reply
                                     </button>
                                   </div>
                                 </div>

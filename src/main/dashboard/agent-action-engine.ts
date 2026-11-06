@@ -13,6 +13,7 @@ import type { MonitorStore } from './monitor-store'
 export interface AgentAction {
   type: 'send_slack' | 'read_channel' | 'trigger_scrape' | 'set_schedule' | 'list_capabilities'
   channelNameOrId?: string
+  targetChannels?: string[]
   text?: string
   count?: number
   intervalMinutes?: number
@@ -38,11 +39,11 @@ export interface AgentActionContext {
 }
 
 /**
- * Normalizes channel queries (e.g. "#general", "general", "agentworkprojecttesting")
+ * Normalizes channel queries (e.g. "#general", "@Ankita Manna", "newtestinggroup")
  * for case-insensitive matching.
  */
 export function cleanChannel(name: string): string {
-  return name.trim().replace(/^[#@]/, '').toLowerCase()
+  return name.trim().replace(/^[#@]+/, '').toLowerCase()
 }
 
 /**
@@ -54,6 +55,11 @@ function channelScore(query: string, candidate: string): number {
   if (!q || !c) return 0
   if (q === c) return 1.0
   if (c.includes(q) || q.includes(c)) return 0.85
+
+  // First name / word match (e.g. "ankita" matches "Ankita Manna", "utkarsh" matches "Utkarsh Barnwal")
+  const qWords = q.split(/\s+/)
+  const cWords = c.split(/\s+/)
+  if (qWords.some((w) => w.length > 2 && cWords.includes(w))) return 0.85
 
   // Levenshtein / letter overlap distance
   const lenDiff = Math.abs(q.length - c.length)
@@ -133,21 +139,87 @@ export function resolveProjectChannel(
 }
 
 /**
+ * Formats a concise summary of current channel and DM permissions to inject
+ * into the LLM context so the agent knows who is authorized for Read, Write, and Auto-Reply.
+ */
+export function formatChannelPermissionsContext(project: DashboardProject): string {
+  const writeAuthorized: string[] = []
+  const readMonitored: string[] = []
+  const autoReplyList: string[] = []
+
+  for (const src of project.sources ?? []) {
+    for (const ch of src.channels ?? []) {
+      const name = ch.name.startsWith('@') ? ch.name : `#${ch.name}`
+      if (ch.agentWrite) writeAuthorized.push(name)
+      if (ch.enabled !== false || ch.agentRead) readMonitored.push(name)
+      if (ch.autoReply) autoReplyList.push(name)
+    }
+  }
+
+  return [
+    `- Write Authorized: ${writeAuthorized.length > 0 ? writeAuthorized.join(', ') : 'None yet (Enable Agent Write in Workspace Control)'}`,
+    `- Read Monitored: ${readMonitored.length > 0 ? readMonitored.join(', ') : 'None yet'}`,
+    `- Real-Time Auto-Reply: ${autoReplyList.length > 0 ? autoReplyList.join(', ') : 'None enabled'}`
+  ].join('\n')
+}
+
+/**
+ * Helper to check whether an incoming message qualifies for Real-Time Auto-Reply.
+ */
+export function shouldAutoReplyToMessage(
+  project: DashboardProject,
+  msg: { text: string; userId?: string; userName?: string; isMine?: boolean },
+  channelId: string,
+  selfNames: string[] = ['Ashutosh', 'You', 'me']
+): { shouldReply: boolean; reason?: 'dm' | 'mention'; channel?: ProjectSourceChannel; source?: ProjectSource } {
+  if (msg.isMine) return { shouldReply: false }
+
+  for (const src of project.sources ?? []) {
+    for (const ch of src.channels ?? []) {
+      if (ch.id === channelId || cleanChannel(ch.name) === cleanChannel(channelId)) {
+        if (!ch.autoReply) return { shouldReply: false }
+
+        // 1. Direct message (1-on-1 DM): auto-reply immediately
+        if (ch.isDm || ch.kind === 'dm') {
+          return { shouldReply: true, reason: 'dm', channel: ch, source: src }
+        }
+
+        // 2. Group channel: only reply if user's name is mentioned
+        const textLower = msg.text.toLowerCase()
+        const isMentioned = selfNames.some((name) => textLower.includes(name.toLowerCase()))
+        if (isMentioned) {
+          return { shouldReply: true, reason: 'mention', channel: ch, source: src }
+        }
+      }
+    }
+  }
+
+  return { shouldReply: false }
+}
+
+/**
  * Analyzes user prompts to identify if an action is requested.
  */
 export function detectAgentAction(prompt: string, project?: DashboardProject): AgentAction | null {
   const p = prompt.trim()
   if (!p) return null
 
-  // 1. Explicit JSON action block emitted by LLM: ```action { ... } ```
-  const actionMatch = p.match(/```action\s*([\s\S]*?)\s*```/i)
+  // 1. Explicit JSON action block emitted by LLM: ```action { ... } ``` or raw JSON {"action": ...}
+  const actionMatch = p.match(/```action\s*([\s\S]*?)\s*```/i) || p.match(/\{[\s\r\n]*"action"\s*:\s*"([^"]+)"[\s\S]*?\}/i)
   if (actionMatch) {
     try {
-      const parsed = JSON.parse(actionMatch[1])
+      const rawJson = actionMatch[0].startsWith('```') ? actionMatch[1] : actionMatch[0]
+      const parsed = JSON.parse(rawJson)
       if (parsed && typeof parsed.action === 'string') {
+        const channels = Array.isArray(parsed.channels)
+          ? parsed.channels
+          : parsed.channel
+            ? [parsed.channel]
+            : undefined
         return {
           type: parsed.action as AgentAction['type'],
           channelNameOrId: parsed.channel || parsed.channelNameOrId,
+          targetChannels: channels,
           text: parsed.text,
           count: Number(parsed.count) || undefined,
           intervalMinutes: Number(parsed.intervalMinutes) || undefined,
@@ -192,61 +264,76 @@ export function detectAgentAction(prompt: string, project?: DashboardProject): A
     return { type: 'set_schedule', intervalMinutes: mins, enabled: true }
   }
 
-  // 5. Intent: Send Slack Message (evaluated before read so "send message in #ch ... text" takes precedence)
+  // 5. Intent: Send Slack Message (Supports single and multiple recipients)
   // Examples:
-  // "here try to send the message in the agentworkprojecttesting channel you try to send the message properly see that all proeprly and ten send the message thier hiii or hlw as yyou want in thier"
-  // "send message in agentworkprojecttesting channel hiii"
-  // "post to #general hello team"
-  // "send hiii in agentworkprojecttesting"
+  // - "send message in slack - ankita and utkarsh and ashutosh - send that message - just simple - ' hii '"
+  // - "#ankita and #utkarsh send both simple - 'hiii '"
+  // - "@utkarsh send 'hii ' message"
+  // - "#manjeet singh send him message - hiii bro how are you ??"
+  // - "send message in agentworkprojecttesting channel hiii"
   if (/\b(?:send|post|write)\b/i.test(p)) {
-    // Check if any project channel is mentioned
-    let targetChannel = ''
-    if (project) {
-      const allChannels = (project.sources ?? []).flatMap((s) => s.channels ?? []).map((c) => c.name)
-      const pLower = p.toLowerCase()
-      for (const name of allChannels) {
-        if (pLower.includes(name.toLowerCase())) {
-          targetChannel = name
-          break
-        }
-      }
-    }
-
-    const sendPatterns = [
-      /(?:^|.*?\b)(?:send|post|write)\s+(?:the\s+)?(?:message\s+)?(?:in|to|into)\s+(?:the\s+)?(?:#)?([a-zA-Z0-9_-]+)(?:\s+channel)?(?:.*?)(?:send\s+(?:the\s+)?message\s+(?:thier|there)?\s*[:,-]?\s*|\s*[:,-]\s*|\s+text\s+[:,-]?\s*)(.+)$/i,
-      /(?:^|.*?\b)(?:send|post|write)\s+(?:the\s+)?(?:message\s+)?(?:in|to|into)\s+(?:the\s+)?(?:#)?([a-zA-Z0-9_-]+)(?:\s+channel)?\s*[:,-]?\s*(.+)$/i,
-      /(?:^|.*?\b)(?:send|post)\s+(.+?)\s+(?:in|to|into)\s+(?:the\s+)?(?:#)?([a-zA-Z0-9_-]+)(?:\s+channel)?$/i
-    ]
-
-    for (const re of sendPatterns) {
-      const m = p.match(re)
-      if (m) {
-        if (re === sendPatterns[2]) {
-          const text = m[1].trim()
-          const channel = targetChannel || m[2].trim()
-          if (channel && text) {
-            return { type: 'send_slack', channelNameOrId: channel, text }
-          }
-        } else {
-          const channel = targetChannel || m[1].trim()
-          let text = m[2].trim()
-          // Clean boilerplate
-          text = text.replace(/^["']|["']$/g, '')
-          // Clean trailing phrases like "as you want in thier" or "in thier"
-          text = text.replace(/\s*(?:as\s+(?:y?you|u)\s+want)?\s*(?:in\s+thier|in\s+there)?$/i, '').trim()
-          if (channel && text) {
-            return { type: 'send_slack', channelNameOrId: channel, text }
-          }
-        }
-      }
-    }
-
-    // Fallback if targetChannel was identified but regex didn't extract text
-    if (targetChannel) {
-      const textMatch = p.match(/(?:send\s+(?:the\s+)?message\s+(?:thier|there)?\s*[:,-]?\s*|\s+message\s+[:,-]?\s*|\s+text\s+[:,-]?\s*)(.+)$/i)
+    // 5A. Extract message text
+    let messageText = ''
+    const quoteMatch = p.match(/["'“]([^"'“”]+)["'”]/)
+    if (quoteMatch) {
+      messageText = quoteMatch[1].trim()
+    } else {
+      const textMatch = p.match(
+        /(?:send\s+(?:the\s+|that\s+|him\s+|her\s+)?message\s+(?:thier|there)?\s*[:,-]?\s*|\s+(?:message|text)\s*[:,-]\s*|\s+saying\s+)(.+)$/i
+      )
       if (textMatch) {
-        let text = textMatch[1].trim().replace(/\s*(?:as\s+(?:y?you|u)\s+want)?\s*(?:in\s+thier|in\s+there)?$/i, '').trim()
-        return { type: 'send_slack', channelNameOrId: targetChannel, text: text || 'Hello' }
+        messageText = textMatch[1]
+          .trim()
+          .replace(/\s*(?:as\s+(?:y?you|u)\s+want)?\s*(?:in\s+thier|in\s+there)?$/i, '')
+          .trim()
+      }
+    }
+
+    // 5B. Extract target channels / people
+    const targetSet = new Set<string>()
+
+    // If project is available, check for channel/contact names in prompt
+    if (project) {
+      const allChannels = (project.sources ?? []).flatMap((s) => s.channels ?? [])
+      const pLower = p.toLowerCase()
+      for (const ch of allChannels) {
+        const cleanName = cleanChannel(ch.name)
+        const firstName = cleanName.split(/\s+/)[0]
+        if (
+          pLower.includes(cleanName) ||
+          (firstName.length > 2 && new RegExp(`\\b${firstName}\\b`, 'i').test(pLower))
+        ) {
+          targetSet.add(ch.name)
+        }
+      }
+    }
+
+    // Fallback: extract target names using regex before "send", "message", or after "to/in"
+    if (targetSet.size === 0) {
+      const targetMatch =
+        p.match(/(?:send|post|write)\s+(?:the\s+)?(?:message\s+)?(?:in|to|into)\s+(?:the\s+)?(?:slack\s*[-:]?\s*)?([a-zA-Z0-9_#@,\s-]+?)(?:\s*-\s*send|\s+channel|\s*[:,-]\s*["']|\s+text|\s+message|\s+saying|\s*$)/i) ||
+        p.match(/([a-zA-Z0-9_#@,\s-]+?)\s+(?:send|post|write)\s+(?:both|all|simple|him|her|\s*["'])/i)
+
+      if (targetMatch) {
+        const rawTargetStr = targetMatch[1].trim()
+        const parts = rawTargetStr.split(/\s*(?:and|&|,)\s*/i).filter((s) => s.trim().length > 0)
+        for (const part of parts) {
+          const cleaned = part.replace(/^[#@]+/, '').trim()
+          if (cleaned && !['slack', 'the', 'message', 'simple'].includes(cleaned.toLowerCase())) {
+            targetSet.add(cleaned)
+          }
+        }
+      }
+    }
+
+    const detectedTargets = Array.from(targetSet)
+
+    if (detectedTargets.length > 0) {
+      return {
+        type: 'send_slack',
+        channelNameOrId: detectedTargets[0],
+        targetChannels: detectedTargets,
+        text: messageText || 'Hello'
       }
     }
   }
@@ -293,7 +380,7 @@ function wrapCardReply(result: AgentActionResult): AgentActionResult {
 }
 
 /**
- * Executes the resolved agent action against the backend dependencies.
+ * Executes the resolved agent action against backend dependencies.
  */
 export async function executeAgentAction(
   action: AgentAction,
@@ -303,47 +390,20 @@ export async function executeAgentAction(
 
   switch (action.type) {
     case 'send_slack': {
-      const targetQuery = action.channelNameOrId || ''
+      const targets =
+        action.targetChannels && action.targetChannels.length > 0
+          ? action.targetChannels
+          : action.channelNameOrId
+            ? [action.channelNameOrId]
+            : []
       const text = (action.text || '').trim()
 
-      if (!targetQuery || !text) {
+      if (targets.length === 0 || !text) {
         return wrapCardReply({
           handled: true,
           action,
           ok: false,
-          replyMarkdown: 'Please specify both the destination channel and the message text to send.'
-        })
-      }
-
-      const resolved = resolveProjectChannel(project, targetQuery)
-      if (!resolved) {
-        return wrapCardReply({
-          handled: true,
-          action,
-          ok: false,
-          replyMarkdown: `Could not find a channel named **#${targetQuery}** in this project. Please check the channel name in Workspace Control.`
-        })
-      }
-
-      const { channel } = resolved
-
-      // Strict security guardrail: verify agentWrite permission
-      if (!channel.agentWrite) {
-        return wrapCardReply({
-          handled: true,
-          action,
-          ok: false,
-          cardType: 'permission_denied',
-          cardData: {
-            channelId: channel.id,
-            channelName: channel.name
-          },
-          replyMarkdown: [
-            `⚠️ **Permission Locked**: Agent write permission is disabled for **#${channel.name}**.`,
-            '',
-            'To protect your workspace, the agent will never post messages without explicit authorization.',
-            `Click below to open **Workspace Control** and enable **Agent Write** for **#${channel.name}**:`
-          ].join('\n')
+          replyMarkdown: 'Please specify the destination contact(s) or channel(s) and the message text to send.'
         })
       }
 
@@ -356,53 +416,118 @@ export async function executeAgentAction(
         })
       }
 
-      try {
-        const sendRes = await chatService.sendMessage({
-          projectId,
-          channelId: channel.id,
-          text,
-          isAgent: true
-        })
+      const delivered: Array<{ id: string; name: string; ts?: string }> = []
+      const locked: Array<{ id: string; name: string }> = []
+      const notFound: string[] = []
 
-        if (!sendRes.ok) {
-          return wrapCardReply({
-            handled: true,
-            action,
-            ok: false,
-            replyMarkdown: `Failed to post message to **#${channel.name}**: ${sendRes.error || 'Unknown error'}`
-          })
+      for (const targetQuery of targets) {
+        const resolved = resolveProjectChannel(project, targetQuery)
+        if (!resolved) {
+          notFound.push(targetQuery)
+          continue
         }
 
-        const nowFormatted = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        return wrapCardReply({
-          handled: true,
-          action,
-          ok: true,
-          cardType: 'slack_dispatch',
-          cardData: {
+        const { channel } = resolved
+
+        // Strict security guardrail: check agentWrite permission
+        if (!channel.agentWrite) {
+          locked.push({ id: channel.id, name: channel.name })
+          continue
+        }
+
+        try {
+          const sendRes = await chatService.sendMessage({
+            projectId,
             channelId: channel.id,
-            channelName: channel.name,
-            ts: sendRes.message?.ts,
-            time: nowFormatted,
             text,
-            mode: 'direct_api'
-          },
-          replyMarkdown: [
-            `✅ **Message Dispatched to #${channel.name}**`,
-            `> *${text}*`,
-            '',
-            `*Delivered via Direct API in ~150ms at ${nowFormatted} (Slack TS: \`${sendRes.message?.ts || 'verified'}\`)*`
-          ].join('\n')
-        })
-      } catch (err) {
-        log.error('executeAgentAction send_slack error:', err)
+            isAgent: true
+          })
+
+          if (sendRes.ok) {
+            delivered.push({ id: channel.id, name: channel.name, ts: sendRes.message?.ts })
+          } else {
+            locked.push({ id: channel.id, name: channel.name })
+          }
+        } catch (err) {
+          log.error(`send_slack dispatch failed for ${channel.name}:`, err)
+          locked.push({ id: channel.id, name: channel.name })
+        }
+      }
+
+      const nowFormatted = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
+      // Case 1: All targets were locked (zero delivered)
+      if (delivered.length === 0 && locked.length > 0) {
+        const lockedNames = locked.map((c) => `#${c.name}`).join(', ')
         return wrapCardReply({
           handled: true,
           action,
           ok: false,
-          replyMarkdown: `Encountered an error dispatching message: ${err instanceof Error ? err.message : String(err)}`
+          cardType: 'permission_denied',
+          cardData: {
+            channelId: locked[0].id,
+            channelName: locked[0].name,
+            lockedChannels: locked
+          },
+          replyMarkdown: [
+            `⚠️ **Permission Locked**: Agent write permission is disabled for **${lockedNames}**.`,
+            '',
+            'To protect your workspace, the agent will never post messages without explicit authorization.',
+            `Click below to open **Workspace Control** and enable **Agent Write** for these contacts.`
+          ].join('\n')
         })
       }
+
+      // Case 2: Targets not found in project
+      if (delivered.length === 0 && notFound.length > 0) {
+        return wrapCardReply({
+          handled: true,
+          action,
+          ok: false,
+          replyMarkdown: `Could not find channel(s) or contact(s) **${notFound.map((n) => `#${n}`).join(', ')}** in this project. Please verify in Workspace Control.`
+        })
+      }
+
+      // Case 3: Partial or full delivery
+      const deliveredNames = delivered.map((c) => `#${c.name}`).join(', ')
+      const replyLines = [
+        `✅ **Message Dispatched to ${deliveredNames}**`,
+        `> *${text}*`,
+        '',
+        `*Delivered via Direct API in ~150ms at ${nowFormatted}*`
+      ]
+
+      if (locked.length > 0) {
+        replyLines.push(
+          '',
+          `⚠️ **Permission Locked for ${locked.map((c) => `#${c.name}`).join(', ')}**: Agent write permission is disabled. Use Workspace Control to authorize them.`
+        )
+      }
+
+      if (notFound.length > 0) {
+        replyLines.push(
+          '',
+          `ℹ️ **Not Found**: Could not match **${notFound.map((n) => `#${n}`).join(', ')}** to a monitored channel.`
+        )
+      }
+
+      return wrapCardReply({
+        handled: true,
+        action,
+        ok: true,
+        cardType: 'slack_dispatch',
+        cardData: {
+          channelId: delivered[0].id,
+          channelName: delivered[0].name,
+          delivered,
+          locked,
+          ts: delivered[0].ts,
+          time: nowFormatted,
+          text,
+          mode: 'direct_api'
+        },
+        replyMarkdown: replyLines.join('\n')
+      })
     }
 
     case 'read_channel': {
@@ -463,13 +588,14 @@ export async function executeAgentAction(
           })
         }
 
-        // Return latest N messages formatted chronologically
         const msgs = page.messages.slice(0, limit)
-        const formatted = msgs.map((m: DashboardChatMessage, idx: number) => {
-          const user = m.userName || m.userId || 'Unknown'
-          const time = m.atIso ? new Date(m.atIso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
-          return `${idx + 1}. **${user}** (${time}): *${m.text}*`
-        }).join('\n')
+        const formatted = msgs
+          .map((m: DashboardChatMessage, idx: number) => {
+            const user = m.userName || m.userId || 'Unknown'
+            const time = m.atIso ? new Date(m.atIso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
+            return `${idx + 1}. **${user}** (${time}): *${m.text}*`
+          })
+          .join('\n')
 
         return wrapCardReply({
           handled: true,
@@ -482,11 +608,7 @@ export async function executeAgentAction(
             count: msgs.length,
             messages: msgs.map((m) => ({ user: m.userName || m.userId, text: m.text, ts: m.ts }))
           },
-          replyMarkdown: [
-            `📖 **Latest ${msgs.length} message(s) in #${channel.name}:**`,
-            '',
-            formatted
-          ].join('\n')
+          replyMarkdown: [`📖 **Latest ${msgs.length} message(s) in #${channel.name}:**`, '', formatted].join('\n')
         })
       } catch (err) {
         return wrapCardReply({
@@ -545,7 +667,8 @@ export async function executeAgentAction(
 
       // Update schedule on browser sources
       try {
-        const source = (project.sources ?? []).find((s) => s.platform === 'slack' && s.enabled !== false) || project.sources?.[0]
+        const source =
+          (project.sources ?? []).find((s) => s.platform === 'slack' && s.enabled !== false) || project.sources?.[0]
         if (source && ctx.monitorStore?.upsertProject) {
           source.scheduleEnabled = enabled
           source.scheduleIntervalMinutes = interval as any
@@ -578,37 +701,24 @@ export async function executeAgentAction(
     }
 
     case 'list_capabilities': {
-      const authorizedChannels = (project.sources ?? [])
-        .flatMap((s) => s.channels ?? [])
-        .filter((c) => c.agentWrite === true)
-        .map((c) => `#${c.name}`)
-
-      const readChannels = (project.sources ?? [])
-        .flatMap((s) => s.channels ?? [])
-        .filter((c) => c.enabled !== false)
-        .map((c) => `#${c.name}`)
+      const permsContext = formatChannelPermissionsContext(project)
 
       return wrapCardReply({
         handled: true,
         action,
         ok: true,
         cardType: 'capabilities',
-        cardData: {
-          authorizedChannels,
-          readChannels
-        },
         replyMarkdown: [
           `🤖 **Cosmic Autonomous Agent Superpowers**`,
           '',
           `I can execute real workspace actions directly from this chat:`,
-          `- **🚀 Post to Slack**: Send messages or announcements to any authorized channel (e.g. \`send message to #agentworkprojecttesting hello team\`).`,
+          `- **🚀 Post to Slack**: Send messages or announcements to any authorized channel (e.g. \`send message to #agentworkprojecttesting hello team\`, or to multiple people: \`#ankita and #utkarsh send simple 'hiii'\`).`,
           `- **📖 Read Channels**: Fetch recent messages from any channel (e.g. \`what are the last 3 messages in #newtestinggroup\`).`,
           `- **🕷️ Trigger Scrape**: Ingest fresh messages on demand (e.g. \`scrape now\` or \`trigger scraping\`).`,
           `- **⏱️ Manage Schedules**: Configure automated polling frequency (e.g. \`schedule every 20s\` or \`schedule every 15m\`).`,
           '',
           `**Current Channel Access:**`,
-          `- **Write Authorized**: ${authorizedChannels.length > 0 ? authorizedChannels.join(', ') : '*None yet (Enable Agent Write in Workspace Control)*'}`,
-          `- **Monitored Channels**: ${readChannels.length > 0 ? readChannels.join(', ') : '*None selected*'}`
+          permsContext
         ].join('\n')
       })
     }
