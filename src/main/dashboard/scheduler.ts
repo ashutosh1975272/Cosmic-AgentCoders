@@ -48,6 +48,8 @@ export interface DashboardSchedulerDeps {
   listProjects?: () => Promise<DashboardProject[]>
   /** Called after every state transition so the renderer can refresh. */
   onChanged?: (state: DashboardSchedulesState) => void
+  /** Broadcasts the updated snapshot to all windows so the UI updates automatically. */
+  broadcastSnapshot?: (projectId?: string) => Promise<void>
   /** Injectable clock for tests. */
   now?: () => number
   /** Injectable id factory for tests. */
@@ -71,6 +73,7 @@ export class DashboardScheduler {
   private started = false
   private pendingSlackTrigger: SlackTrigger = 'scheduled'
   private hasRunStartupSourceCatchUp = false
+  private broadcastSnapshotCallback?: (projectId?: string) => Promise<void>
 
   constructor(
     engine: DashboardSyncEngine,
@@ -82,6 +85,23 @@ export class DashboardScheduler {
     this.deps = deps
     this.now = deps.now ?? (() => Date.now())
     this.newId = deps.newId ?? (() => `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+  }
+
+  /** Wire up external snapshot broadcaster so UI updates automatically on scrape. */
+  setBroadcastSnapshot(fn: (projectId?: string) => Promise<void>): void {
+    this.broadcastSnapshotCallback = fn
+  }
+
+  private async triggerBroadcastSnapshot(projectId?: string): Promise<void> {
+    try {
+      if (this.broadcastSnapshotCallback) {
+        await this.broadcastSnapshotCallback(projectId)
+      } else if (this.deps.broadcastSnapshot) {
+        await this.deps.broadcastSnapshot(projectId)
+      }
+    } catch {
+      // ignore
+    }
   }
 
   /** Start timers; an overdue sync runs immediately as the catch-up. */
@@ -180,13 +200,23 @@ export class DashboardScheduler {
       for (const project of projects) {
         for (const source of project.sources ?? []) {
           if (source.kind !== 'browser' || source.enabled === false) continue
-          if (source.scheduleEnabled !== true) continue
-          if (!source.profileId || !source.workspaceId) continue
+          if (source.scheduleEnabled === false) continue
+          const isDirectApi = (source.engineMode ?? 'direct_api') === 'direct_api'
+          const isEnabled = source.scheduleEnabled ?? isDirectApi
+          if (!isEnabled) continue
+          const profileId = source.profileId || project.profileId
+          const workspaceId = source.workspaceId || project.teamId
+          if (!profileId || !workspaceId) continue
 
           activeIds.push(source.id)
           if (this.engine.isSourceRunning(source.id)) continue
 
-          const intervalMs = Math.round((source.scheduleIntervalMinutes ?? 15) * 60_000)
+          const defaultInterval = isDirectApi ? 0.333 : 15
+          let intervalMinutes = source.scheduleIntervalMinutes ?? defaultInterval
+          if (isDirectApi && intervalMinutes === 15) {
+            intervalMinutes = 0.333
+          }
+          const intervalMs = Math.round(intervalMinutes * 60_000)
           const last =
             stored.sourceLastRunAt?.[source.id] ??
             source.lastScrapeAt ??
@@ -194,7 +224,10 @@ export class DashboardScheduler {
             null
           const lastMs = last ? new Date(last).getTime() : null
           const isOverdue =
-            lastMs === null || !Number.isFinite(lastMs) || this.now() >= lastMs + intervalMs
+            lastMs === null ||
+            !Number.isFinite(lastMs) ||
+            lastMs > this.now() ||
+            this.now() >= lastMs + intervalMs
           const isStartupCatchUp =
             !this.hasRunStartupSourceCatchUp &&
             lastMs !== null &&
@@ -212,6 +245,7 @@ export class DashboardScheduler {
             new Date(this.now()).toISOString()
           )
           if (result.status === 'success' || result.status === 'partial') {
+            await this.triggerBroadcastSnapshot(project.id)
             await this.store.recordRun({
               id: result.runId || this.newId(),
               kind: 'slack-sync',
@@ -269,13 +303,17 @@ export class DashboardScheduler {
     for (const project of projects) {
       for (const source of project.sources ?? []) {
         if (source.kind !== 'browser') continue
-        const intervalMinutes = source.scheduleIntervalMinutes ?? 15
+        const isDirectApi = (source.engineMode ?? 'direct_api') === 'direct_api'
+        let intervalMinutes = source.scheduleIntervalMinutes ?? (isDirectApi ? 0.333 : 15)
+        if (isDirectApi && intervalMinutes === 15) {
+          intervalMinutes = 0.333
+        }
         const lastRunAt =
           stored.sourceLastRunAt?.[source.id] ??
           source.lastScrapeAt ??
           source.lastReadAt ??
           null
-        const scheduleEnabled = source.scheduleEnabled === true
+        const scheduleEnabled = source.scheduleEnabled ?? isDirectApi
         out.push({
           projectId: project.id,
           projectName: project.name,
@@ -336,6 +374,7 @@ export class DashboardScheduler {
     const startedAt = new Date(this.now()).toISOString()
     try {
       const results = await this.engine.syncAll({ includeBrowserSources: false })
+      await this.triggerBroadcastSnapshot()
       const finishedAt = new Date(this.now()).toISOString()
       const run = this.slackRun(trigger, results, startedAt, finishedAt)
       await this.store.recordRun(run)

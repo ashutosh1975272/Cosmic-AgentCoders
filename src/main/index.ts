@@ -27,6 +27,7 @@ import { DashboardDeltaStore } from './dashboard/delta-store'
 import { MonitorStore } from './dashboard/monitor-store'
 import { WorkspaceMappingStore } from './dashboard/workspace-mapping-store'
 import { DashboardInsightSyncEngine } from './dashboard/sync-engine'
+import { initSlackUserStore, normalizeHistoricalDeltaUsers } from './dashboard/slack-api-client'
 import { DashboardScheduler } from './dashboard/scheduler'
 import { DashboardSidebarStateStore } from './dashboard/sidebar-state'
 import { TeamWorkspaceStore } from './dashboard/team-workspace-store'
@@ -262,6 +263,8 @@ if (!gotSingleInstanceLock) {
 
     // dashboard feature (ADR-0007) — isolated module, no behavior changes above
     const dashboardRoot = join(userData, 'dashboard')
+    initSlackUserStore(dashboardRoot)
+    normalizeHistoricalDeltaUsers(dashboardRoot)
     const dashboardMonitorStore = new MonitorStore({
       rootDir: dashboardRoot,
       encryptionAvailable: (await import('electron')).safeStorage.isEncryptionAvailable()
@@ -429,9 +432,23 @@ if (!gotSingleInstanceLock) {
       })
     }
 
+    // v2.6 — Slack Chat tab: local history + replies via chat.postMessage
+    const dashboardChatService = new DashboardChatService({
+      monitorStore: dashboardMonitorStore,
+      deltaStore: dashboardDeltaStore,
+      oauthTokenProvider: { tryGet: (profileId, teamId) => tokenStore.tryGet(profileId, teamId) },
+      teamWorkspace: teamWorkspaceReader,
+      oauthScopesProvider: async (profileId, teamId) => {
+        const links = await tokenStore.listWorkspaces(profileId)
+        return links.find((link) => link.teamId === teamId)?.scopes ?? null
+      },
+      log: (msg) => log.info(msg)
+    })
+
     const dashboardEngine = new DashboardInsightSyncEngine({
       monitorStore: dashboardMonitorStore,
       deltaStore: dashboardDeltaStore,
+      chatService: dashboardChatService,
       workspaceMapping: workspaceMappingStore,
       oauthTokenProvider: { tryGet: (profileId, teamId) => tokenStore.tryGet(profileId, teamId) },
       manualTokenProvider: {
@@ -498,19 +515,6 @@ if (!gotSingleInstanceLock) {
         getLastViewedAt: (projectId: string) => dashboardViewedStore.get(projectId)
       })
     const getDigest = async (): Promise<DashboardDigest | null> => refreshDigestNow()
-
-    // v2.6 — Slack Chat tab: local history + replies via chat.postMessage
-    const dashboardChatService = new DashboardChatService({
-      monitorStore: dashboardMonitorStore,
-      deltaStore: dashboardDeltaStore,
-      oauthTokenProvider: { tryGet: (profileId, teamId) => tokenStore.tryGet(profileId, teamId) },
-      teamWorkspace: teamWorkspaceReader,
-      oauthScopesProvider: async (profileId, teamId) => {
-        const links = await tokenStore.listWorkspaces(profileId)
-        return links.find((link) => link.teamId === teamId)?.scopes ?? null
-      },
-      log: (msg) => log.info(msg)
-    })
     const projectChatService = new ProjectChatService({
       rootDir: dashboardRoot,
       monitorStore: dashboardMonitorStore,
@@ -605,6 +609,23 @@ if (!gotSingleInstanceLock) {
         const win = mainWindow
         if (win && !win.isDestroyed()) {
           win.webContents.send(IpcChannels.DashboardSchedulesChanged, state)
+        }
+      },
+      broadcastSnapshot: async () => {
+        const win = mainWindow
+        if (win && !win.isDestroyed()) {
+          const projects = await dashboardEngine.buildSnapshot()
+          const manualTokens = (await dashboardMonitorStore.listManualTokens()).map((t) => ({
+            key: t.key,
+            validated: t.persisted
+          }))
+          win.webContents.send(IpcChannels.DashboardSnapshotChanged, {
+            projects,
+            manualTokens,
+            globalConfig: await configService.publicGlobalConfig(),
+            syncIntervalSeconds: 60,
+            lastUpdatedAt: new Date().toISOString()
+          })
         }
       }
     })

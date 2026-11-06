@@ -2,6 +2,19 @@ import { describe, it, expect, vi } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
+
+const mockSessionCookiesGet = vi.fn().mockResolvedValue([])
+
+vi.mock('electron', () => ({
+  session: {
+    fromPartition: vi.fn().mockReturnValue({
+      cookies: {
+        get: (...args: any[]) => mockSessionCookiesGet(...args)
+      }
+    })
+  }
+}))
+
 import {
   SessionTokenExtractor,
   EXTRACT_TOKEN_SCRIPT
@@ -183,6 +196,62 @@ describe('SessionTokenExtractor', () => {
     // Cached call with no partitions returns cached credentials
     const cachedRes = await extractor.extractSlackSessionTokens([], 'test-cache-key')
     expect(cachedRes?.token).toBe(sampleToken)
+
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('Tier 2: extracts token from disk LevelDB and cookie from Electron session when Cookies file is missing', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slack-t2-'))
+    const partDir = path.join(tmpDir, 'Partitions', 'card-t2')
+    const ldbDir = path.join(partDir, 'Local Storage', 'leveldb')
+    fs.mkdirSync(ldbDir, { recursive: true })
+
+    const sampleToken = 'xoxc-disk-token-tier2-1234567890abcdef1234567890abcdef'
+    const sessionCookie = 'xoxd-electron-session-cookie-1234567890abcdef'
+
+    fs.writeFileSync(path.join(ldbDir, '000002.ldb'), `data_${sampleToken}\x00end`)
+    // Deliberately do NOT create partDir/Cookies on disk to simulate locked/in-memory session cookie
+
+    // Mock Electron session.fromPartition cookie response for Tier 2
+    mockSessionCookiesGet.mockResolvedValueOnce([{ name: 'd', value: sessionCookie }])
+
+    const extractor = new SessionTokenExtractor()
+    const partRes = await extractor.extractFromPartition('persist:card-t2', tmpDir)
+    expect(partRes).not.toBeNull()
+    expect(partRes?.token).toBe(sampleToken)
+    expect(partRes?.cookie).toBe(sessionCookie)
+
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('probes candidate partitions in order, giving priority to card partition over profile partition', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slack-priority-'))
+    const cardDir = path.join(tmpDir, 'Partitions', 'card-proj1-slack')
+    const profDir = path.join(tmpDir, 'Partitions', 'profile-prof1-slack')
+    fs.mkdirSync(path.join(cardDir, 'Local Storage', 'leveldb'), { recursive: true })
+    fs.mkdirSync(path.join(profDir, 'Local Storage', 'leveldb'), { recursive: true })
+
+    const cardToken = 'xoxc-card-specific-token-1234567890abcdef1234567890'
+    const cardCookie = 'xoxd-card-specific-cookie-1234567890abcdef123456789'
+    const profToken = 'xoxc-profile-fallback-token-1234567890abcdef12345678'
+    const profCookie = 'xoxd-profile-fallback-cookie-1234567890abcdef1234567'
+
+    fs.writeFileSync(path.join(cardDir, 'Local Storage', 'leveldb', '01.log'), `token_${cardToken}`)
+    fs.writeFileSync(path.join(cardDir, 'Cookies'), `cookie_${cardCookie}`)
+
+    fs.writeFileSync(path.join(profDir, 'Local Storage', 'leveldb', '01.log'), `token_${profToken}`)
+    fs.writeFileSync(path.join(profDir, 'Cookies'), `cookie_${profCookie}`)
+
+    const extractor = new SessionTokenExtractor()
+    // When card partition is listed first, it must be selected
+    const res = await extractor.extractSlackSessionTokens([], undefined, {
+      partitions: ['persist:card-proj1-slack', 'persist:profile-prof1-slack'],
+      userDataDir: tmpDir
+    })
+
+    expect(res).not.toBeNull()
+    expect(res?.token).toBe(cardToken)
+    expect(res?.cookie).toBe(cardCookie)
 
     fs.rmSync(tmpDir, { recursive: true, force: true })
   })

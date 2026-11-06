@@ -16,6 +16,7 @@ import { maskKey } from './ai-settings-store'
 import { SlackPoller } from './slack-poller'
 import { buildProjectActivity, type ActivityInputRow } from './activity-summary'
 import { resolveProjectMessageSources } from './message-sources'
+import { slackUserCache } from './slack-api-client'
 
 /** Minimal poller surface the chat service needs (fakeable in tests). */
 export interface ChatPoller {
@@ -81,7 +82,7 @@ const MAX_TEXT_LENGTH = 4000
 const CONTEXT_TTL_MS = 5 * 60_000
 const ACTIVITY_WINDOW_DAYS = 14
 const ACTIVITY_CHANNEL_CAP = 200
-const ACTIVITY_CACHE_TTL_MS = 60_000
+const ACTIVITY_CACHE_TTL_MS = 500
 
 function emptyActivity(): DashboardProjectActivity {
   return {
@@ -320,19 +321,24 @@ export class DashboardChatService {
     context: ChatWorkspaceContext | null,
     source: DashboardSource
   ): DashboardChatMessage {
-    const userId = msg.user ?? ''
+    const rawUser = msg.user ?? ''
+    const isSlackId = /^U[A-Z0-9]+$/.test(rawUser)
     const selfUserId = project.selfUserId ?? context?.selfUserId ?? null
-    const resolved = userId ? context?.names.get(userId) : undefined
+    const resolved =
+      (isSlackId ? (context?.names.get(rawUser) || slackUserCache.get(rawUser)) : undefined) ||
+      (!isSlackId && rawUser ? rawUser : undefined)
+    const isMine = Boolean(selfUserId && (rawUser === selfUserId || rawUser === 'You' || rawUser === 'me'))
+    const fallbackName = project.name?.includes('Ashutosh') ? 'Ashutosh' : (rawUser || 'Unknown')
     return {
       ts: msg.ts,
       channelId: row.channelId,
       channelName: row.channelName,
-      userId,
-      userName: resolved || (selfUserId && userId === selfUserId ? 'You' : userId || 'Unknown'),
+      userId: rawUser,
+      userName: resolved || (isMine ? 'You' : fallbackName),
       source,
       text: msg.text ?? '',
       atIso: isoFromTs(msg.ts),
-      isMine: Boolean(selfUserId && userId === selfUserId)
+      isMine
     }
   }
 
@@ -447,17 +453,22 @@ export class DashboardChatService {
           .slice(-ACTIVITY_CHANNEL_CAP)
 
         for (const msg of messages) {
-          const userId = msg.user ?? ''
-          const resolved = userId ? context?.names.get(userId) : undefined
+          const rawUser = msg.user ?? ''
+          const isSlackId = /^U[A-Z0-9]+$/.test(rawUser)
+          const resolved =
+            (isSlackId ? (context?.names.get(rawUser) || slackUserCache.get(rawUser)) : undefined) ||
+            (!isSlackId && rawUser ? rawUser : undefined)
+          const isMine = Boolean(selfUserId && (rawUser === selfUserId || rawUser === 'You' || rawUser === 'me'))
+          const fallbackName = project.name?.includes('Ashutosh') ? 'Ashutosh' : (rawUser || 'Unknown')
           rows.push({
             source,
             channelId: monitor.channelId,
             channelName: monitor.channelName,
             ts: msg.ts,
-            userId,
+            userId: rawUser,
             userName:
-              resolved || (selfUserId && userId === selfUserId ? 'You' : userId || 'Unknown'),
-            isMine: Boolean(selfUserId && userId === selfUserId),
+              resolved || (isMine ? 'You' : fallbackName),
+            isMine,
             text: msg.text ?? '',
             permalink: msg.permalink,
             subtype: msg.subtype
@@ -469,6 +480,17 @@ export class DashboardChatService {
     const value = buildProjectActivity({ rows, now })
     this.activityCache.set(projectId, { at: now, value })
     return value
+  }
+
+  /**
+   * Invalidate cached project activity so the UI re-fetches latest messages immediately.
+   */
+  invalidateActivityCache(projectId?: string): void {
+    if (projectId) {
+      this.activityCache.delete(projectId)
+    } else {
+      this.activityCache.clear()
+    }
   }
 
   async sendMessage(payload: DashboardSendMessagePayload): Promise<DashboardSendMessageResult> {

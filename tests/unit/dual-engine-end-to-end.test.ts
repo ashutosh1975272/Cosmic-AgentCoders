@@ -28,10 +28,12 @@ function makeMockView(overrides: Partial<{
   }
 }
 
+const mockWebContentsView = vi.fn().mockImplementation(function () {
+  return makeMockView({ jsResult: 'logged_in' })
+})
+
 vi.mock('electron', () => ({
-  WebContentsView: vi.fn().mockImplementation(function () {
-    return makeMockView({ jsResult: 'logged_in' })
-  }),
+  WebContentsView: (...args: any[]) => mockWebContentsView(...args),
   session: {
     fromPartition: vi.fn().mockReturnValue({
       setUserAgent: vi.fn(),
@@ -365,5 +367,240 @@ describe('Dual-Engine End-to-End Testing', () => {
     // requestedSinceTs must be at least ~24 hours ago (>= 86,000 seconds lookback)
     const nowSec = Math.floor(Date.now() / 1000)
     expect(nowSec - (requestedSinceTs ?? 0)).toBeGreaterThanOrEqual(86000)
+  })
+
+  it('Zero-DOM: executes Direct API scrape without creating WebContentsView when credentials resolve', async () => {
+    const { monitors, delta, history } = await createStores()
+    const project = testProject('direct_api')
+    await monitors.upsertProject({ project })
+
+    mockWebContentsView.mockClear()
+
+    vi.spyOn(sessionTokenExtractor, 'extractSlackSessionTokens').mockResolvedValue({
+      token: 'xoxc-test-token-123',
+      cookie: 'xoxd-test-cookie-456'
+    })
+
+    vi.spyOn(SlackApiClient.prototype, 'fetchChannelMessages').mockResolvedValueOnce({
+      messages: [
+        { ts: '1793960000.000001', user: 'Ashutosh', text: 'zero dom message', source: 'client' }
+      ],
+      oldestTs: 1793960000.000001,
+      newestTs: 1793960000.000001,
+      hasMore: false
+    })
+
+    const insightEngineMock = new InsightEngine({
+      provider: null,
+      historyStore: history,
+      deltaStore: delta,
+      resolveSources: (p) => Promise.resolve(resolveProjectMessageSources(p))
+    })
+    vi.spyOn(insightEngineMock, 'refresh').mockImplementation((_p, _t, s) => Promise.resolve(s))
+
+    const engine = new DashboardInsightSyncEngine({
+      monitorStore: monitors,
+      deltaStore: delta,
+      oauthTokenProvider: { tryGet: async () => null },
+      pollerFactory: () => ({ fetchHistory: async () => ({ messages: [], hasMore: false }) }),
+      insightEngine: insightEngineMock
+    })
+
+    const result = await engine.syncProjectSource('proj-test', 'src-test-1', {
+      trigger: 'scheduled'
+    })
+
+    expect(result.status).toBe('success')
+    expect(result.newMessages).toBe(1)
+    // In Zero-DOM mode, no WebContentsView was instantiated!
+    expect(mockWebContentsView).not.toHaveBeenCalled()
+  })
+
+  it('Strict AI Decoupling: skips LLM analysis on startup catch-up when 0 new messages arrive', async () => {
+    const { monitors, delta, history } = await createStores()
+    const project = testProject('direct_api')
+    await monitors.upsertProject({ project })
+
+    vi.spyOn(sessionTokenExtractor, 'extractSlackSessionTokens').mockResolvedValue({
+      token: 'xoxc-test-token-123',
+      cookie: 'xoxd-test-cookie-456'
+    })
+
+    // Return empty messages on startup catch-up
+    vi.spyOn(SlackApiClient.prototype, 'fetchChannelMessages').mockResolvedValueOnce({
+      messages: [],
+      oldestTs: null,
+      newestTs: null,
+      hasMore: false
+    })
+
+    const insightEngineMock = new InsightEngine({
+      provider: null,
+      historyStore: history,
+      deltaStore: delta,
+      resolveSources: (p) => Promise.resolve(resolveProjectMessageSources(p))
+    })
+    const refreshSpy = vi.spyOn(insightEngineMock, 'refresh').mockImplementation((_p, _t, s) => Promise.resolve(s))
+
+    const engine = new DashboardInsightSyncEngine({
+      monitorStore: monitors,
+      deltaStore: delta,
+      oauthTokenProvider: { tryGet: async () => null },
+      pollerFactory: () => ({ fetchHistory: async () => ({ messages: [], hasMore: false }) }),
+      insightEngine: insightEngineMock
+    })
+
+    const runStartupEmpty = await engine.syncProjectSource('proj-test', 'src-test-1', {
+      trigger: 'startup'
+    })
+
+    expect(runStartupEmpty.status).toBe('success')
+    expect(runStartupEmpty.newMessages).toBe(0)
+    // Strictly 0 AI tokens spent when 0 new messages arrived on startup
+    expect(refreshSpy).not.toHaveBeenCalled()
+  })
+
+  it('Strict AI Decoupling: triggers LLM analysis on manual trigger even with 0 new messages', async () => {
+    const { monitors, delta, history } = await createStores()
+    const project = testProject('direct_api')
+    await monitors.upsertProject({ project })
+
+    vi.spyOn(sessionTokenExtractor, 'extractSlackSessionTokens').mockResolvedValue({
+      token: 'xoxc-test-token-123',
+      cookie: 'xoxd-test-cookie-456'
+    })
+
+    vi.spyOn(SlackApiClient.prototype, 'fetchChannelMessages').mockResolvedValueOnce({
+      messages: [],
+      oldestTs: null,
+      newestTs: null,
+      hasMore: false
+    })
+
+    const insightEngineMock = new InsightEngine({
+      provider: null,
+      historyStore: history,
+      deltaStore: delta,
+      resolveSources: (p) => Promise.resolve(resolveProjectMessageSources(p))
+    })
+    const refreshSpy = vi.spyOn(insightEngineMock, 'refresh').mockImplementation((_p, _t, s) => Promise.resolve(s))
+
+    const engine = new DashboardInsightSyncEngine({
+      monitorStore: monitors,
+      deltaStore: delta,
+      oauthTokenProvider: { tryGet: async () => null },
+      pollerFactory: () => ({ fetchHistory: async () => ({ messages: [], hasMore: false }) }),
+      insightEngine: insightEngineMock
+    })
+
+    const runManual = await engine.syncProjectSource('proj-test', 'src-test-1', {
+      trigger: 'manual'
+    })
+
+    expect(runManual.status).toBe('success')
+    expect(runManual.newMessages).toBe(0)
+    // Manual click MUST trigger AI insight refresh
+    expect(refreshSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('Strict AI Decoupling: triggers LLM analysis when 6-hour heartbeat timer expires', async () => {
+    const { monitors, delta, history } = await createStores()
+    const project = testProject('direct_api')
+    await monitors.upsertProject({ project })
+
+    vi.spyOn(sessionTokenExtractor, 'extractSlackSessionTokens').mockResolvedValue({
+      token: 'xoxc-test-token-123',
+      cookie: 'xoxd-test-cookie-456'
+    })
+
+    vi.spyOn(SlackApiClient.prototype, 'fetchChannelMessages').mockResolvedValue({
+      messages: [],
+      oldestTs: null,
+      newestTs: null,
+      hasMore: false
+    })
+
+    const insightEngineMock = new InsightEngine({
+      provider: null,
+      historyStore: history,
+      deltaStore: delta,
+      resolveSources: (p) => Promise.resolve(resolveProjectMessageSources(p))
+    })
+    const refreshSpy = vi.spyOn(insightEngineMock, 'refresh').mockImplementation((_p, _t, s) => Promise.resolve(s))
+
+    const engine = new DashboardInsightSyncEngine({
+      monitorStore: monitors,
+      deltaStore: delta,
+      oauthTokenProvider: { tryGet: async () => null },
+      pollerFactory: () => ({ fetchHistory: async () => ({ messages: [], hasMore: false }) }),
+      insightEngine: insightEngineMock
+    })
+
+    // Simulate an initial AI analysis done 6.5 hours ago
+    const sixAndHalfHoursAgo = Date.now() - 6.5 * 60 * 60 * 1000
+    ;(engine as any).lastAiAnalysisAt.set('proj-test', sixAndHalfHoursAgo)
+
+    const runHeartbeat = await engine.syncProjectSource('proj-test', 'src-test-1', {
+      trigger: 'scheduled'
+    })
+
+    expect(runHeartbeat.status).toBe('success')
+    expect(runHeartbeat.newMessages).toBe(0)
+    // 6-hour heartbeat expiration MUST trigger AI insight refresh
+    expect(refreshSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('UI Reactivity: invalidates chatService activityCache and stamps lastUpdatedAt on new messages', async () => {
+    const { monitors, delta, history } = await createStores()
+    const project = testProject('direct_api')
+    await monitors.upsertProject({ project })
+
+    vi.spyOn(sessionTokenExtractor, 'extractSlackSessionTokens').mockResolvedValue({
+      token: 'xoxc-test-token-123',
+      cookie: 'xoxd-test-cookie-456'
+    })
+
+    vi.spyOn(SlackApiClient.prototype, 'fetchChannelMessages').mockResolvedValueOnce({
+      messages: [
+        { ts: '1793970000.000001', user: 'Ashutosh', text: 'reactive UI message', source: 'client' }
+      ],
+      oldestTs: 1793970000.000001,
+      newestTs: 1793970000.000001,
+      hasMore: false
+    })
+
+    const mockChatService = {
+      invalidateActivityCache: vi.fn()
+    }
+
+    let syncedSnapshot: any = null
+    const engine = new DashboardInsightSyncEngine({
+      monitorStore: monitors,
+      deltaStore: delta,
+      chatService: mockChatService,
+      oauthTokenProvider: { tryGet: async () => null },
+      pollerFactory: () => ({ fetchHistory: async () => ({ messages: [], hasMore: false }) }),
+      onSynced: (snapshots) => {
+        syncedSnapshot = snapshots[0]
+      },
+      insightEngine: new InsightEngine({
+        provider: null,
+        historyStore: history,
+        deltaStore: delta,
+        resolveSources: (p) => Promise.resolve(resolveProjectMessageSources(p))
+      })
+    })
+
+    const result = await engine.syncProjectSource('proj-test', 'src-test-1', {
+      trigger: 'scheduled'
+    })
+
+    expect(result.status).toBe('success')
+    expect(result.newMessages).toBe(1)
+    // Activity cache must be invalidated
+    expect(mockChatService.invalidateActivityCache).toHaveBeenCalledWith('proj-test')
+    // Snapshot lastUpdatedAt must be stamped
+    expect(syncedSnapshot).not.toBeNull()
+    expect(syncedSnapshot?.lastUpdatedAt).toBeDefined()
   })
 })

@@ -874,3 +874,179 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+/* ==========================================================================
+   Executive Intelligence Cards & Badges (ADR-0009)
+   ========================================================================== */
+
+/* Message Intent Badges in Latest Messages */
+.dash-intent-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  vertical-align: middle;
+}
+.dash-intent-badge.is-purple {
+  color: #c084fc;
+  background: rgba(168, 85, 247, 0.14);
+  border: 1px solid rgba(168, 85, 247, 0.28);
+}
+.dash-intent-badge.is-emerald {
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(16, 185, 129, 0.28);
+}
+.dash-intent-badge.is-blue {
+  color: #60a5fa;
+  background: rgba(59, 130, 246, 0.14);
+  border: 1px solid rgba(59, 130, 246, 0.28);
+}
+.dash-intent-badge.is-red {
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px solid rgba(239, 68, 68, 0.28);
+}
+.dash-intent-badge.is-gray {
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-soft);
+}
+
+/* Decisions & Agreements Vault */
+.dash-decisions-vault {
+  border-left: 3px solid #10b981;
+  background: color-mix(in srgb, #10b981 3%, color-mix(in srgb, var(--text) 3.5%, transparent));
+}
+.dash-badge-verified {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+.dash-decision-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dash-decision-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-soft);
+  transition: background 0.15s ease;
+}
+.dash-decision-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.dash-decision-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: bold;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.18);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.dash-decision-body {
+  flex: 1;
+  min-width: 0;
+}
+.dash-decision-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.4;
+}
+.dash-decision-meta {
+  margin: 3px 0 0;
+  font-size: 11px;
+  color: var(--text-faint);
+  display: flex;
+  gap: 6px;
+}
+
+/* Live SLA Clock Accent */
+.dash-sla-live {
+  color: #eab308;
+  font-weight: 600;
+}
+.dash-sla-pill {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #facc15;
+  background: rgba(234, 179, 8, 0.12);
+  border: 1px solid rgba(234, 179, 8, 0.25);
+  margin-top: 2px;
+}
+
+/* Interactive Deliverables */
+.dash-deliverable-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-soft);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+}
+.dash-deliverable-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+.dash-deliverable-name {
+  font-size: 12px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dash-deliverable-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: capitalize;
+}
+.dash-deliverable-badge.is-done {
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.15);
+}
+.dash-deliverable-badge.is-in-progress {
+  color: #60a5fa;
+  background: rgba(59, 130, 246, 0.15);
+}
+.dash-deliverable-badge.is-pending,
+.dash-deliverable-badge.is-not-started {
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.06);
+}

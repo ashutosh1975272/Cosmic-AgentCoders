@@ -14,6 +14,8 @@ import { dashboardApi } from '../../lib/dashboard-api'
 import type { CardSummary, CardView } from './card-view'
 import { requestMessageJump } from './jump-to-message'
 import type { SelectionId } from './workspace-nav'
+import { DecisionVaultCard } from './DecisionVaultCard'
+import { classifyMessageIntent } from './message-reasoning'
 
 interface DashboardPageProps {
   view: CardView
@@ -64,8 +66,10 @@ function age(iso: string | null | undefined): string {
   if (!iso) return '—'
   const ms = new Date(iso).getTime()
   if (!Number.isFinite(ms)) return '—'
-  const mins = Math.max(0, Math.round((Date.now() - ms) / 60_000))
-  if (mins < 1) return 'just now'
+  const diffSec = Math.max(0, Math.round((Date.now() - ms) / 1000))
+  if (diffSec < 15) return 'just now'
+  if (diffSec < 60) return `${diffSec}s ago`
+  const mins = Math.round(diffSec / 60)
   if (mins < 60) return `${mins}m ago`
   const hours = Math.round(mins / 60)
   if (hours < 24) return `${hours}h ago`
@@ -346,6 +350,28 @@ export default function DashboardPage({
   const metrics = snapshot.metrics
   const busy = syncing || snapshot.syncState === 'syncing'
 
+  // Live 5-second ticker ensures relative timestamps ("just now", "15s ago", "30s ago")
+  // and latest messages re-query automatically without clicking any button
+  const [, setTick] = useState(0)
+  const [autoTick, setAutoTick] = useState(0)
+  const [ipcTick, setIpcTick] = useState(0)
+
+  useEffect(() => {
+    if (!window.api?.dashboard?.onSnapshotChanged) return
+    const off = window.api.dashboard.onSnapshotChanged(() => {
+      setIpcTick((t) => t + 1)
+    })
+    return () => off()
+  }, [])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setAutoTick((t) => t + 1)
+      setTick((t) => t + 1)
+    }, 5_000)
+    return () => window.clearInterval(timer)
+  }, [])
+
   useEffect(() => {
     let alive = true
     const refresh = (): void => {
@@ -375,7 +401,10 @@ export default function DashboardPage({
       : 'not stated in chat'
 
   const time = centre.visuals.timeElapsed
-  const activityState = useProjectActivity(summary.projectId, snapshot.lastUpdatedAt)
+  const activityState = useProjectActivity(
+    summary.projectId,
+    `${snapshot.lastUpdatedAt}:${snapshot.totalMessageCount}:${ipcTick}:${autoTick}`
+  )
   const activity = activityState.activity
   const waiting = metrics?.waiting
   const response = metrics?.ourResponse
@@ -391,7 +420,27 @@ export default function DashboardPage({
   const latestRequirements = [...requirements]
     .sort((a, b) => isoMs(b.whenIso) - isoMs(a.whenIso))
     .slice(0, 3)
-  const deliverables = leftSidebar.scopeDeliverables.deliverables
+
+  const [deliverableOverrides, setDeliverableOverrides] = useState<
+    Record<string, 'done' | 'in-progress' | 'pending' | 'not-started'>
+  >({})
+
+  const toggleDeliverable = (name: string, current: string): void => {
+    const cycle: Record<string, 'done' | 'in-progress' | 'pending' | 'not-started'> = {
+      'not-started': 'in-progress',
+      pending: 'in-progress',
+      'in-progress': 'done',
+      done: 'not-started'
+    }
+    const next = cycle[current] || 'in-progress'
+    setDeliverableOverrides((prev) => ({ ...prev, [name]: next }))
+  }
+
+  const rawDeliverables = leftSidebar.scopeDeliverables.deliverables
+  const deliverables = rawDeliverables.map((d) => ({
+    ...d,
+    status: deliverableOverrides[d.name] || d.status
+  }))
   const deliverableCounts = {
     done: deliverables.filter((d) => d.status === 'done').length,
     'in-progress': deliverables.filter((d) => d.status === 'in-progress').length,
@@ -599,18 +648,31 @@ export default function DashboardPage({
               )}
             </div>
 
-            <div className="dash-tile">
+            <div className={`dash-tile${waiting && waiting.count > 0 ? ' is-attention' : ''}`}>
               <div className="dash-tile-head">
                 <span>Our response time</span>
               </div>
-              <p className={`dash-kpi-value${response?.medianSeconds == null ? ' is-soft' : ''}`}>
-                {duration(response?.medianSeconds ?? null)}
-              </p>
-              <p className="dash-muted">
-                {response && response.medianSeconds !== null
-                  ? `median · ${response.pairs} replies / ${response.windowDays}d`
-                  : 'Needs 3+ replies to measure'}
-              </p>
+              {waiting && waiting.count > 0 ? (
+                <>
+                  <p className="dash-kpi-value dash-sla-live">
+                    {waiting.oldestIso ? compactAge(waiting.oldestIso) : 'Active'}
+                  </p>
+                  <p className="dash-muted">
+                    <span className="dash-sla-pill">Target &lt; 30m</span> · Awaiting reply
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className={`dash-kpi-value${response?.medianSeconds == null ? ' is-soft' : ''}`}>
+                    {duration(response?.medianSeconds ?? null)}
+                  </p>
+                  <p className="dash-muted">
+                    {response && response.medianSeconds !== null
+                      ? `median · ${response.pairs} replies / ${response.windowDays}d`
+                      : 'Needs 3+ replies to measure'}
+                  </p>
+                </>
+              )}
             </div>
 
             <div className="dash-tile">
@@ -770,6 +832,18 @@ export default function DashboardPage({
                                 #{message.channelName || message.channelId}
                               </span>
                               <SourceChip source={message.source} />
+                              {(() => {
+                                const intent = classifyMessageIntent(message.text)
+                                return (
+                                  <span
+                                    className={`dash-intent-badge is-${intent.tone}`}
+                                    title={intent.label}
+                                  >
+                                    {intent.icon ? `${intent.icon} ` : ''}
+                                    {intent.label}
+                                  </span>
+                                )
+                              })()}
                             </span>
                             <span className="dash-msg-text">{message.text}</span>
                           </span>
@@ -837,6 +911,15 @@ export default function DashboardPage({
                   )}
                 </section>
               ) : null}
+
+              <DecisionVaultCard
+                decisions={insight?.decisions}
+                situationLine={insight?.situationLine}
+                recentLine={insight?.recentLine}
+                onJump={(ch) =>
+                  jumpToMessage({ source: 'client', channelId: ch || '', ts: '' } as any)
+                }
+              />
 
               {newSince && newTotal > 0 ? (
                 <section className="dash-block" aria-label="New since your last visit">
@@ -986,6 +1069,40 @@ export default function DashboardPage({
                 )}
                 {deliverables.length > 0 ? (
                   <>
+                    <div
+                      style={{
+                        margin: '10px 0 8px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '5px'
+                      }}
+                    >
+                      {deliverables.map((d, index) => {
+                        const currentStatus = d.status || 'not-started'
+                        return (
+                          <div
+                            key={`${d.name}-${index}`}
+                            className="dash-deliverable-row"
+                            onClick={() => toggleDeliverable(d.name, currentStatus)}
+                            title="Click to toggle status: Not started → In progress → Done"
+                          >
+                            <span className="dash-deliverable-name">
+                              <span aria-hidden="true">
+                                {currentStatus === 'done'
+                                  ? '☑'
+                                  : currentStatus === 'in-progress'
+                                    ? '⏳'
+                                    : '☐'}
+                              </span>
+                              {d.name}
+                            </span>
+                            <span className={`dash-deliverable-badge is-${currentStatus}`}>
+                              {currentStatus === 'in-progress' ? 'In progress' : currentStatus}
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
                     <div className="dash-seg" aria-hidden="true">
                       {(['done', 'in-progress', 'pending', 'not-started'] as const).map(
                         (status) => (

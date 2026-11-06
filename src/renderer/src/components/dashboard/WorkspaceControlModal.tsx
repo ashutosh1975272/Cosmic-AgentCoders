@@ -50,7 +50,7 @@ export function WorkspaceControlModal({
   // Schedules state
   const [scheduleEnabled, setScheduleEnabled] = useState(source.scheduleEnabled ?? true)
   const [intervalMinutes, setIntervalMinutes] = useState<number>(
-    source.scheduleIntervalMinutes ?? 15
+    source.scheduleIntervalMinutes ?? 0.333
   )
   const [engineMode, setEngineMode] = useState<'direct_api' | 'browser'>(
     source.engineMode ?? 'direct_api'
@@ -66,7 +66,7 @@ export function WorkspaceControlModal({
     setChannelsError(null)
     setSelectionMode(source.selectionMode ?? 'include')
     setScheduleEnabled(source.scheduleEnabled ?? true)
-    setIntervalMinutes(source.scheduleIntervalMinutes ?? 15)
+    setIntervalMinutes(source.scheduleIntervalMinutes ?? 0.333)
     setEngineMode(source.engineMode ?? 'direct_api')
 
     const existing = new Map(source.channels.map((c) => [c.id, c]))
@@ -750,10 +750,10 @@ export function WorkspaceControlModal({
                         cursor: scheduleEnabled ? 'pointer' : 'not-allowed'
                       }}
                     >
-                      <option value={0.05}>Every 3 seconds (⚡ Rapid)</option>
-                      <option value={0.083}>Every 5 seconds (⚡ Rapid)</option>
+                      <option value={0.083}>Every 5 seconds (⚡ Ultra-Rapid)</option>
                       <option value={0.167}>Every 10 seconds (⚡ Rapid)</option>
-                      <option value={0.333}>Every 20 seconds (⚡ Rapid)</option>
+                      <option value={0.25}>Every 15 seconds (⚡ Rapid)</option>
+                      <option value={0.333}>Every 20 seconds (⚡ Standard)</option>
                       <option value={0.5}>Every 30 seconds</option>
                       <option value={1}>Every 1 minute</option>
                       <option value={5}>Every 5 minutes</option>

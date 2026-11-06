@@ -59,6 +59,26 @@ export function CosmicWorkspaceView({
     }
   }, [snapshot, loadSnapshot])
 
+  // Listen for snapshot broadcasts and sync completions from background scraper
+  useEffect(() => {
+    if (!window.api?.dashboard?.onSnapshotChanged) return
+    const offSnapshot = window.api.dashboard.onSnapshotChanged((nextSnapshot) => {
+      useDashboardStore.getState().applySnapshot(nextSnapshot)
+    })
+    const offProgress = window.api.dashboard.onSyncProgress?.((payload) => {
+      useDashboardStore.getState().applyProgress?.(payload)
+      if (payload.phase === 'complete' || payload.phase === 'error') {
+        window.setTimeout(() => {
+          void loadSnapshot().catch(() => {})
+        }, 250)
+      }
+    })
+    return () => {
+      offSnapshot()
+      offProgress?.()
+    }
+  }, [loadSnapshot])
+
   // Query team workspace for connector channel listing
   useEffect(() => {
     let cancelled = false

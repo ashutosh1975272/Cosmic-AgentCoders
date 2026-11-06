@@ -1,9 +1,10 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type {
-  DashboardProject,
-  DashboardProjectDefaults,
-  ProjectSource
+import {
+  type DashboardProject,
+  type DashboardProjectDefaults,
+  type ProjectSource,
+  DASHBOARD_SCHEDULE_INTERVALS
 } from '../../shared/dashboard-contract'
 
 /** Workspace facts discovered when a manual token was validated. */
@@ -41,8 +42,8 @@ const PLAINTEXT_TOKEN_RE = /^xox[a-zA-Z]-[A-Za-z0-9-]+$/
 
 export const DEFAULT_PROJECT_DEFAULTS: DashboardProjectDefaults = {
   allowDms: 'off',
-  scheduleEnabled: false,
-  intervalMinutes: 15,
+  scheduleEnabled: true,
+  intervalMinutes: 0.333,
   backfillHours: 6,
   catchUpCapDays: 7
 }
@@ -166,10 +167,12 @@ export class MonitorStore {
       // Keep the persisted shape small and validated.
       const defaults: DashboardProjectDefaults = {
         allowDms: next.allowDms === 'on' ? 'on' : 'off',
-        scheduleEnabled: next.scheduleEnabled === true,
-        intervalMinutes: ([1, 5, 15, 30, 60] as number[]).includes(next.intervalMinutes)
+        scheduleEnabled: next.scheduleEnabled !== false,
+        intervalMinutes: (DASHBOARD_SCHEDULE_INTERVALS as readonly number[]).includes(
+          next.intervalMinutes
+        )
           ? next.intervalMinutes
-          : 15,
+          : 0.333,
         backfillHours:
           next.backfillHours === 0
             ? 0

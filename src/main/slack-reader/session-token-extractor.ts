@@ -1,4 +1,4 @@
-import type { WebContentsView } from 'electron'
+import { app, session, type WebContentsView } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { log } from '../logging'
@@ -98,74 +98,96 @@ export class SessionTokenExtractor {
   }
 
   /**
-   * Probes the partition's Local Storage leveldb and Cookies on disk.
+   * Resolves the userData path for a partition.
    */
-  extractFromPartitionDisk(partition: string, customUserDataDir?: string): SlackSessionCredentials | null {
+  private resolvePartitionDir(partition: string, customUserDataDir?: string): string | null {
+    const rawPart = partition.replace(/^persist:/, '')
+    let userData = customUserDataDir
+    if (!userData) {
+      try {
+        userData = app?.getPath?.('userData')
+      } catch {
+        // ignore
+      }
+    }
+    if (!userData) return null
+    return path.join(userData, 'Partitions', rawPart)
+  }
+
+  /**
+   * Extracts the xoxc token from the partition's Local Storage leveldb files.
+   */
+  extractTokenFromPartitionDisk(partition: string, customUserDataDir?: string): string | null {
     try {
-      const rawPart = partition.replace(/^persist:/, '')
-      let userData = customUserDataDir
-      if (!userData) {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const electron = require('electron')
-          userData = electron?.app?.getPath?.('userData')
-        } catch {
-          // ignore
-        }
-      }
-      if (!userData) return null
+      const partitionDir = this.resolvePartitionDir(partition, customUserDataDir)
+      if (!partitionDir || !fs.existsSync(partitionDir)) return null
 
-      const partitionDir = path.join(userData, 'Partitions', rawPart)
-      if (!fs.existsSync(partitionDir)) return null
-
-      // 1. Extract xoxc token from Local Storage/leveldb
-      let token = ''
       const ldbDir = path.join(partitionDir, 'Local Storage', 'leveldb')
-      if (fs.existsSync(ldbDir)) {
-        const files = fs.readdirSync(ldbDir)
-        for (const file of files) {
-          if (file.endsWith('.ldb') || file.endsWith('.log')) {
-            try {
-              const content = fs.readFileSync(path.join(ldbDir, file), 'latin1')
-              const match = content.match(/xoxc-[a-zA-Z0-9-]+/)
-              if (match && match[0].length > 40) {
-                token = match[0]
-                break
-              }
-            } catch {
-              // ignore
+      if (!fs.existsSync(ldbDir)) return null
+
+      const files = fs.readdirSync(ldbDir)
+      for (const file of files) {
+        if (file.endsWith('.ldb') || file.endsWith('.log')) {
+          try {
+            const content = fs.readFileSync(path.join(ldbDir, file), 'latin1')
+            const match = content.match(/xoxc-[a-zA-Z0-9-]+/)
+            if (match && match[0].length > 40) {
+              return match[0]
             }
+          } catch {
+            // ignore
           }
         }
       }
-
-      if (!token) return null
-
-      // 2. Extract xoxd cookie from Cookies file
-      let cookie = ''
-      const cookiesPath = path.join(partitionDir, 'Cookies')
-      if (fs.existsSync(cookiesPath)) {
-        try {
-          const content = fs.readFileSync(cookiesPath, 'latin1')
-          const match = content.match(/xoxd-[a-zA-Z0-9%-]+/)
-          if (match && match[0].length > 40) {
-            cookie = match[0]
-          }
-        } catch {
-          // ignore
-        }
-      }
-
-      if (!cookie) return null
-
-      return { token, cookie }
+      return null
     } catch {
       return null
     }
   }
 
   /**
+   * Extracts the xoxd cookie from the partition's Cookies SQLite file on disk.
+   */
+  extractCookieFromPartitionDisk(partition: string, customUserDataDir?: string): string | null {
+    try {
+      const partitionDir = this.resolvePartitionDir(partition, customUserDataDir)
+      if (!partitionDir || !fs.existsSync(partitionDir)) return null
+
+      const cookiesPath = path.join(partitionDir, 'Cookies')
+      if (!fs.existsSync(cookiesPath)) return null
+
+      try {
+        const content = fs.readFileSync(cookiesPath, 'latin1')
+        const match = content.match(/xoxd-[a-zA-Z0-9%-]+/)
+        if (match && match[0].length > 40) {
+          return match[0]
+        }
+      } catch {
+        // ignore
+      }
+      return null
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Probes the partition's Local Storage leveldb and Cookies on disk.
+   */
+  extractFromPartitionDisk(partition: string, customUserDataDir?: string): SlackSessionCredentials | null {
+    const token = this.extractTokenFromPartitionDisk(partition, customUserDataDir)
+    if (!token) return null
+
+    const cookie = this.extractCookieFromPartitionDisk(partition, customUserDataDir)
+    if (!cookie) return null
+
+    return { token, cookie }
+  }
+
+  /**
    * Extracts credentials from an Electron session partition (combining session cookie + disk storage).
+   * Tier 2: session.fromPartition(partition).cookies.get({ name: 'd' }) + disk LevelDB xoxc-
+   * Tier 3: disk Cookies SQLite file + disk LevelDB xoxc-
    */
   async extractFromPartition(
     partition: string,
@@ -174,10 +196,8 @@ export class SessionTokenExtractor {
     try {
       let cookie = ''
       try {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const electron = require('electron')
-        if (electron?.session?.fromPartition) {
-          const sess = electron.session.fromPartition(partition)
+        if (session?.fromPartition) {
+          const sess = session.fromPartition(partition)
           if (sess?.cookies) {
             const cookies = await sess.cookies.get({ name: 'd' })
             const d = cookies.find((c: any) => c.value?.startsWith('xoxd-'))
@@ -190,15 +210,16 @@ export class SessionTokenExtractor {
         // ignore
       }
 
-      const diskCreds = this.extractFromPartitionDisk(partition, customUserDataDir)
-      if (diskCreds) {
-        return {
-          token: diskCreds.token,
-          cookie: cookie || diskCreds.cookie
-        }
+      if (!cookie) {
+        cookie = this.extractCookieFromPartitionDisk(partition, customUserDataDir) || ''
       }
 
-      return null
+      if (!cookie) return null
+
+      const token = this.extractTokenFromPartitionDisk(partition, customUserDataDir)
+      if (!token) return null
+
+      return { token, cookie }
     } catch {
       return null
     }

@@ -3,7 +3,7 @@ import { slackTokenKey } from './slack-throttle'
 import type { InsightEngine } from './insight-engine'
 import { SlackReaderView, type ScrapeStepEvent } from '../slack-reader/slack-reader-view'
 import { sessionTokenExtractor } from '../slack-reader/session-token-extractor'
-import { SlackApiClient } from './slack-api-client'
+import { SlackApiClient, slackUserCache } from './slack-api-client'
 import { partitionForCard, partitionForProfile } from '../profiles/session-partition'
 import { resolveProjectMessageSources, type ResolvedChannel } from './message-sources'
 import { RunLogStore } from './run-log-store'
@@ -123,6 +123,8 @@ export interface DashboardSyncEngineDeps {
   getScrapePersonalDms?: () => boolean | Promise<boolean>
   /** Persist a source's last run so the scheduler survives restarts. */
   onSourceRun?: (sourceId: string, atIso: string) => void
+  /** Invalidate chat service activity cache when new messages arrive */
+  chatService?: { invalidateActivityCache(projectId?: string): void }
 }
 
 export class DashboardSyncEngine {
@@ -138,7 +140,8 @@ export class DashboardSyncEngine {
   private readonly historyReader:
     ((projectId: string) => Promise<InsightHistoryEntry[]>) | undefined
   private readonly viewedStore: { get(projectId: string): Promise<string | null> } | undefined
-  private readonly metricsCache: Map<string, { key: string; value: DashboardMetrics }> = new Map()
+  protected readonly chatService?: { invalidateActivityCache(projectId?: string): void }
+  protected readonly metricsCache: Map<string, { key: string; value: DashboardMetrics }> = new Map()
   protected readonly onSynced: ((snapshots: DashboardProjectSnapshot[]) => void) | undefined
   private readonly getScrapePersonalDms: () => boolean | Promise<boolean>
   private readonly onSourceRun?: (sourceId: string, atIso: string) => void
@@ -175,6 +178,7 @@ export class DashboardSyncEngine {
     this.insightReader = deps.insightReader
     this.historyReader = deps.historyReader
     this.viewedStore = deps.viewedStore
+    this.chatService = deps.chatService
     this.onSynced = deps.onSynced
     this.getScrapePersonalDms = deps.getScrapePersonalDms ?? (() => false)
     this.onSourceRun = deps.onSourceRun
@@ -804,23 +808,27 @@ export class DashboardSyncEngine {
     let channelErrors = 0
 
     const effectiveWorkspaceName = source.workspaceName || source.workspaceId
-    const reader = new SlackReaderView({
-      profileId: source.profileId,
-      projectId: project.id,
-      workspaceId: source.workspaceId,
-      // Run scrape in an isolated background WebContentsView sharing the card partition.
-      // Do NOT borrow the foreground active view so the user's visible Slack tab never reloads or flickers.
-      existingView: null,
-      onEvent: (ev) =>
-        this.scrapeEventListener?.({
-          ...ev,
-          runId,
+    let reader: SlackReaderView | null = null
+    const getOrCreateReader = (): SlackReaderView => {
+      if (!reader) {
+        reader = new SlackReaderView({
+          profileId: source.profileId ?? '',
           projectId: project.id,
-          sourceId: source.id,
-          workspaceName: effectiveWorkspaceName
+          workspaceId: source.workspaceId,
+          existingView: null,
+          onEvent: (ev) =>
+            this.scrapeEventListener?.({
+              ...ev,
+              runId,
+              projectId: project.id,
+              sourceId: source.id,
+              workspaceName: effectiveWorkspaceName
+            })
         })
-    })
-    this.activeWatchReader = reader
+        this.activeWatchReader = reader
+      }
+      return reader
+    }
 
     this.scrapeEventListener?.({
       type: 'run_started',
@@ -839,76 +847,37 @@ export class DashboardSyncEngine {
       partitionForCard(project.id, 'slack'),
       partitionForProfile(source.profileId, 'slack')
     ]
-    const candidateViews = [
+    const existingViews = [
       this.getExistingCardView?.(project.id, 'slack'),
-      this.getExistingBrowserView?.(source.profileId, 'slack'),
-      reader.getView()
+      this.getExistingBrowserView?.(source.profileId, 'slack')
     ].filter(Boolean)
 
     try {
       let targetChannels: ProjectSourceChannel[] = source.channels ?? []
 
-      // Auto-discover the live sidebar so logs can name every channel, but never
-      // turn an unselected channel into a read. The selected set is explicit.
-      try {
-        const discovered = await reader.listChannels()
-        if (discovered.length > 0) {
-          const discoveredIds = new Set(discovered.map((channel) => channel.id))
-          const mapped = discovered.map((ch) => {
-            const kind = channelKind({
-              id: ch.id,
-              name: ch.name,
-              isPrivate: ch.isPrivate,
-              isDm: ch.isDm
-            })
-            const existingCh = source.channels?.find((c) => c.id === ch.id)
-            return {
-              id: ch.id,
-              name: ch.name,
-              isPrivate: ch.isPrivate,
-              isDm: ch.isDm,
-              kind,
-              enabled: selectedChannelIds.has(ch.id),
-              created: ch.created ?? existingCh?.created,
-              memberCount: ch.memberCount ?? existingCh?.memberCount
-            }
-          })
-          const extras = (source.channels ?? [])
-            .filter((ch) => selectedChannelIds.has(ch.id) && !discoveredIds.has(ch.id))
-            .map((ch) => ({ ...ch, enabled: true }))
-          targetChannels = [...mapped, ...extras]
-          // A per-run override must not rewrite the saved default.
-          if (!options?.channelIds?.length && !options?.selectionMode) {
-            await this.mergeSource(project.id, source.id, (current) => ({
-              ...current,
-              channels: targetChannels,
-              updatedAt: new Date().toISOString()
-            }))
-          }
-        }
-      } catch {
-        targetChannels = source.channels ?? []
-      }
-
       if (requestedEngineMode === 'direct_api') {
         try {
-          let creds = await sessionTokenExtractor.extractSlackSessionTokens(candidateViews, cacheKey, {
+          // Zero-DOM: Resolve credentials using 3-tier fallback (memory -> session/disk -> partition disk)
+          // checking candidate partitions directly without instantiating or loading any WebContentsView.
+          let creds = await sessionTokenExtractor.extractSlackSessionTokens(existingViews, cacheKey, {
             partitions: candidatePartitions
           })
 
           if (!creds) {
-            await reader.initialize()
-            const bgView = reader.getView()
+            // Lazy fallback: only instantiate and load a browser view if zero-DOM credential extraction failed
+            const fallbackReader = getOrCreateReader()
+            await fallbackReader.initialize()
+            const bgView = fallbackReader.getView()
             if (bgView && !bgView.webContents.isDestroyed() && !bgView.webContents.getURL().includes('slack.com')) {
               const targetUrl = `https://app.slack.com/client/${source.workspaceId}`
               try {
                 await bgView.webContents.loadURL(targetUrl)
-                await reader.waitForContent(8000)
+                await fallbackReader.waitForContent(8000)
               } catch {
                 // ignore
               }
             }
-            const allCandidates = [bgView, ...candidateViews].filter(Boolean)
+            const allCandidates = [bgView, ...existingViews].filter(Boolean)
             creds = await sessionTokenExtractor.extractSlackSessionTokens(allCandidates, cacheKey, {
               partitions: candidatePartitions
             })
@@ -917,6 +886,11 @@ export class DashboardSyncEngine {
           if (creds) {
             directApiClient = new SlackApiClient(creds)
             activeEngineMode = 'direct_api'
+            if (slackUserCache.size === 0) {
+              await directApiClient.loadWorkspaceUsers().catch(() => {})
+            } else {
+              void directApiClient.loadWorkspaceUsers().catch(() => {})
+            }
             this.logInfo(
               `[sync-engine] direct API session credentials active for ${effectiveWorkspaceName}`
             )
@@ -929,6 +903,50 @@ export class DashboardSyncEngine {
           this.logInfo(
             `[sync-engine] direct API token probe failed, falling back to browser DOM: ${String(tokenErr)}`
           )
+        }
+      }
+
+      // If in browser DOM mode, discover live sidebar channels via the reader
+      if (activeEngineMode === 'browser') {
+        try {
+          const domReader = getOrCreateReader()
+          const discovered = await domReader.listChannels()
+          if (discovered.length > 0) {
+            const discoveredIds = new Set(discovered.map((channel) => channel.id))
+            const mapped = discovered.map((ch) => {
+              const kind = channelKind({
+                id: ch.id,
+                name: ch.name,
+                isPrivate: ch.isPrivate,
+                isDm: ch.isDm
+              })
+              const existingCh = source.channels?.find((c) => c.id === ch.id)
+              return {
+                id: ch.id,
+                name: ch.name,
+                isPrivate: ch.isPrivate,
+                isDm: ch.isDm,
+                kind,
+                enabled: selectedChannelIds.has(ch.id),
+                created: ch.created ?? existingCh?.created,
+                memberCount: ch.memberCount ?? existingCh?.memberCount
+              }
+            })
+            const extras = (source.channels ?? [])
+              .filter((ch) => selectedChannelIds.has(ch.id) && !discoveredIds.has(ch.id))
+              .map((ch) => ({ ...ch, enabled: true }))
+            targetChannels = [...mapped, ...extras]
+            // A per-run override must not rewrite the saved default.
+            if (!options?.channelIds?.length && !options?.selectionMode) {
+              await this.mergeSource(project.id, source.id, (current) => ({
+                ...current,
+                channels: targetChannels,
+                updatedAt: new Date().toISOString()
+              }))
+            }
+          }
+        } catch {
+          targetChannels = source.channels ?? []
         }
       }
 
@@ -1021,15 +1039,10 @@ export class DashboardSyncEngine {
         } else if (isThirtyDays) {
           sinceTs = thirtyDaysAgoTs
         } else if (isOfflineGap) {
-          // Smart 24-40 hour lookback: cover at least 24h, up to 40h (or more if offline for days)
+          // Enforce guaranteed 24-hour lookback window on offline gap (>60s) or startup catch-up
           isSmartCatchUp = true
-          const offlineHours = offlineGapSec / 3600
-          const smartLookbackHours = Math.max(24, Math.min(720, Math.ceil(offlineHours + 2)))
-          const smartFloorTs = nowSec - smartLookbackHours * 3600
-          // Guarantee we cover from cursor - 120s or the smart 24-40h floor, capped by catchUpFloorTs
-          sinceTs = cursor
-            ? Math.max(catchUpFloorTs, Math.min(cursor - 120, smartFloorTs))
-            : Math.max(catchUpFloorTs, smartFloorTs)
+          const twentyFourHoursAgoTs = nowSec - 24 * 3600
+          sinceTs = Math.max(catchUpFloorTs, twentyFourHoursAgoTs)
         } else if (!cursor) {
           sinceTs = backfillHours > 0 ? floorTs : thirtyDaysAgoTs
         } else {
@@ -1079,7 +1092,7 @@ export class DashboardSyncEngine {
                   `[sync-engine] direct API session expired for ${ch.id}, attempting refresh...`
                 )
                 const refreshed = await sessionTokenExtractor.refreshSlackSessionTokens(
-                  candidateViews,
+                  existingViews,
                   cacheKey,
                   { partitions: candidatePartitions }
                 )
@@ -1097,7 +1110,8 @@ export class DashboardSyncEngine {
                   this.logInfo(
                     `[sync-engine] direct API token refresh failed, falling back to browser DOM for ${ch.id}`
                   )
-                  const domResult = await reader.readChannelWindow(ch.id, {
+                  const domReader = getOrCreateReader()
+                  const domResult = await domReader.readChannelWindow(ch.id, {
                     sinceTs,
                     maxScrolls,
                     maxMessages,
@@ -1112,7 +1126,8 @@ export class DashboardSyncEngine {
               }
             }
           } else {
-            const result = await reader.readChannelWindow(ch.id, {
+            const domReader = getOrCreateReader()
+            const result = await domReader.readChannelWindow(ch.id, {
               sinceTs,
               maxScrolls,
               maxMessages,
@@ -1147,6 +1162,9 @@ export class DashboardSyncEngine {
             source: 'client'
           })
           newMessages += append.added
+          if (append.added > 0) {
+            this.chatService?.invalidateActivityCache(project.id)
+          }
 
           const latestTs = messages[messages.length - 1]?.ts
           deltas.push({
@@ -1204,8 +1222,11 @@ export class DashboardSyncEngine {
       this.log(`[dashboard] scrape source ${source.id} error: ${runError}`)
     } finally {
       const cancelled = signal.aborted
-      reader.destroy()
-      if (this.activeWatchReader === reader) this.activeWatchReader = null
+      const activeReader = reader as unknown as SlackReaderView | null
+      if (activeReader) {
+        activeReader.destroy()
+        if (this.activeWatchReader === activeReader) this.activeWatchReader = null
+      }
       this.runControllers.delete(runId)
       this.runProject.delete(runId)
       this.runningSources.delete(source.id)
@@ -1613,26 +1634,25 @@ export class DashboardInsightSyncEngine extends DashboardSyncEngine {
     const result = await super.syncProjectSource(projectId, sourceId, extra)
 
     // Decoupled AI Token Optimization:
-    // Raw Slack messages are polled rapidly (3s, 5s, 10s, 30s) at ZERO AI token cost ($0).
+    // Raw Slack messages are polled rapidly (10s-20s) at ZERO AI token cost ($0).
     // The expensive LLM analysis is ONLY triggered when:
     // 1. Genuine new messages were captured (result.newMessages > 0), OR
-    // 2. Startup catch-up was run (trigger === 'startup' after laptop sleep/boot), OR
-    // 3. User clicked manual scrape, OR
-    // 4. Over 5 minutes elapsed since last AI analysis and force was requested
+    // 2. User clicked manual scrape/refresh ('Sync now' / 'Refresh Insight'), OR
+    // 3. Heartbeat timer (6 hours) expires.
     const now = Date.now()
-    const lastAiTime = this.lastAiAnalysisAt.get(projectId) ?? 0
-    const fiveMinutesMs = 5 * 60 * 1000
+    const lastAiTime = this.lastAiAnalysisAt.get(projectId)
+    const sixHoursMs = 6 * 60 * 60 * 1000
     const hasNewMessages = (result.newMessages ?? 0) > 0
-    const isStartup = extra.trigger === 'startup'
     const isManual = extra.trigger === 'manual'
-    const isCooldownElapsed = now - lastAiTime >= fiveMinutesMs
+    const isHeartbeat = typeof lastAiTime === 'number' && now - lastAiTime >= sixHoursMs
 
-    if (
-      hasNewMessages ||
-      isStartup ||
-      isManual ||
-      (extra.options?.forceGenesis && isCooldownElapsed)
-    ) {
+    if (hasNewMessages) {
+      this.chatService?.invalidateActivityCache(projectId)
+      this.metricsCache.delete(projectId)
+      this.lastResults.delete(projectId)
+    }
+
+    if (hasNewMessages || isManual || isHeartbeat) {
       this.lastAiAnalysisAt.set(projectId, now)
       await this.refreshInsightForProject(projectId, { force: true }).catch((err) => {
         this.logInfo(
@@ -1652,15 +1672,32 @@ export class DashboardInsightSyncEngine extends DashboardSyncEngine {
     projectId: string,
     options?: { force?: boolean }
   ): Promise<DashboardProjectSnapshot | null> {
-    if (!this.insightEngine) return null
     const projects = await this.monitorStore.listProjects()
     const project = projects.find((p) => p.id === projectId)
     if (!project) return null
+
+    if (!this.insightEngine) {
+      const snapshots = await this.buildSnapshot(projectId)
+      const snapshot = snapshots[0] ?? null
+      if (snapshot) {
+        snapshot.lastUpdatedAt = new Date().toISOString()
+        this.lastResults.set(projectId, snapshot)
+        try {
+          this.onSynced?.([snapshot])
+        } catch (err) {
+          this.logInfo(`[dashboard] post-insight hook failed: ${String(err)}`)
+        }
+      }
+      return snapshot
+    }
+
     const token = await this.tokenFor(project).catch(() => null)
     const snapshots = await this.buildSnapshot(projectId)
     const snapshot = snapshots[0]
     if (!snapshot) return null
+    snapshot.lastUpdatedAt = new Date().toISOString()
     const enriched = await this.enrich(project, snapshot, token, options)
+    enriched.lastUpdatedAt = snapshot.lastUpdatedAt
     this.lastResults.set(projectId, enriched)
     try {
       this.onSynced?.([enriched])

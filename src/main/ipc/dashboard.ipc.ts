@@ -70,6 +70,9 @@ import type { DashboardViewedStore } from '../dashboard/viewed-store'
 import { RunLogStore } from '../dashboard/run-log-store'
 import type { DashboardDeltaStore } from '../dashboard/delta-store'
 import { SlackReaderView } from '../slack-reader/slack-reader-view'
+import { sessionTokenExtractor } from '../slack-reader/session-token-extractor'
+import { SlackApiClient } from '../dashboard/slack-api-client'
+import { log } from '../logging'
 
 export interface DashboardIpcDeps {
   monitorStore: MonitorStore
@@ -122,10 +125,15 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
   }
 
   const broadcastSnapshot = async (): Promise<DashboardSnapshot> => {
+    deps.chatService?.invalidateActivityCache()
     const snapshot = await publicSnapshot()
     broadcast(IpcChannels.DashboardSnapshotChanged, snapshot)
     return snapshot
   }
+
+  deps.scheduler.setBroadcastSnapshot?.(async () => {
+    await broadcastSnapshot()
+  })
 
   const publicSnapshot = async (): Promise<DashboardSnapshot> => {
     const projects = await deps.engine.buildSnapshot()
@@ -227,6 +235,49 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
           : null) ??
         deps.getExistingProfileView?.(profileId, 'slack') ??
         null
+
+      // 1. Direct API discovery: Fast, Zero-DOM, queries conversations.list directly
+      const candidatePartitions = [
+        payload.projectId ? `persist:card-${payload.projectId}-slack` : undefined,
+        `persist:profile-${profileId}-slack`,
+        `persist:partition-${profileId}`
+      ].filter(Boolean) as string[]
+
+      const existingViews = existingView ? [existingView] : []
+      const cacheKey = `slack:session:${profileId}:${workspaceId}`
+
+      try {
+        const creds = await sessionTokenExtractor.extractSlackSessionTokens(
+          existingViews,
+          cacheKey,
+          { partitions: candidatePartitions }
+        )
+        if (creds) {
+          const client = new SlackApiClient(creds)
+          // Also warm up workspace user names so user IDs resolve
+          void client.loadWorkspaceUsers().catch(() => {})
+          const discovered = await client.listWorkspaceChannels()
+          if (discovered.length > 0) {
+            return {
+              channels: discovered.map((channel) => ({
+                id: channel.id,
+                name: channel.name,
+                isPrivate: channel.isPrivate,
+                isDm: channel.isDm,
+                kind: channel.kind,
+                enabled: false,
+                memberCount: channel.memberCount
+              }))
+            }
+          }
+        }
+      } catch (err: any) {
+        log.info('[dashboard-ipc] direct API channel discovery fallback to DOM:', {
+          error: err?.message
+        })
+      }
+
+      // 2. Fallback to browser DOM reader if direct API was unable to discover channels
       const reader = new SlackReaderView({
         profileId,
         workspaceId,
@@ -234,6 +285,23 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
         existingView
       })
       try {
+        if (!existingView) {
+          await reader.initialize()
+          const bgView = reader.getView()
+          if (
+            bgView &&
+            !bgView.webContents.isDestroyed() &&
+            !bgView.webContents.getURL().includes('slack.com')
+          ) {
+            const targetUrl = `https://app.slack.com/client/${workspaceId}`
+            try {
+              await bgView.webContents.loadURL(targetUrl)
+              await reader.waitForContent(8000)
+            } catch {
+              // ignore
+            }
+          }
+        }
         const discovered = await reader.listChannels()
         if (discovered.length === 0) {
           return {
@@ -281,6 +349,14 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
         patch
       )
       const snapshot = await broadcastSnapshot()
+
+      // When channels are updated, immediately trigger an instant background scrape of the newly selected channels
+      if (patch.channels) {
+        void deps.engine
+          .syncProjectSource(payload.projectId, payload.sourceId, { trigger: 'manual' })
+          .catch(() => {})
+      }
+
       return { source, snapshot }
     }
   )
@@ -356,6 +432,9 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
         trigger: payload.trigger,
         options: payload.options
       })
+      if (res.newMessages > 0) {
+        deps.chatService?.invalidateActivityCache(payload.projectId)
+      }
       await broadcastSnapshot()
       return res
     }

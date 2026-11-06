@@ -130,5 +130,105 @@ describe('SlackApiClient', () => {
       client.fetchChannelMessages({ channelId: 'C0CF72BSYKT' })
     ).rejects.toThrow('slack conversations.history failed: not_authed')
   })
+
+  it('discovers and sorts public, private, and DM channels using listWorkspaceChannels', async () => {
+    const mockChannelsResponse = {
+      ok: true,
+      channels: [
+        {
+          id: 'D012345678',
+          name: '',
+          is_im: true,
+          user: 'U0C781CFVLK'
+        },
+        {
+          id: 'C099999999',
+          name: 'general',
+          is_channel: true,
+          is_private: false,
+          num_members: 42
+        },
+        {
+          id: 'C088888888',
+          name: 'agentworkprojecttesting',
+          is_channel: true,
+          is_private: true,
+          num_members: 3
+        }
+      ],
+      response_metadata: {}
+    }
+
+    const mockUsersResponse = {
+      ok: true,
+      members: [
+        {
+          id: 'U0C781CFVLK',
+          name: 'ashutosh',
+          real_name: 'Ashutosh',
+          profile: { display_name: 'Ashutosh' }
+        }
+      ]
+    }
+
+    global.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('users.list')) {
+        return Promise.resolve({
+          status: 200,
+          json: () => Promise.resolve(mockUsersResponse)
+        })
+      }
+      return Promise.resolve({
+        status: 200,
+        json: () => Promise.resolve(mockChannelsResponse)
+      })
+    })
+
+    const client = new SlackApiClient(mockCreds)
+    const channels = await client.listWorkspaceChannels()
+
+    expect(channels).toHaveLength(3)
+    // Public & private channels come first alphabetically
+    expect(channels[0].name).toBe('agentworkprojecttesting')
+    expect(channels[0].kind).toBe('private')
+    expect(channels[0].isPrivate).toBe(true)
+
+    expect(channels[1].name).toBe('general')
+    expect(channels[1].kind).toBe('public')
+
+    // DM channel has user resolved display name
+    expect(channels[2].id).toBe('D012345678')
+    expect(channels[2].kind).toBe('dm')
+    expect(channels[2].name).toBe('@Ashutosh')
+  })
+
+  it('loads workspace users and caches display names', async () => {
+    const mockUsersResponse = {
+      ok: true,
+      members: [
+        {
+          id: 'U0USER1',
+          name: 'alice',
+          profile: { display_name: 'Alice W' }
+        },
+        {
+          id: 'U0USER2',
+          name: 'bob',
+          profile: { real_name: 'Bob Builder' }
+        }
+      ]
+    }
+
+    global.fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      json: () => Promise.resolve(mockUsersResponse)
+    } as any)
+
+    const client = new SlackApiClient(mockCreds)
+    const cache = await client.loadWorkspaceUsers()
+
+    expect(cache.get('U0USER1')).toBe('Alice W')
+    expect(cache.get('U0USER2')).toBe('Bob Builder')
+  })
 })
 

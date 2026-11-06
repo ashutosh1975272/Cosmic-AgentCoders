@@ -449,8 +449,8 @@ export interface DashboardMarkViewedPayload {
 
 export type DashboardScheduleKind = 'slack-sync' | 'agent-analysis' | 'daily-recheck'
 
-/** The only intervals the selector offers; sub-minute fast intervals (3s, 5s, 10s, 30s) down to 0.05m. */
-export const DASHBOARD_SCHEDULE_INTERVALS = [0.05, 0.083, 0.167, 0.333, 0.5, 1, 5, 10, 15, 30, 60] as const
+/** The only intervals the selector offers; sub-minute fast intervals (3s, 5s, 10s, 15s, 20s, 30s) down to 0.05m. */
+export const DASHBOARD_SCHEDULE_INTERVALS = [0.05, 0.083, 0.167, 0.25, 0.333, 0.5, 1, 5, 10, 15, 30, 60] as const
 export type DashboardScheduleInterval = (typeof DASHBOARD_SCHEDULE_INTERVALS)[number]
 
 export interface DashboardScheduleSettings {

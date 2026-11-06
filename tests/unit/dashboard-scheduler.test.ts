@@ -498,4 +498,149 @@ describe('DashboardScheduler', () => {
     })
     scheduler.stop()
   })
+
+  it('auto-enables Direct API sources with rapid 20-second interval by default', async () => {
+    let mockNow = T0.getTime()
+    const project = {
+      id: 'proj-rapid',
+      name: 'Project Rapid',
+      sources: [
+        {
+          id: 'src-direct',
+          kind: 'browser',
+          engineMode: 'direct_api',
+          workspaceId: 'T1',
+          profileId: 'prof-1',
+          enabled: true,
+          // scheduleEnabled and scheduleIntervalMinutes omitted - should auto-enable with 0.333m (20s)
+          channels: []
+        }
+      ]
+    } as unknown as DashboardProject
+
+    const syncProjectSource = vi.fn(async () => ({ status: 'success' as const }))
+    const engine = {
+      syncAll: vi.fn(async () => []),
+      syncProjectSource,
+      isSourceRunning: vi.fn(() => false)
+    } as unknown as DashboardSyncEngine
+    const store = new FakeStore()
+    const scheduler = new DashboardScheduler(engine, store, {
+      now: () => mockNow,
+      listProjects: async () => [project]
+    })
+
+    await scheduler.start()
+    // Initial immediate tick at t=0
+    await vi.advanceTimersByTimeAsync(0)
+    expect(syncProjectSource).toHaveBeenCalledTimes(1)
+
+    // Advance 10 seconds (not due yet: interval is 20s)
+    mockNow += 10_000
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(syncProjectSource).toHaveBeenCalledTimes(1)
+
+    // Advance 10 more seconds (total 20s -> due)
+    mockNow += 10_000
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(syncProjectSource).toHaveBeenCalledTimes(2)
+
+    scheduler.stop()
+  })
+
+  it('broadcasts snapshot over IPC when background source sync completes', async () => {
+    const project = {
+      id: 'proj-broadcast',
+      name: 'Project Broadcast',
+      sources: [
+        {
+          id: 'src-broadcast',
+          kind: 'browser',
+          engineMode: 'direct_api',
+          workspaceId: 'T1',
+          profileId: 'prof-1',
+          enabled: true,
+          scheduleEnabled: true,
+          scheduleIntervalMinutes: 0.333,
+          channels: []
+        }
+      ]
+    } as unknown as DashboardProject
+
+    const broadcastSnapshot = vi.fn(async () => {})
+    const syncProjectSource = vi.fn(async () => ({
+      status: 'success' as const,
+      newMessages: 2,
+      channelsRead: 1
+    }))
+    const engine = {
+      syncAll: vi.fn(async () => []),
+      syncProjectSource,
+      isSourceRunning: vi.fn(() => false)
+    } as unknown as DashboardSyncEngine
+    const store = new FakeStore()
+    const scheduler = new DashboardScheduler(engine, store, {
+      now: () => T0.getTime(),
+      listProjects: async () => [project],
+      broadcastSnapshot
+    })
+
+    await scheduler.start()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(syncProjectSource).toHaveBeenCalledTimes(1)
+    expect(broadcastSnapshot).toHaveBeenCalledWith('proj-broadcast')
+
+    scheduler.stop()
+  })
+
+  it('respects 15-second (0.25m) interval for rapid background polling', async () => {
+    let mockNow = T0.getTime()
+    const project = {
+      id: 'proj-15s',
+      name: 'Project 15s',
+      sources: [
+        {
+          id: 'src-15s',
+          kind: 'browser',
+          engineMode: 'direct_api',
+          workspaceId: 'T1',
+          profileId: 'prof-1',
+          enabled: true,
+          scheduleEnabled: true,
+          scheduleIntervalMinutes: 0.25, // 15 seconds
+          channels: []
+        }
+      ]
+    } as unknown as DashboardProject
+
+    const syncProjectSource = vi.fn(async () => ({ status: 'success' as const }))
+    const engine = {
+      syncAll: vi.fn(async () => []),
+      syncProjectSource,
+      isSourceRunning: vi.fn(() => false)
+    } as unknown as DashboardSyncEngine
+    const store = new FakeStore()
+    const scheduler = new DashboardScheduler(engine, store, {
+      now: () => mockNow,
+      listProjects: async () => [project]
+    })
+
+    await scheduler.start()
+    // Initial immediate tick at t=0
+    await vi.advanceTimersByTimeAsync(0)
+    expect(syncProjectSource).toHaveBeenCalledTimes(1)
+
+    // Advance 10 seconds (not due yet: interval is 15s)
+    mockNow += 10_000
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(syncProjectSource).toHaveBeenCalledTimes(1)
+
+    // Advance 5 more seconds (total 15s -> due)
+    mockNow += 5_000
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(syncProjectSource).toHaveBeenCalledTimes(2)
+
+    scheduler.stop()
+  })
 })

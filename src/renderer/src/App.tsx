@@ -301,6 +301,25 @@ function App(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
+    if (!window.api?.dashboard?.onSnapshotChanged) return
+    const offSnapshot = window.api.dashboard.onSnapshotChanged((nextSnapshot) => {
+      useDashboardStore.getState().applySnapshot(nextSnapshot)
+    })
+    const offProgress = window.api.dashboard.onSyncProgress?.((payload) => {
+      useDashboardStore.getState().applyProgress?.(payload)
+      if (payload.phase === 'complete' || payload.phase === 'error') {
+        window.setTimeout(() => {
+          void useDashboardStore.getState().loadSnapshot().catch(() => {})
+        }, 250)
+      }
+    })
+    return () => {
+      offSnapshot()
+      offProgress?.()
+    }
+  }, [])
+
+  useEffect(() => {
     return window.api.profiles.onDeepLink(({ profileId, appId, teamId }) => {
       void (async () => {
         await activateProfile(profileId, viewportBounds())
