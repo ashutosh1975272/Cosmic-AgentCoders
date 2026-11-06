@@ -389,7 +389,8 @@ vi.mock('electron', () => ({
 }))
 
 vi.mock('../../src/main/profiles/session-partition', () => ({
-  partitionForProfile: (profileId: string, app: string) => `persist:${profileId}-${app}`
+  partitionForProfile: (profileId: string, app: string) => `persist:${profileId}-${app}`,
+  partitionForCard: (projectId: string, app: string) => `persist:card-${projectId}-${app}`
 }))
 
 vi.mock('../../src/main/logging', () => ({

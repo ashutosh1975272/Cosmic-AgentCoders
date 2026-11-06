@@ -1,4 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
+import fs from 'node:fs'
+import path from 'node:path'
+import os from 'node:os'
 import {
   SessionTokenExtractor,
   EXTRACT_TOKEN_SCRIPT
@@ -149,5 +152,40 @@ describe('SessionTokenExtractor', () => {
     expect(EXTRACT_TOKEN_SCRIPT).toContain('window.TS')
     expect(EXTRACT_TOKEN_SCRIPT).toContain('localConfig_v2')
   })
+
+  it('extracts tokens directly from partition disk storage when views are missing', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slack-test-'))
+    const partDir = path.join(tmpDir, 'Partitions', 'card-p1')
+    const ldbDir = path.join(partDir, 'Local Storage', 'leveldb')
+    fs.mkdirSync(ldbDir, { recursive: true })
+
+    const sampleToken = 'xoxc-disk-token-1234567890abcdef1234567890abcdef1234567890abcdef'
+    const sampleCookie = 'xoxd-disk-cookie-1234567890abcdef1234567890abcdef1234567890abcdef'
+
+    fs.writeFileSync(path.join(ldbDir, '000001.ldb'), `some_binary_data_${sampleToken}\x00end`)
+    fs.writeFileSync(path.join(partDir, 'Cookies'), `sqlite_header_${sampleCookie}\x00cookie_end`)
+
+    const extractor = new SessionTokenExtractor()
+    const diskRes = extractor.extractFromPartitionDisk('persist:card-p1', tmpDir)
+    expect(diskRes).not.toBeNull()
+    expect(diskRes?.token).toBe(sampleToken)
+    expect(diskRes?.cookie).toBe(sampleCookie)
+
+    // Verify extractSlackSessionTokens falls back to partition disk storage and caches result
+    const fullRes = await extractor.extractSlackSessionTokens([], 'test-cache-key', {
+      partitions: ['persist:card-p1'],
+      userDataDir: tmpDir
+    })
+    expect(fullRes).not.toBeNull()
+    expect(fullRes?.token).toBe(sampleToken)
+    expect(fullRes?.cookie).toBe(sampleCookie)
+
+    // Cached call with no partitions returns cached credentials
+    const cachedRes = await extractor.extractSlackSessionTokens([], 'test-cache-key')
+    expect(cachedRes?.token).toBe(sampleToken)
+
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+  })
 })
+
 

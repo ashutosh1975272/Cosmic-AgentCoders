@@ -1,4 +1,6 @@
 import type { WebContentsView } from 'electron'
+import fs from 'node:fs'
+import path from 'node:path'
 import { log } from '../logging'
 
 export interface SlackSessionCredentials {
@@ -6,6 +8,13 @@ export interface SlackSessionCredentials {
   token: string
   /** Session cookie d starting with xoxd- */
   cookie: string
+}
+
+export interface ExtractTokenOptions {
+  /** Candidate partition names to probe (e.g. persist:card-..., persist:profile-...) */
+  partitions?: string[]
+  /** Custom userData directory override */
+  userDataDir?: string
 }
 
 /**
@@ -89,13 +98,121 @@ export class SessionTokenExtractor {
   }
 
   /**
-   * Extracts xoxc token and xoxd session cookie from a WebContentsView or an array of candidate views.
+   * Probes the partition's Local Storage leveldb and Cookies on disk.
+   */
+  extractFromPartitionDisk(partition: string, customUserDataDir?: string): SlackSessionCredentials | null {
+    try {
+      const rawPart = partition.replace(/^persist:/, '')
+      let userData = customUserDataDir
+      if (!userData) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const electron = require('electron')
+          userData = electron?.app?.getPath?.('userData')
+        } catch {
+          // ignore
+        }
+      }
+      if (!userData) return null
+
+      const partitionDir = path.join(userData, 'Partitions', rawPart)
+      if (!fs.existsSync(partitionDir)) return null
+
+      // 1. Extract xoxc token from Local Storage/leveldb
+      let token = ''
+      const ldbDir = path.join(partitionDir, 'Local Storage', 'leveldb')
+      if (fs.existsSync(ldbDir)) {
+        const files = fs.readdirSync(ldbDir)
+        for (const file of files) {
+          if (file.endsWith('.ldb') || file.endsWith('.log')) {
+            try {
+              const content = fs.readFileSync(path.join(ldbDir, file), 'latin1')
+              const match = content.match(/xoxc-[a-zA-Z0-9-]+/)
+              if (match && match[0].length > 40) {
+                token = match[0]
+                break
+              }
+            } catch {
+              // ignore
+            }
+          }
+        }
+      }
+
+      if (!token) return null
+
+      // 2. Extract xoxd cookie from Cookies file
+      let cookie = ''
+      const cookiesPath = path.join(partitionDir, 'Cookies')
+      if (fs.existsSync(cookiesPath)) {
+        try {
+          const content = fs.readFileSync(cookiesPath, 'latin1')
+          const match = content.match(/xoxd-[a-zA-Z0-9%-]+/)
+          if (match && match[0].length > 40) {
+            cookie = match[0]
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (!cookie) return null
+
+      return { token, cookie }
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Extracts credentials from an Electron session partition (combining session cookie + disk storage).
+   */
+  async extractFromPartition(
+    partition: string,
+    customUserDataDir?: string
+  ): Promise<SlackSessionCredentials | null> {
+    try {
+      let cookie = ''
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const electron = require('electron')
+        if (electron?.session?.fromPartition) {
+          const sess = electron.session.fromPartition(partition)
+          if (sess?.cookies) {
+            const cookies = await sess.cookies.get({ name: 'd' })
+            const d = cookies.find((c: any) => c.value?.startsWith('xoxd-'))
+            if (d?.value) {
+              cookie = d.value
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      const diskCreds = this.extractFromPartitionDisk(partition, customUserDataDir)
+      if (diskCreds) {
+        return {
+          token: diskCreds.token,
+          cookie: cookie || diskCreds.cookie
+        }
+      }
+
+      return null
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Extracts xoxc token and xoxd session cookie from candidate views or partition storage.
    * Checks the cache first if cacheKey is provided.
-   * Returns null if no candidate view yields valid credentials.
+   * Returns null if no candidate yields valid credentials.
    */
   async extractSlackSessionTokens(
     viewOrViews: WebContentsView | null | (WebContentsView | null | undefined)[],
-    cacheKey?: string
+    cacheKey?: string,
+    options?: ExtractTokenOptions
   ): Promise<SlackSessionCredentials | null> {
     if (cacheKey) {
       const cached = this.getCached(cacheKey)
@@ -124,6 +241,20 @@ export class SessionTokenExtractor {
       }
     }
 
+    // Fallback: check partitions directly (in-memory session + partition disk storage)
+    if (options?.partitions?.length) {
+      for (const part of options.partitions) {
+        if (!part) continue
+        const partCreds = await this.extractFromPartition(part, options.userDataDir)
+        if (partCreds) {
+          if (cacheKey) {
+            this.setCached(cacheKey, partCreds)
+          }
+          return partCreds
+        }
+      }
+    }
+
     return null
   }
 
@@ -134,8 +265,8 @@ export class SessionTokenExtractor {
     const sessionObj = view.webContents.session
     if (!sessionObj?.cookies) return null
 
-    const cookies = await sessionObj.cookies.get({ domain: '.slack.com', name: 'd' })
-    let xoxdCookie = cookies.find((c) => c.name === 'd')?.value
+    const cookies = await sessionObj.cookies.get({ name: 'd' })
+    let xoxdCookie = cookies.find((c) => c.value?.startsWith('xoxd-'))?.value
 
     if (!xoxdCookie) {
       const allSlackCookies = await sessionObj.cookies.get({ url: 'https://app.slack.com' })
@@ -172,11 +303,13 @@ export class SessionTokenExtractor {
    */
   async refreshSlackSessionTokens(
     viewOrViews: WebContentsView | null | (WebContentsView | null | undefined)[],
-    cacheKey?: string
+    cacheKey?: string,
+    options?: ExtractTokenOptions
   ): Promise<SlackSessionCredentials | null> {
     if (cacheKey) this.clearCache(cacheKey)
-    return this.extractSlackSessionTokens(viewOrViews, cacheKey)
+    return this.extractSlackSessionTokens(viewOrViews, cacheKey, options)
   }
 }
 
 export const sessionTokenExtractor = new SessionTokenExtractor()
+

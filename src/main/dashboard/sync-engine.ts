@@ -4,6 +4,7 @@ import type { InsightEngine } from './insight-engine'
 import { SlackReaderView, type ScrapeStepEvent } from '../slack-reader/slack-reader-view'
 import { sessionTokenExtractor } from '../slack-reader/session-token-extractor'
 import { SlackApiClient } from './slack-api-client'
+import { partitionForCard, partitionForProfile } from '../profiles/session-partition'
 import { resolveProjectMessageSources, type ResolvedChannel } from './message-sources'
 import { RunLogStore } from './run-log-store'
 import type {
@@ -834,6 +835,10 @@ export class DashboardSyncEngine {
     let activeEngineMode: 'direct_api' | 'browser' = 'browser'
     let directApiClient: SlackApiClient | null = null
     const cacheKey = `slack:${project.id}:${source.workspaceId}`
+    const candidatePartitions = [
+      partitionForCard(project.id, 'slack'),
+      partitionForProfile(source.profileId, 'slack')
+    ]
     const candidateViews = [
       this.getExistingCardView?.(project.id, 'slack'),
       this.getExistingBrowserView?.(source.profileId, 'slack'),
@@ -887,7 +892,9 @@ export class DashboardSyncEngine {
 
       if (requestedEngineMode === 'direct_api') {
         try {
-          let creds = await sessionTokenExtractor.extractSlackSessionTokens(candidateViews, cacheKey)
+          let creds = await sessionTokenExtractor.extractSlackSessionTokens(candidateViews, cacheKey, {
+            partitions: candidatePartitions
+          })
 
           if (!creds) {
             await reader.initialize()
@@ -902,7 +909,9 @@ export class DashboardSyncEngine {
               }
             }
             const allCandidates = [bgView, ...candidateViews].filter(Boolean)
-            creds = await sessionTokenExtractor.extractSlackSessionTokens(allCandidates, cacheKey)
+            creds = await sessionTokenExtractor.extractSlackSessionTokens(allCandidates, cacheKey, {
+              partitions: candidatePartitions
+            })
           }
 
           if (creds) {
@@ -1071,7 +1080,8 @@ export class DashboardSyncEngine {
                 )
                 const refreshed = await sessionTokenExtractor.refreshSlackSessionTokens(
                   candidateViews,
-                  cacheKey
+                  cacheKey,
+                  { partitions: candidatePartitions }
                 )
                 if (refreshed) {
                   directApiClient = new SlackApiClient(refreshed)
