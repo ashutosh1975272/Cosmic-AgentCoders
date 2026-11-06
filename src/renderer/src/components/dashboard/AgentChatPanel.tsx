@@ -859,7 +859,16 @@ export default function AgentChatPanel({
               <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <h3 className="chat-head-title">
-                    Chat with {socialSource.workspaceName || (socialSource.platform === 'teams' ? 'Microsoft Teams' : socialSource.platform === 'whatsapp' ? 'WhatsApp' : 'Slack Workspace')}
+                    Chat with {(() => {
+                      const rawWsName = socialSource.workspaceName?.trim()
+                      return rawWsName && rawWsName.toLowerCase() !== 'agentwork'
+                        ? rawWsName
+                        : socialSource.platform === 'teams'
+                          ? 'Microsoft Teams'
+                          : socialSource.platform === 'whatsapp'
+                            ? 'WhatsApp'
+                            : 'Slack Workspace'
+                    })()}
                     {activeChannel ? ` · ${activeChannel.name.startsWith('@') ? '' : '#'}${activeChannel.name}` : ' · All Channels'}
                   </h3>
                   <span
@@ -912,57 +921,74 @@ export default function AgentChatPanel({
               <span className="chat-head-sub">
                 CrewAI Master Supervisor · Cross-platform agent with direct dispatch to Slack, Teams &amp; WhatsApp
               </span>
-              {sources && sources.length > 0 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
-                  {sources
-                    .filter(
-                      (s) =>
-                        s.enabled !== false &&
-                        s.role !== 'ours' &&
-                        s.workspaceName?.trim().toLowerCase() !== 'agentwork' &&
-                        !s.id?.toLowerCase().includes('agentwork') &&
-                        (s.platform === 'slack' ||
-                          s.platform === 'teams' ||
-                          s.platform === 'whatsapp' ||
-                          s.kind === 'token' ||
-                          (s.kind === 'browser' && !s.url?.includes('google')))
-                    )
-                    .map((s) => {
-                      const plat = (s.platform || 'slack').toLowerCase()
-                      return (
-                        <span
-                          key={s.id}
-                          style={{
-                            fontSize: 10,
-                            fontWeight: 650,
-                            padding: '1px 6px',
-                            borderRadius: 4,
-                            background:
-                              plat === 'slack'
-                                ? 'rgba(168, 85, 247, 0.15)'
-                                : plat === 'teams'
-                                  ? 'rgba(59, 130, 246, 0.15)'
-                                  : 'rgba(34, 197, 94, 0.15)',
-                            color:
-                              plat === 'slack'
-                                ? '#c084fc'
-                                : plat === 'teams'
-                                  ? '#93c5fd'
-                                  : '#86efac',
-                            border:
-                              plat === 'slack'
-                                ? '1px solid rgba(168, 85, 247, 0.3)'
-                                : plat === 'teams'
-                                  ? '1px solid rgba(59, 130, 246, 0.3)'
-                                  : '1px solid rgba(34, 197, 94, 0.3)'
-                          }}
-                        >
-                          {plat === 'slack' ? '⚡ Slack' : plat === 'teams' ? '👥 Teams' : '📱 WhatsApp'}: {s.workspaceName || 'Connected'}
-                        </span>
+              {sources && sources.length > 0 && (() => {
+                const seenChips = new Set<string>()
+                return (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                    {sources
+                      .filter(
+                        (s) =>
+                          s.enabled !== false &&
+                          s.role !== 'ours' &&
+                          (s.platform === 'slack' ||
+                            s.platform === 'teams' ||
+                            s.platform === 'whatsapp' ||
+                            s.kind === 'token' ||
+                            (s.kind === 'browser' && !s.url?.includes('google')))
                       )
-                    })}
-                </div>
-              )}
+                      .filter((s) => {
+                        const plat = (s.platform || 'slack').toLowerCase()
+                        const key = s.workspaceId ? `${plat}:${s.workspaceId}` : s.id
+                        if (seenChips.has(key)) return false
+                        seenChips.add(key)
+                        return true
+                      })
+                      .map((s) => {
+                        const plat = (s.platform || 'slack').toLowerCase()
+                        const rawName = s.workspaceName?.trim()
+                        const chipName =
+                          rawName && rawName.toLowerCase() !== 'agentwork'
+                            ? rawName
+                            : plat === 'teams'
+                              ? 'Teams'
+                              : plat === 'whatsapp'
+                                ? 'WhatsApp'
+                                : 'Slack Workspace'
+                        return (
+                          <span
+                            key={s.id}
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 650,
+                              padding: '1px 6px',
+                              borderRadius: 4,
+                              background:
+                                plat === 'slack'
+                                  ? 'rgba(168, 85, 247, 0.15)'
+                                  : plat === 'teams'
+                                    ? 'rgba(59, 130, 246, 0.15)'
+                                    : 'rgba(34, 197, 94, 0.15)',
+                              color:
+                                plat === 'slack'
+                                  ? '#c084fc'
+                                  : plat === 'teams'
+                                    ? '#93c5fd'
+                                    : '#86efac',
+                              border:
+                                plat === 'slack'
+                                  ? '1px solid rgba(168, 85, 247, 0.3)'
+                                  : plat === 'teams'
+                                    ? '1px solid rgba(59, 130, 246, 0.3)'
+                                    : '1px solid rgba(34, 197, 94, 0.3)'
+                            }}
+                          >
+                            {plat === 'slack' ? '⚡ Slack' : plat === 'teams' ? '👥 Teams' : '📱 WhatsApp'}: {chipName}
+                          </span>
+                        )
+                      })}
+                  </div>
+                )
+              })()}
             </>
           )}
         </div>

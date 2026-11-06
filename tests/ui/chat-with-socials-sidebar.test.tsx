@@ -32,7 +32,7 @@ describe('WorkspaceSidebar: Chat with Socials Dropdown', () => {
       platform: 'slack',
       profileId: 'prof-1',
       workspaceId: 'T_CLIENT_SLACK',
-      workspaceName: 'Slack Workspace',
+      workspaceName: 'AgentWork', // Real team name detected by Slack partition
       channels: [{ id: 'C1', name: 'general', enabled: true }],
       role: 'client',
       enabled: true,

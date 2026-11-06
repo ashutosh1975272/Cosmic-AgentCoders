@@ -300,18 +300,15 @@ export default function WorkspaceSidebar({
   const [globalAccountsOpen, setGlobalAccountsOpen] = useState(true)
   const [socialsDropdownOpen, setSocialsDropdownOpen] = useState(false)
 
-  // Filter connected social media accounts with active session tokens or authenticated cookies
-  // Note: AgentWork is our internal workspace, accessed via the dedicated "Talk to AgentWork" button above
+  // Filter connected social media accounts with active session tokens or authenticated cookies.
+  // Note: Internal team workspaces (role === 'ours') belong to "Talk to AgentWork" above and are excluded.
   const connectedSocialSources = useMemo(() => {
+    const seen = new Set<string>()
     return (sources ?? []).filter((s) => {
       if (s.enabled === false) return false
-      if (
-        s.role === 'ours' ||
-        s.workspaceName?.trim().toLowerCase() === 'agentwork' ||
-        s.id?.toLowerCase().includes('agentwork')
-      ) {
-        return false
-      }
+      // Only internal team workspace is excluded from Socials; client accounts always belong here.
+      if (s.role === 'ours') return false
+
       const p = (s.platform || '').toLowerCase()
       const isSocial =
         p === 'slack' ||
@@ -326,7 +323,13 @@ export default function WorkspaceSidebar({
       // Active session/token check
       const hasToken = s.kind === 'token'
       const hasSession = Boolean(s.workspaceId) || Boolean(s.profileId)
-      return hasToken || hasSession
+      if (!hasToken && !hasSession) return false
+
+      // Deduplicate by platform + workspaceId to prevent duplicate entries
+      const key = s.workspaceId ? `${p}:${s.workspaceId}` : s.id
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
     })
   }, [sources])
 
@@ -1085,7 +1088,15 @@ export default function WorkspaceSidebar({
                               const isSelected = nav.selection === selId
                               const platform = (source.platform || 'slack').toLowerCase()
                               const iconName = platform === 'teams' ? 'users' : platform === 'whatsapp' ? 'message' : 'slack'
-                              const displayName = source.workspaceName || (platform === 'teams' ? 'Microsoft Teams' : platform === 'whatsapp' ? 'WhatsApp' : 'Slack Workspace')
+                              const rawName = source.workspaceName?.trim()
+                              const displayName =
+                                rawName && rawName.toLowerCase() !== 'agentwork'
+                                  ? rawName
+                                  : platform === 'teams'
+                                    ? 'Microsoft Teams'
+                                    : platform === 'whatsapp'
+                                      ? 'WhatsApp'
+                                      : 'Slack Workspace'
                               return (
                                 <button
                                   key={source.id}

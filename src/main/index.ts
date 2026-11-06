@@ -754,7 +754,7 @@ if (!gotSingleInstanceLock) {
                       workspaceId: realTeamId,
                       workspaceName: realTeamName || 'Slack Workspace',
                       channels: [],
-                      role: 'ours',
+                      role: 'client',
                       backfillDays: 7,
                       enabled: true,
                       status: 'connected',
