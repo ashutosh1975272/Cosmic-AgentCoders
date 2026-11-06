@@ -174,18 +174,28 @@ export function shouldAutoReplyToMessage(
 ): { shouldReply: boolean; reason?: 'dm' | 'mention'; channel?: ProjectSourceChannel; source?: ProjectSource } {
   if (msg.isMine) return { shouldReply: false }
 
+  const textLower = (msg.text || '').toLowerCase()
+  // Anti-loop guard: never reply to our own automated reply template
+  if (textLower.includes('thanks for reaching out') && textLower.includes('reviewing this')) {
+    return { shouldReply: false }
+  }
+
   for (const src of project.sources ?? []) {
     for (const ch of src.channels ?? []) {
       if (ch.id === channelId || cleanChannel(ch.name) === cleanChannel(channelId)) {
         if (!ch.autoReply) return { shouldReply: false }
 
         // 1. Direct message (1-on-1 DM): auto-reply immediately
-        if (ch.isDm || ch.kind === 'dm') {
+        const isDm =
+          ch.isDm ||
+          ch.kind === 'dm' ||
+          ch.name.startsWith('@') ||
+          ch.name.startsWith('#@')
+        if (isDm) {
           return { shouldReply: true, reason: 'dm', channel: ch, source: src }
         }
 
         // 2. Group channel: only reply if user's name is mentioned
-        const textLower = msg.text.toLowerCase()
         const isMentioned = selfNames.some((name) => textLower.includes(name.toLowerCase()))
         if (isMentioned) {
           return { shouldReply: true, reason: 'mention', channel: ch, source: src }

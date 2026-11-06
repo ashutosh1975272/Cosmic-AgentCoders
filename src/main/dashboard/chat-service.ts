@@ -530,11 +530,11 @@ export class DashboardChatService {
       }
     }
 
-    // Security check: if this is an automated agent dispatch, verify agentWrite permission
+    // Security check: if this is an automated agent dispatch, verify agentWrite or autoReply permission
     if (payload.isAgent) {
       const allChannels = (project.sources ?? []).flatMap((s) => s.channels ?? [])
       const matched = allChannels.find((c) => c.id === payload.channelId)
-      if (!matched || !matched.agentWrite) {
+      if (!matched || (!matched.agentWrite && !matched.autoReply)) {
         return {
           ok: false,
           code: 'permission_denied',

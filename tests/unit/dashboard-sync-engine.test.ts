@@ -1,5 +1,5 @@
 const fakeVault = { encrypt: (p: string) => Buffer.from(p).toString('base64'), decrypt: (b: string) => Buffer.from(b, 'base64').toString('utf8') }
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DashboardDeltaStore } from '../../src/main/dashboard/delta-store'
 import { DashboardSyncEngine } from '../../src/main/dashboard/sync-engine'
 import { MonitorStore } from '../../src/main/dashboard/monitor-store'
@@ -125,5 +125,68 @@ describe('DashboardSyncEngine', () => {
     const all = await engine.syncAll()
     expect(all).toHaveLength(2)
     expect(all.every((s) => s.syncState === 'idle')).toBe(true)
+  })
+
+  it('dispatches autonomous auto-reply when new messages arrive on autoReply channel', async () => {
+    const { monitors, delta } = await stores()
+    const proj = fakeProject({
+      monitors: [{ channelId: 'C_DM', channelName: '@Ankita Manna' }],
+      sources: [
+        {
+          id: 'src_1',
+          kind: 'browser',
+          platform: 'slack',
+          profileId: 'pf1',
+          workspaceId: 'tt',
+          workspaceName: 'Acme',
+          role: 'client',
+          backfillDays: 1,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          enabled: true,
+          channels: [
+            {
+              id: 'C_DM',
+              name: '@Ankita Manna',
+              isDm: true,
+              enabled: true,
+              autoReply: true
+            }
+          ]
+        }
+      ]
+    })
+    await monitors.upsertProject({ project: proj })
+
+    const sendMessageMock = vi.fn().mockResolvedValue({ ok: true })
+    const chatServiceMock = {
+      invalidateActivityCache: vi.fn(),
+      sendMessage: sendMessageMock
+    }
+
+    const engine = new DashboardSyncEngine({
+      monitorStore: monitors,
+      deltaStore: delta,
+      chatService: chatServiceMock,
+      oauthTokenProvider: { tryGet: async () => 'xoxp' },
+      pollerFactory: () => ({
+        fetchHistory: async () => ({
+          messages: [{ ts: '1793970000.001', user: 'Ankita', text: 'Hello, are you there?' }],
+          hasMore: false
+        })
+      })
+    })
+
+    const snapshot = await engine.syncProject('proj_x')
+    expect(snapshot).not.toBeNull()
+    expect(sendMessageMock).toHaveBeenCalledTimes(1)
+    expect(sendMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: 'proj_x',
+        channelId: 'C_DM',
+        isAgent: true,
+        text: expect.stringContaining('Hi @Ankita! I received your message.')
+      })
+    )
   })
 })

@@ -32,6 +32,7 @@ import type { MonitorStore } from './monitor-store'
 import type { WorkspaceMappingStore } from './workspace-mapping-store'
 import { summarizeProject } from './summary-engine'
 import { computeMetrics } from './metrics'
+import { shouldAutoReplyToMessage } from './agent-action-engine'
 
 export interface DashboardPoller {
   fetchHistory(input: {
@@ -123,8 +124,17 @@ export interface DashboardSyncEngineDeps {
   getScrapePersonalDms?: () => boolean | Promise<boolean>
   /** Persist a source's last run so the scheduler survives restarts. */
   onSourceRun?: (sourceId: string, atIso: string) => void
-  /** Invalidate chat service activity cache when new messages arrive */
-  chatService?: { invalidateActivityCache(projectId?: string): void }
+  /** Invalidate chat service activity cache when new messages arrive and dispatch auto-replies */
+  chatService?: {
+    invalidateActivityCache(projectId?: string): void
+    sendMessage?(payload: {
+      projectId: string
+      channelId: string
+      text: string
+      source?: 'client' | 'ours'
+      isAgent?: boolean
+    }): Promise<{ ok: boolean; error?: string; [key: string]: any }>
+  }
 }
 
 export class DashboardSyncEngine {
@@ -140,7 +150,17 @@ export class DashboardSyncEngine {
   private readonly historyReader:
     ((projectId: string) => Promise<InsightHistoryEntry[]>) | undefined
   private readonly viewedStore: { get(projectId: string): Promise<string | null> } | undefined
-  protected readonly chatService?: { invalidateActivityCache(projectId?: string): void }
+  protected readonly chatService?: {
+    invalidateActivityCache(projectId?: string): void
+    sendMessage?(payload: {
+      projectId: string
+      channelId: string
+      text: string
+      source?: 'client' | 'ours'
+      isAgent?: boolean
+    }): Promise<{ ok: boolean; error?: string; [key: string]: any }>
+  }
+  private readonly repliedMessageTimestamps = new Set<string>()
   protected readonly metricsCache: Map<string, { key: string; value: DashboardMetrics }> = new Map()
   protected readonly onSynced: ((snapshots: DashboardProjectSnapshot[]) => void) | undefined
   private readonly getScrapePersonalDms: () => boolean | Promise<boolean>
@@ -227,7 +247,8 @@ export class DashboardSyncEngine {
   private async syncWorkspace(
     workspace: SyncWorkspace,
     poller: DashboardPoller,
-    historyCache?: CycleHistoryCache
+    historyCache?: CycleHistoryCache,
+    project?: DashboardProject
   ): Promise<DashboardChannelDelta[]> {
     const perChannel: DashboardChannelDelta[] = []
 
@@ -261,6 +282,15 @@ export class DashboardSyncEngine {
         messages: result.messages,
         source: workspace.source
       })
+
+      if (stored.added > 0 && project) {
+        this.chatService?.invalidateActivityCache(project.id)
+        void this.handleAutoReplyForNewMessages(
+          project,
+          monitor.channelId,
+          result.messages.slice(-stored.added)
+        )
+      }
 
       const after = await this.deltaStore.readSnapshotMeta(
         workspace.profileId,
@@ -442,7 +472,8 @@ export class DashboardSyncEngine {
               monitors: project.monitors
             },
             poller,
-            historyCache
+            historyCache,
+            project
           )
         } else if (browserSources.length === 0) {
           throw new Error(
@@ -483,7 +514,8 @@ export class DashboardSyncEngine {
                 monitors: connection.channels
               },
               poller,
-              historyCache
+              historyCache,
+              project
             )
             await this.markTeamStatus('connected', connection.status)
           } catch (err) {
@@ -1164,6 +1196,7 @@ export class DashboardSyncEngine {
           newMessages += append.added
           if (append.added > 0) {
             this.chatService?.invalidateActivityCache(project.id)
+            void this.handleAutoReplyForNewMessages(project, ch.id, messages.slice(-append.added))
           }
 
           const latestTs = messages[messages.length - 1]?.ts
@@ -1352,6 +1385,65 @@ export class DashboardSyncEngine {
       await this.monitorStore.upsertProject({ project: { ...fresh, sources } })
     } catch (err) {
       this.log(`[dashboard] source update failed (${sourceId}): ${String(err)}`)
+    }
+  }
+
+  /**
+   * Autonomous Real-Time Auto-Reply:
+   * Inspects newly ingested messages and dispatches polite responses via Direct API
+   * for 1-on-1 DMs or group channel mentions if autoReply is enabled.
+   */
+  private async handleAutoReplyForNewMessages(
+    project: DashboardProject,
+    channelId: string,
+    newMessages: DashboardStoredMessage[]
+  ): Promise<void> {
+    if (!this.chatService?.sendMessage || !newMessages || newMessages.length === 0) return
+
+    for (const msg of newMessages) {
+      if (!msg.ts || this.repliedMessageTimestamps.has(msg.ts)) continue
+
+      const check = shouldAutoReplyToMessage(
+        project,
+        {
+          text: msg.text || '',
+          userId: msg.user,
+          userName: msg.user
+        },
+        channelId
+      )
+
+      if (check.shouldReply) {
+        this.repliedMessageTimestamps.add(msg.ts)
+        const recipientName = check.channel?.name ? `#${check.channel.name}` : `#${channelId}`
+        const sender = msg.user ? `@${msg.user}` : 'there'
+
+        const replyText =
+          check.reason === 'dm'
+            ? `Hi ${sender}! I received your message. Thanks for reaching out — I am reviewing this and will get back to you shortly.`
+            : `Hello ${sender}! Thanks for mentioning me. Noted, I am looking into this right away.`
+
+        try {
+          const res = await this.chatService.sendMessage({
+            projectId: project.id,
+            channelId,
+            text: replyText,
+            isAgent: true
+          })
+
+          if (res?.ok) {
+            this.log(`[auto-reply] Successfully dispatched automated reply to ${recipientName} (~150ms Direct API)`)
+          } else {
+            this.log(`[auto-reply] Failed to dispatch reply to ${recipientName}: ${res?.error || 'unknown error'}`)
+          }
+        } catch (err) {
+          this.log(
+            `[auto-reply] Error auto-replying to ${recipientName}: ${
+              err instanceof Error ? err.message : String(err)
+            }`
+          )
+        }
+      }
     }
   }
 
