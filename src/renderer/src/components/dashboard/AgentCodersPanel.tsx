@@ -1010,6 +1010,7 @@ export default function AgentCodersPanel({
         >
           {currentMessages.map((msg) => {
             const isUser = msg.senderId === 'user'
+            const isThreadReply = Boolean(msg.parentMessageId)
             return (
               <div
                 key={msg.id}
@@ -1018,9 +1019,29 @@ export default function AgentCodersPanel({
                   maxWidth: '82%',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: 4
+                  gap: 4,
+                  marginLeft: isThreadReply && !isUser ? 20 : 0,
+                  borderLeft: isThreadReply && !isUser ? '2px solid rgba(168, 85, 247, 0.5)' : undefined,
+                  paddingLeft: isThreadReply && !isUser ? 10 : undefined
                 }}
               >
+                {isThreadReply && (
+                  <div
+                    data-testid="threaded-reply-indicator"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      fontSize: 9,
+                      color: '#c084fc',
+                      fontWeight: 650,
+                      marginBottom: -1
+                    }}
+                  >
+                    <span>↳</span>
+                    <span>Threaded follow-up</span>
+                  </div>
+                )}
                 <div
                   style={{
                     display: 'flex',
@@ -1028,11 +1049,81 @@ export default function AgentCodersPanel({
                     gap: 6,
                     alignSelf: isUser ? 'flex-end' : 'flex-start',
                     fontSize: 10,
-                    color: '#94a3b8'
+                    color: '#94a3b8',
+                    flexWrap: 'wrap'
                   }}
                 >
                   <span style={{ fontWeight: 650 }}>{msg.senderName}</span>
                   <span>{msg.timestamp}</span>
+
+                  {/* Provenance Tag */}
+                  {msg.provenance === 'project_chat' && (
+                    <span
+                      data-testid="provenance-project-chat"
+                      style={{
+                        fontSize: 8.5,
+                        fontWeight: 700,
+                        padding: '1px 5px',
+                        borderRadius: 3,
+                        background: 'rgba(59, 130, 246, 0.2)',
+                        color: '#93c5fd',
+                        border: '1px solid rgba(59, 130, 246, 0.4)'
+                      }}
+                      title="Originated from Project Master Chat"
+                    >
+                      [Via Project Chat]
+                    </span>
+                  )}
+                  {msg.provenance === 'agentcoders_inner' && (
+                    <span
+                      data-testid="provenance-dispatched"
+                      style={{
+                        fontSize: 8.5,
+                        fontWeight: 700,
+                        padding: '1px 5px',
+                        borderRadius: 3,
+                        background: 'rgba(168, 85, 247, 0.2)',
+                        color: '#d8b4fe',
+                        border: '1px solid rgba(168, 85, 247, 0.4)'
+                      }}
+                      title="Dispatched to Project Chat"
+                    >
+                      [Dispatched to Project Chat]
+                    </span>
+                  )}
+
+                  {/* Telemetry Badge */}
+                  {msg.telemetry && (
+                    <span
+                      data-testid="message-telemetry"
+                      style={{
+                        fontSize: 8.5,
+                        fontWeight: 700,
+                        padding: '1px 5px',
+                        borderRadius: 3,
+                        background: 'rgba(34, 197, 94, 0.15)',
+                        color: '#86efac',
+                        border: '1px solid rgba(34, 197, 94, 0.3)'
+                      }}
+                      title={`Tokens: ${msg.telemetry.promptTokens} in / ${msg.telemetry.completionTokens} out`}
+                    >
+                      ⏱️ {(msg.telemetry.executionTimeMs / 1000).toFixed(1)}s · 🪙 ~{msg.telemetry.estimatedTokens} tokens
+                    </span>
+                  )}
+
+                  {/* Thread Identifier */}
+                  {msg.threadId && (
+                    <span
+                      data-testid="message-thread-tag"
+                      style={{
+                        fontSize: 8.5,
+                        color: '#94a3b8'
+                      }}
+                    >
+                      💬 #{msg.threadId.slice(-4)}
+                    </span>
+                  )}
+
                   {msg.assignedFromHead && (
                     <span
                       style={{

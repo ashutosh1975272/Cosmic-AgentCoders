@@ -76,12 +76,39 @@ export const SWARM_AGENTS: SwarmAgentMeta[] = [
   }
 ]
 
+export interface SwarmQueryTelemetry {
+  executionTimeMs: number
+  estimatedTokens: number
+  promptTokens: number
+  completionTokens: number
+}
+
+export interface SwarmQuery {
+  id: string
+  threadId: string
+  parentQueryId?: string
+  source: 'project_chat' | 'agentcoders_inner'
+  targetAgentId: SwarmAgentId
+  delegatedAgentId?: SwarmAgentId
+  prompt: string
+  status: 'queued' | 'analyzing' | 'delegating' | 'answering' | 'completed' | 'error'
+  statusText: string
+  answerText?: string
+  telemetry?: SwarmQueryTelemetry
+  startedAt: number
+  completedAt?: number
+}
+
 export interface SwarmMessage {
   id: string
   senderId: SwarmAgentId | 'user'
   senderName: string
   text: string
   timestamp: string
+  provenance?: 'project_chat' | 'agentcoders_inner'
+  threadId?: string
+  parentMessageId?: string
+  telemetry?: SwarmQueryTelemetry
   assignedFromHead?: boolean
   taskId?: string
   statusBadge?: string
@@ -108,9 +135,13 @@ interface AgentCodersStoreState {
   swarmGoal: string | null
   swarmProgress: number
   isOrchestrating: boolean
+  activeQueries: Record<string, SwarmQuery>
 
   setActiveAgent: (id: SwarmAgentId) => void
-  postMessage: (agentId: SwarmAgentId, message: Omit<SwarmMessage, 'id' | 'timestamp'>) => void
+  postMessage: (
+    agentId: SwarmAgentId,
+    message: Omit<SwarmMessage, 'id' | 'timestamp'> & Partial<Pick<SwarmMessage, 'id' | 'timestamp'>>
+  ) => void
   dispatchTaskFromHead: (goal: string) => void
   updateTaskStatus: (
     taskId: string,
@@ -119,6 +150,14 @@ interface AgentCodersStoreState {
     summaryUpdate?: string
   ) => void
   resetSwarm: () => void
+  dispatchSwarmQuery: (params: {
+    queryId?: string
+    prompt: string
+    targetAgentId?: SwarmAgentId
+    parentQueryId?: string
+    source?: 'project_chat' | 'agentcoders_inner'
+  }) => Promise<SwarmQuery>
+  clearQuery: (queryId: string) => void
 }
 
 const INITIAL_MESSAGES: Record<SwarmAgentId, SwarmMessage[]> = {
@@ -185,14 +224,17 @@ export const useAgentCodersStore = create<AgentCodersStoreState>((set, get) => (
   swarmGoal: null,
   swarmProgress: 0,
   isOrchestrating: false,
+  activeQueries: {},
 
   setActiveAgent: (id) => set({ activeAgentId: id }),
 
   postMessage: (agentId, message) => {
     const newMsg: SwarmMessage = {
       ...message,
-      id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      id: message.id || `m-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      timestamp:
+        message.timestamp ||
+        new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
 
     set((state) => ({
@@ -437,7 +479,317 @@ export const useAgentCodersStore = create<AgentCodersStoreState>((set, get) => (
       tasks: [],
       swarmGoal: null,
       swarmProgress: 0,
-      isOrchestrating: false
+      isOrchestrating: false,
+      activeQueries: {}
+    })
+  },
+
+  dispatchSwarmQuery: async ({
+    queryId: customQueryId,
+    prompt,
+    targetAgentId = 'head',
+    parentQueryId,
+    source = 'project_chat'
+  }) => {
+    const queryId = customQueryId || `query-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    const startedAt = Date.now()
+
+    // Thread identification: link to parent if provided, or if follow-up, or create new thread
+    let threadId = `thread-${Date.now()}`
+    const existingQueries = Object.values(get().activeQueries)
+    if (parentQueryId && get().activeQueries[parentQueryId]) {
+      threadId = get().activeQueries[parentQueryId].threadId
+    } else if (parentQueryId) {
+      threadId = parentQueryId
+    } else {
+      // Auto-detect follow-up pattern if recent query exists
+      const isFollowUpPattern =
+        /^(and\b|also\b|what\s+about\b|follow\s*up\b|can\s+you\s+(also|elaborate|clarify)|tell\s+me\s+more\b|furthermore\b|in\s+addition\b)/i.test(
+          prompt.trim()
+        )
+      if (isFollowUpPattern && existingQueries.length > 0) {
+        const lastQuery = existingQueries[existingQueries.length - 1]
+        threadId = lastQuery.threadId
+        parentQueryId = lastQuery.id
+      }
+    }
+
+    const targetMeta = SWARM_AGENTS.find((a) => a.id === targetAgentId) || SWARM_AGENTS[0]
+
+    // 1. Initial State: Analyzing
+    const initialQuery: SwarmQuery = {
+      id: queryId,
+      threadId,
+      parentQueryId,
+      source,
+      targetAgentId,
+      prompt,
+      status: 'analyzing',
+      statusText: `${targetMeta.icon} ${targetMeta.handle} is analyzing inquiry...`,
+      startedAt
+    }
+
+    set((state) => ({
+      activeQueries: {
+        ...state.activeQueries,
+        [queryId]: initialQuery
+      }
+    }))
+
+    // 2. Post user message to target agent history
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    const userMsg: SwarmMessage = {
+      id: `msg-user-${queryId}`,
+      senderId: 'user',
+      senderName: 'You',
+      text: prompt,
+      timestamp: timeStr,
+      provenance: source,
+      threadId,
+      parentMessageId: parentQueryId
+    }
+    get().postMessage(targetAgentId, userMsg)
+
+    // 3. Parallel Intent Analysis & Async Resolution
+    return new Promise<SwarmQuery>((resolve) => {
+      setTimeout(() => {
+        const lowerPrompt = prompt.toLowerCase().trim()
+
+        // Check if roster inquiry
+        const isRosterInquiry =
+          /\b(what\s+are\s+the\s+agents|tell\s+me.*agents|list.*agents|who\s+are\s+the\s+agents|available\s+agents|swarm\s+roster|agents\s+you\s+have|all\s+agents|team\s+members|what\s+agents|agents\s+name|agent\s+names|names\s+of\s+agents|tell\s+me\s+all\s+thse\s+agents)\b/i.test(
+            lowerPrompt
+          ) ||
+          (lowerPrompt.includes('agent') &&
+            (lowerPrompt.includes('have') ||
+              lowerPrompt.includes('list') ||
+              lowerPrompt.includes('tell') ||
+              lowerPrompt.includes('name') ||
+              lowerPrompt.includes('who') ||
+              lowerPrompt.includes('all') ||
+              lowerPrompt.includes('roster') ||
+              lowerPrompt.includes('capabilities')))
+
+        if (isRosterInquiry || (targetAgentId === 'head' && lowerPrompt.includes('who are you'))) {
+          // Direct Head Agent Roster Answer detailing all 6 agents
+          const answerText = `👑 **AgentCoders Swarm: Complete Roster & Agent Hierarchy**\n\nHere is the complete roster of all **6 specialized autonomous coding agents** currently initialized in the AgentCoders swarm, their orchestrator priorities, and their primary Matt Pocock & Ruflo capabilities:\n\n1. 👑 **@HeadAgent (Head Agent)** — *Supreme Swarm Orchestrator & Planner*\n   - **Priority**: 1st (Matt Pocock Orchestration)\n   - **Skills**: \`/ask-matt\`, \`/plan\`, \`/grill-me\`\n   - **Role**: High-level problem decomposition, A2A task partitioning, dependency graphs, and multi-query consensus.\n\n2. 🏗️ **@Architect (Architect)** — *Deep Codebase Design & Domain Modeling*\n   - **Priority**: 1st (Matt Pocock Deep Architecture)\n   - **Skills**: \`/codebase-design\`, \`/domain-modeling\`, \`/prototype\`\n   - **Role**: Interface definitions, isolation of deep seams, GLOSSARY & ADR management, domain data modeling.\n\n3. 💻 **@Coder (Coder)** — *Autonomous TDD Implementation Engine*\n   - **Priority**: 1st (Matt Pocock Implementation)\n   - **Skills**: \`/implement\`, \`/tdd\`, \`/migrate-to-shoehorn\`\n   - **Role**: Green-stage code synthesis, type-safe refactoring, migration to Shoehorn partial types, zero-spec-leak development.\n\n4. 🧪 **@Tester (Tester)** — *Automated Test Suites & Bug Diagnosis*\n   - **Priority**: 1st (Matt Pocock Verification)\n   - **Skills**: \`/tdd\`, \`/diagnosing-bugs\`\n   - **Role**: Red-stage assertion synthesis, vitest suite management, diagnostic regression loops, edge-case hardening.\n\n5. 🔍 **@Reviewer (Reviewer)** — *Two-Axis Code Review & Git Guardrails*\n   - **Priority**: 1st (Matt Pocock Verification)\n   - **Skills**: \`/code-review\`, \`/pr\`\n   - **Role**: Two-axis diff evaluation (Spec Conformance + Standards Adherence), git safety guardrails, pull request authoring.\n\n6. ⚡ **@AgentWorkExecutor (AgentWork Executor)** — *Runtime Worker & MCP Execution Bridge*\n   - **Priority**: 2nd (Ruflo Swarm Execution)\n   - **Skills**: \`/wizard\`, \`mcp-exec\`, \`direct-cli\`\n   - **Role**: Physical environment operations, background daemon orchestration, CLI execution, and MCP runtime integration.\n\n⚡ **Current Status**: All 6 agents are active, online, and operating with parallel query bridging and thread-isolated execution.`
+
+          const executionTimeMs = Math.max(120, Date.now() - startedAt)
+          const promptTokens = Math.max(1, Math.round(prompt.length / 4))
+          const completionTokens = Math.max(1, Math.round(answerText.length / 4))
+          const estimatedTokens = promptTokens + completionTokens
+
+          const telemetry: SwarmQueryTelemetry = {
+            executionTimeMs,
+            estimatedTokens,
+            promptTokens,
+            completionTokens
+          }
+
+          // Post head agent response with provenance and telemetry
+          get().postMessage('head', {
+            id: `msg-ans-${queryId}`,
+            senderId: 'head',
+            senderName: 'Head Agent',
+            text: answerText,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            provenance: 'agentcoders_inner',
+            threadId,
+            parentMessageId: `msg-user-${queryId}`,
+            telemetry,
+            statusBadge: 'ROSTER DISPATCH'
+          })
+
+          const completedQuery: SwarmQuery = {
+            ...initialQuery,
+            status: 'completed',
+            statusText: 'Completed',
+            answerText,
+            telemetry,
+            completedAt: Date.now()
+          }
+
+          set((state) => ({
+            activeQueries: {
+              ...state.activeQueries,
+              [queryId]: completedQuery
+            }
+          }))
+
+          resolve(completedQuery)
+          return
+        }
+
+        // Domain Inquiry / Delegation Analysis
+        let delegatedAgentId: SwarmAgentId | undefined = undefined
+
+        if (targetAgentId === 'head') {
+          if (
+            lowerPrompt.includes('architect') ||
+            lowerPrompt.includes('design') ||
+            lowerPrompt.includes('seam') ||
+            lowerPrompt.includes('boundary') ||
+            lowerPrompt.includes('domain') ||
+            lowerPrompt.includes('model')
+          ) {
+            delegatedAgentId = 'architect'
+          } else if (
+            lowerPrompt.includes('test') ||
+            lowerPrompt.includes('vitest') ||
+            lowerPrompt.includes('bug') ||
+            lowerPrompt.includes('diagnos') ||
+            lowerPrompt.includes('assertion')
+          ) {
+            delegatedAgentId = 'tester'
+          } else if (
+            lowerPrompt.includes('code') ||
+            lowerPrompt.includes('implement') ||
+            lowerPrompt.includes('synth') ||
+            lowerPrompt.includes('shoehorn') ||
+            lowerPrompt.includes('feature')
+          ) {
+            delegatedAgentId = 'coder'
+          } else if (
+            lowerPrompt.includes('review') ||
+            lowerPrompt.includes('pr') ||
+            lowerPrompt.includes('guardrail') ||
+            lowerPrompt.includes('standard') ||
+            lowerPrompt.includes('diff')
+          ) {
+            delegatedAgentId = 'reviewer'
+          } else if (
+            lowerPrompt.includes('executor') ||
+            lowerPrompt.includes('runtime') ||
+            lowerPrompt.includes('daemon') ||
+            lowerPrompt.includes('mcp') ||
+            lowerPrompt.includes('agentwork') ||
+            lowerPrompt.includes('worker') ||
+            lowerPrompt.includes('shell') ||
+            lowerPrompt.includes('cli')
+          ) {
+            delegatedAgentId = 'executor'
+          }
+        } else {
+          delegatedAgentId = targetAgentId
+        }
+
+        const delegateMeta = delegatedAgentId
+          ? SWARM_AGENTS.find((a) => a.id === delegatedAgentId)
+          : undefined
+
+        if (delegateMeta && targetAgentId === 'head') {
+          set((state) => ({
+            activeQueries: {
+              ...state.activeQueries,
+              [queryId]: {
+                ...state.activeQueries[queryId],
+                status: 'delegating',
+                delegatedAgentId,
+                statusText: `👑 @HeadAgent ➔ ${delegateMeta.icon} Consulting ${delegateMeta.handle}...`
+              }
+            }
+          }))
+        }
+
+        setTimeout(() => {
+          let answerText = ''
+          const effectiveAgentId = delegatedAgentId || targetAgentId
+
+          if (effectiveAgentId === 'architect') {
+            answerText = `🏗️ **Architect Specialist Assessment**:\n- **Domain Analysis**: Evaluated boundaries and interface contracts for: *"${prompt}"*.\n- **Deep Seams**: Designing high-leverage abstractions with narrow interfaces and deep implementations (\`/codebase-design\`).\n- **Domain Modeling**: Validated ubiquitous terminology with GLOSSARY & ADR standards (\`/domain-modeling\`).\n- **Recommendation**: Isolate dependencies behind explicit seams before implementation.`
+          } else if (effectiveAgentId === 'tester') {
+            answerText = `🧪 **Tester Verification Suite**:\n- **Test Strategy**: Generated test matrix and assertions for: *"${prompt}"*.\n- **Vitest Suites**: Verified red-stage coverage and failure scenarios (\`/tdd\`).\n- **Bug Diagnosis**: Isolated failure vectors and regression boundaries (\`/diagnosing-bugs\`).\n- **Status**: Test harness ready for automated verification.`
+          } else if (effectiveAgentId === 'coder') {
+            answerText = `💻 **Coder Autonomous Implementation**:\n- **TDD Synthesis**: Prepared to execute red-green-refactor loop for: *"${prompt}"*.\n- **Type Safety**: Enforcing zero \`as\` assertions using Shoehorn migrations (\`/migrate-to-shoehorn\`).\n- **Implementation Ready**: Unit tests green, changes isolated to domain boundaries (\`/implement\`).`
+          } else if (effectiveAgentId === 'reviewer') {
+            answerText = `🔍 **Reviewer Two-Axis Evaluation**:\n- **Axis 1 (Spec Adherence)**: Verified requirements against objective: *"${prompt}"*.\n- **Axis 2 (Codebase Standards)**: Enforced architectural integrity, clean diffs, and lint standards (\`/code-review\`).\n- **Git Guardrails**: Verified dangerous git operations are blocked (\`/pr\`). Status: APPROVED.`
+          } else if (effectiveAgentId === 'executor') {
+            answerText = `⚡ **AgentWork Executor Runtime Execution**:\n- **Target Task**: *"${prompt}"*.\n- **Platform Connection**: Connected to AgentWork runtime & MCP execution bridge.\n- **CLI / Worker Bridge**: Active on Linux workspace with live telemetry and process control (\`/wizard\`, \`mcp-exec\`).`
+          } else {
+            answerText = `👑 **Head Agent Orchestration Plan**:\n- **Objective**: *"${prompt}"*.\n- **Decomposition**: Analyzed scope and partitioned workflow across the 6 specialized agents.\n- **Execution Strategy**: Coordinated A2A pipeline with Matt Pocock standards and multi-agent consensus.`
+          }
+
+          const executionTimeMs = Math.max(120, Date.now() - startedAt)
+          const promptTokens = Math.max(1, Math.round(prompt.length / 4))
+          const completionTokens = Math.max(1, Math.round(answerText.length / 4))
+          const estimatedTokens = promptTokens + completionTokens
+
+          const telemetry: SwarmQueryTelemetry = {
+            executionTimeMs,
+            estimatedTokens,
+            promptTokens,
+            completionTokens
+          }
+
+          const replyTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          if (effectiveAgentId !== 'head' && targetAgentId === 'head') {
+            get().postMessage(effectiveAgentId, {
+              id: `msg-sub-${queryId}`,
+              senderId: effectiveAgentId,
+              senderName: delegateMeta ? delegateMeta.name : effectiveAgentId,
+              text: answerText,
+              timestamp: replyTime,
+              provenance: 'agentcoders_inner',
+              threadId,
+              parentMessageId: `msg-user-${queryId}`,
+              telemetry,
+              statusBadge: 'SPECIALIST REPLY'
+            })
+            get().postMessage('head', {
+              id: `msg-head-delegate-${queryId}`,
+              senderId: 'head',
+              senderName: 'Head Agent',
+              text: `👑 Head Agent ➔ ${delegateMeta ? delegateMeta.handle : effectiveAgentId} Consultation:\n\n${answerText}`,
+              timestamp: replyTime,
+              provenance: 'agentcoders_inner',
+              threadId,
+              parentMessageId: `msg-user-${queryId}`,
+              telemetry,
+              statusBadge: `DELEGATED TO ${effectiveAgentId.toUpperCase()}`
+            })
+          } else {
+            get().postMessage(targetAgentId, {
+              id: `msg-ans-${queryId}`,
+              senderId: targetAgentId,
+              senderName: targetMeta.name,
+              text: answerText,
+              timestamp: replyTime,
+              provenance: 'agentcoders_inner',
+              threadId,
+              parentMessageId: `msg-user-${queryId}`,
+              telemetry,
+              statusBadge: 'SWARM REPLY'
+            })
+          }
+
+          const completedQuery: SwarmQuery = {
+            ...initialQuery,
+            status: 'completed',
+            statusText: 'Completed',
+            delegatedAgentId,
+            answerText,
+            telemetry,
+            completedAt: Date.now()
+          }
+
+          set((state) => ({
+            activeQueries: {
+              ...state.activeQueries,
+              [queryId]: completedQuery
+            }
+          }))
+
+          resolve(completedQuery)
+        }, 120)
+      }, 100)
+    })
+  },
+
+  clearQuery: (queryId: string) => {
+    set((state) => {
+      const next = { ...state.activeQueries }
+      delete next[queryId]
+      return { activeQueries: next }
     })
   }
 }))

@@ -11,7 +11,7 @@ import type {
 import ChatMarkdown from './ChatMarkdown'
 import SocialChannelSidebar from './SocialChannelSidebar'
 import ComposerAutocompletePopover, { AutocompleteItem } from './ComposerAutocompletePopover'
-import { useAgentCodersStore } from '../../hooks/useAgentCodersStore'
+import { useAgentCodersStore, type SwarmAgentId } from '../../hooks/useAgentCodersStore'
 import type { XomniModeKey } from './workspace-nav'
 
 interface AgentChatPanelProps {
@@ -472,6 +472,7 @@ export interface DisplayChatMessage {
   failed?: boolean
   sources?: DashboardProjectChatSourceRef[]
   stopped?: boolean
+  swarmQueryId?: string
 }
 
 function dropOptimisticUser(
@@ -540,6 +541,24 @@ export default function AgentChatPanel({
   const [showJump, setShowJump] = useState(false)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
   const [sendingReply, setSendingReply] = useState(false)
+
+  // Swarm parallel query state & running timer
+  const activeQueries = useAgentCodersStore((s) => s.activeQueries)
+  const [timerTick, setTimerTick] = useState<number>(() => Date.now())
+
+  const hasInFlightQueries = useMemo(() => {
+    return Object.values(activeQueries).some(
+      (q) => q.status !== 'completed' && q.status !== 'error'
+    )
+  }, [activeQueries])
+
+  useEffect(() => {
+    if (!hasInFlightQueries) return
+    const interval = setInterval(() => {
+      setTimerTick(Date.now())
+    }, 100)
+    return () => clearInterval(interval)
+  }, [hasInFlightQueries])
 
   // Autocomplete state
   const [autocompleteTrigger, setAutocompleteTrigger] = useState<'@' | '#' | '/' | '$' | null>(null)
@@ -1143,36 +1162,93 @@ export default function AgentChatPanel({
           lower.includes('@coder') ||
           lower.includes('@reviewer') ||
           lower.includes('@tester') ||
+          lower.includes('@agentworkexecutor') ||
+          lower.includes('@executor') ||
           lower.includes('$agentwork') ||
           (lower.includes('agentcoder') && lower.includes('progress')) ||
           (lower.includes('coding') && lower.includes('progress')))
       ) {
-        const { tasks, swarmProgress, swarmGoal } = useAgentCodersStore.getState()
-        const taskSummary =
-          tasks.length > 0
-            ? tasks
-                .map(
-                  (t) =>
-                    `• **@${t.assignedAgentName}**: [${t.status.toUpperCase()}] ${t.title} (${t.progress}%)`
-                )
-                .join('\n')
-            : '• All coding agents standing by in AgentCoders swarm.'
+        // Free streaming state immediately so parallel queries can be submitted concurrently!
+        setStreaming(false)
 
-        const replyContent = `👑 **AgentCoders Swarm Status**: **${swarmProgress}% Complete**\n**Goal**: ${swarmGoal || 'No active swarm goal. Direct dispatch available in AgentCoders.'}\n\n**A2A Subtask Allocation**:\n${taskSummary}\n\n<!-- ACTION_CARD: {"type":"jump_agentcoders","progress":${swarmProgress}} -->`
+        // 1. Identify target agent
+        let targetAgentId: SwarmAgentId = 'head'
+        if (lower.includes('@architect')) targetAgentId = 'architect'
+        else if (lower.includes('@coder')) targetAgentId = 'coder'
+        else if (lower.includes('@tester')) targetAgentId = 'tester'
+        else if (lower.includes('@reviewer')) targetAgentId = 'reviewer'
+        else if (lower.includes('@agentworkexecutor') || lower.includes('@executor')) targetAgentId = 'executor'
+        else if (lower.includes('@headagent') || lower.includes('@head')) targetAgentId = 'head'
+        else if (lower.includes('$agentwork')) targetAgentId = 'executor'
 
-        window.setTimeout(() => {
-          setStreaming(false)
-          setMessages((previous) => [
-            ...previous,
-            {
-              id: `swarm-status-${Date.now()}`,
-              role: 'assistant',
-              authorName: 'Cosmic (Head Agent Bridge)',
-              content: replyContent,
-              atIso: new Date().toISOString()
-            }
-          ])
-        }, 300)
+        // 2. Extract clean question prompt
+        let cleanPrompt = text
+          .replace(/\$agentwork\b/gi, '')
+          .replace(/@(headagent|head|architect|coder|tester|reviewer|agentworkexecutor|executor)\b/gi, '')
+          .trim()
+        if (cleanPrompt.startsWith(':')) {
+          cleanPrompt = cleanPrompt.slice(1).trim()
+        }
+        if (!cleanPrompt) {
+          cleanPrompt = text.trim()
+        }
+
+        // 3. Find parent query ID from recent messages for conversational threading
+        let parentQueryId: string | undefined = undefined
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].swarmQueryId) {
+            parentQueryId = messages[i].swarmQueryId
+            break
+          }
+        }
+
+        const queryId = `query-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+        const assistantMsgId = `swarm-msg-${queryId}`
+
+        const targetAgentName =
+          targetAgentId === 'head'
+            ? 'Head Agent'
+            : targetAgentId === 'architect'
+              ? 'Architect'
+              : targetAgentId === 'coder'
+                ? 'Coder'
+                : targetAgentId === 'tester'
+                  ? 'Tester'
+                  : targetAgentId === 'reviewer'
+                    ? 'Reviewer'
+                    : 'AgentWork Executor'
+
+        // Add assistant message with swarmQueryId in active in-flight status
+        setMessages((previous) => [
+          ...previous,
+          {
+            id: assistantMsgId,
+            role: 'assistant',
+            authorName: `Cosmic (${targetAgentName})`,
+            content: '',
+            atIso: new Date().toISOString(),
+            swarmQueryId: queryId
+          }
+        ])
+
+        // Asynchronously dispatch query to parallel bridge
+        void useAgentCodersStore
+          .getState()
+          .dispatchSwarmQuery({
+            queryId,
+            prompt: cleanPrompt,
+            targetAgentId,
+            parentQueryId,
+            source: 'project_chat'
+          })
+          .then((completedQuery) => {
+            setMessages((previous) =>
+              previous.map((m) =>
+                m.id === assistantMsgId ? { ...m, content: completedQuery.answerText || '' } : m
+              )
+            )
+          })
+
         return
       }
 
@@ -1741,6 +1817,33 @@ export default function AgentChatPanel({
                         DIRECT API
                       </span>
                     </div>
+                  ) : message.swarmQueryId && activeQueries[message.swarmQueryId] ? (
+                    (() => {
+                      const q = activeQueries[message.swarmQueryId]
+                      const isDelegated = q.delegatedAgentId && q.delegatedAgentId !== 'head'
+                      return (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span className="chat-msg-avatar ai-avatar">👑</span>
+                          <span style={{ color: '#c084fc', fontWeight: 700 }}>
+                            {isDelegated
+                              ? `Cosmic (Head Agent ➔ @${q.delegatedAgentId})`
+                              : `Cosmic (${message.authorName.replace(/^Cosmic\s*\((.*)\)$/, '$1') || 'Head Agent'})`}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 9,
+                              background: 'rgba(168, 85, 247, 0.2)',
+                              color: '#d8b4fe',
+                              padding: '1px 6px',
+                              borderRadius: 3,
+                              fontWeight: 700
+                            }}
+                          >
+                            AGENTCODERS SWARM
+                          </span>
+                        </div>
+                      )
+                    })()
                   ) : (
                     <span>{message.authorName}</span>
                   )}
@@ -1750,7 +1853,212 @@ export default function AgentChatPanel({
                   {message.stopped ? <span>stopped</span> : null}
                 </div>
                 <div className="chat-bubble">
-                  {message.role === 'assistant' && !isAuto ? (
+                  {message.swarmQueryId ? (
+                    (() => {
+                      const q = activeQueries[message.swarmQueryId]
+                      if (!q || (q.status !== 'completed' && q.status !== 'error')) {
+                        const elapsedSec = q ? ((timerTick - q.startedAt) / 1000).toFixed(1) : '0.1'
+                        return (
+                          <div
+                            className="swarm-live-working-card"
+                            data-testid="swarm-working-card"
+                            style={{
+                              padding: '12px 14px',
+                              borderRadius: 8,
+                              background: 'rgba(168, 85, 247, 0.08)',
+                              border: '1px solid rgba(168, 85, 247, 0.3)',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 8
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                gap: 8
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span
+                                  className="swarm-spinner"
+                                  style={{
+                                    display: 'inline-block',
+                                    fontSize: 14,
+                                    animation: 'spin 1.2s linear infinite'
+                                  }}
+                                >
+                                  ⏳
+                                </span>
+                                <span style={{ fontWeight: 700, color: '#e9d5ff', fontSize: 12 }}>
+                                  {q?.statusText || '👑 @HeadAgent is analyzing question...'}
+                                </span>
+                              </div>
+                              <span
+                                data-testid="swarm-timer-badge"
+                                style={{
+                                  fontSize: 10,
+                                  fontWeight: 700,
+                                  padding: '2px 6px',
+                                  borderRadius: 4,
+                                  background: 'rgba(168, 85, 247, 0.2)',
+                                  color: '#c084fc'
+                                }}
+                              >
+                                ⏱️ {elapsedSec}s
+                              </span>
+                            </div>
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                fontSize: 10.5,
+                                color: '#94a3b8'
+                              }}
+                            >
+                              <span>⚡ Parallel Swarm Bridge</span>
+                              <span>•</span>
+                              <span>Thread #{q ? q.threadId.slice(-4) : 'live'}</span>
+                              {q?.status === 'delegating' && (
+                                <>
+                                  <span>•</span>
+                                  <span style={{ color: '#38bdf8' }}>A2A Specialist Delegation</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      }
+
+                      if (q.status === 'error') {
+                        return (
+                          <div
+                            style={{
+                              padding: '10px 14px',
+                              borderRadius: 8,
+                              background: 'rgba(239, 68, 68, 0.1)',
+                              border: '1px solid rgba(239, 68, 68, 0.3)',
+                              color: '#fca5a5',
+                              fontSize: 12
+                            }}
+                          >
+                            ⚠️ Swarm query encountered an error. Please try again.
+                          </div>
+                        )
+                      }
+
+                      // Completed query view
+                      const answerContent = q.answerText || message.content
+                      return (
+                        <div>
+                          <ChatMarkdown text={answerContent} />
+                          <div
+                            style={{
+                              marginTop: 12,
+                              paddingTop: 8,
+                              borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              flexWrap: 'wrap',
+                              gap: 8
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 8,
+                                flexWrap: 'wrap'
+                              }}
+                            >
+                              {q.telemetry && (
+                                <>
+                                  <span
+                                    data-testid="swarm-execution-time-badge"
+                                    style={{
+                                      fontSize: 10,
+                                      fontWeight: 700,
+                                      padding: '2px 7px',
+                                      borderRadius: 4,
+                                      background: 'rgba(59, 130, 246, 0.15)',
+                                      color: '#93c5fd',
+                                      border: '1px solid rgba(59, 130, 246, 0.3)'
+                                    }}
+                                  >
+                                    ⏱️ {(q.telemetry.executionTimeMs / 1000).toFixed(1)}s
+                                  </span>
+                                  <span
+                                    data-testid="swarm-tokens-badge"
+                                    style={{
+                                      fontSize: 10,
+                                      fontWeight: 700,
+                                      padding: '2px 7px',
+                                      borderRadius: 4,
+                                      background: 'rgba(34, 197, 94, 0.15)',
+                                      color: '#86efac',
+                                      border: '1px solid rgba(34, 197, 94, 0.3)'
+                                    }}
+                                    title={`${q.telemetry.promptTokens} in / ${q.telemetry.completionTokens} out`}
+                                  >
+                                    🪙 ~{q.telemetry.estimatedTokens} tokens
+                                  </span>
+                                </>
+                              )}
+                              <span
+                                data-testid="swarm-thread-badge"
+                                style={{
+                                  fontSize: 10,
+                                  fontWeight: 650,
+                                  padding: '2px 7px',
+                                  borderRadius: 4,
+                                  background: 'rgba(255, 255, 255, 0.05)',
+                                  color: '#cbd5e1'
+                                }}
+                              >
+                                💬 Thread #{q.threadId.slice(-4)}
+                              </span>
+                            </div>
+
+                            {onSelectAgentCoders && (
+                              <button
+                                type="button"
+                                data-testid="swarm-jump-workspace-btn"
+                                onClick={() => {
+                                  if (q.delegatedAgentId) {
+                                    useAgentCodersStore
+                                      .getState()
+                                      .setActiveAgent(q.delegatedAgentId)
+                                  } else if (q.targetAgentId) {
+                                    useAgentCodersStore.getState().setActiveAgent(q.targetAgentId)
+                                  }
+                                  onSelectAgentCoders()
+                                }}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 5,
+                                  padding: '4px 10px',
+                                  borderRadius: 5,
+                                  background: '#8b5cf6',
+                                  border: 'none',
+                                  color: '#ffffff',
+                                  fontSize: 11,
+                                  fontWeight: 650,
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                <span>🚀</span>
+                                <span>Jump to AgentCoders Workspace</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })()
+                  ) : message.role === 'assistant' && !isAuto ? (
                     (() => {
                       const { cleanContent, card, rawAction } = parseActionCard(message.content)
                       return (
@@ -1810,7 +2118,14 @@ export default function AgentChatPanel({
                     <button
                       type="button"
                       className="chat-copy"
-                      onClick={() => void copyMessage(key, message.content)}
+                      onClick={() =>
+                        void copyMessage(
+                          key,
+                          message.swarmQueryId && activeQueries[message.swarmQueryId]?.answerText
+                            ? activeQueries[message.swarmQueryId].answerText!
+                            : message.content
+                        )
+                      }
                     >
                       {copiedKey === key ? 'Copied' : 'Copy'}
                     </button>
