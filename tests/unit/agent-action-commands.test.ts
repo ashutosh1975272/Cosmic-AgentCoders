@@ -120,4 +120,38 @@ describe('agent-action-commands tests', () => {
     expect(action?.channelNameOrId).toBe('Ashutosh')
     expect(action?.text).toBe('hiii how are you bro')
   })
+
+  it('correctly handles order-independent mention syntax: @AgentWork #agentworkprojecttesting /send : hii bro how are you ??', () => {
+    const action = detectAgentAction(
+      '@AgentWork #agentworkprojecttesting /send : hii bro how are you ??',
+      dummyProject
+    )
+    expect(action).not.toBeNull()
+    expect(action?.type).toBe('send_slack')
+    expect(action?.channelNameOrId).toBe('agentworkprojecttesting')
+    expect(action?.text).toBe('hii bro how are you ??')
+  })
+
+  it('correctly handles order-independent mention syntax: @AgentWork #agentworkprojecttesting /ai-ans [professional] : gave their 10 anime name', () => {
+    const action = detectAgentAction(
+      '@AgentWork #agentworkprojecttesting /ai-ans [professional] : gave their 10 anime name',
+      dummyProject
+    )
+    expect(action).not.toBeNull()
+    expect(action?.type).toBe('generate_ai_reply')
+    expect(action?.channelNameOrId).toBe('agentworkprojecttesting')
+    expect(action?.persona).toBe('professional')
+    expect(action?.text).toBe('gave their 10 anime name')
+  })
+
+  it('handles #channel /send : text format', () => {
+    const action = detectAgentAction(
+      '#agentworkprojecttesting /send : update status now',
+      dummyProject
+    )
+    expect(action).not.toBeNull()
+    expect(action?.type).toBe('send_slack')
+    expect(action?.channelNameOrId).toBe('agentworkprojecttesting')
+    expect(action?.text).toBe('update status now')
+  })
 })

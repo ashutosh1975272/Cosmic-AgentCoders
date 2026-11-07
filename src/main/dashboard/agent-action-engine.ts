@@ -312,11 +312,87 @@ export function detectAgentAction(
     return { type: 'show_help', platform: 'all' }
   }
 
-  // 1C. /ai-ans command (with optional persona and target):
+  // 1C & 1D. Order-Independent Colon Dispatch & AI Answer:
   // Examples:
-  // /ai-ans @slack #Ashutosh [friendly] : ask how the project is going
-  // /ai-ans #Ashutosh [empathetic] : reassure him about the release
-  // /ai-ans [professional] : give an answer to the last question
+  // @AgentWork #agentworkprojecttesting /send : hii bro how are you ??
+  // @AgentWork #agentworkprojecttesting /ai-ans [professional] : gave their 10 anime name
+  // /send @slack #Ashutosh : hello bro
+  // #agentworkprojecttesting /send : exact text here
+  // /send : hello world
+  // /ai-ans [friendly] : ask status
+  const colonIdx = p.indexOf(':')
+  if (colonIdx > 0) {
+    const header = p.slice(0, colonIdx).trim()
+    const payload = p.slice(colonIdx + 1).trim()
+
+    const isAiAns = /\b(?:\/ai-ans|\/ai-answer|ai-ans)\b/i.test(header)
+    const isSend = /\b(?:\/send|send|post)\b/i.test(header) || /[@#]/.test(header)
+
+    if (isAiAns || isSend) {
+      const atMatch = header.match(/@([a-zA-Z0-9_-]+)/)
+      const hashMatch = header.match(/#([a-zA-Z0-9_-]+)/)
+      const personaMatch = header.match(/\[([a-zA-Z0-9_-]+)\]/)
+
+      let rawPlatform = atMatch ? atMatch[1].trim() : undefined
+      let rawTarget = hashMatch ? hashMatch[1].trim() : undefined
+
+      // If atMatch is present but no hashMatch, check if atMatch was a target channel/person instead of platform
+      if (!rawTarget && atMatch) {
+        const candidate = atMatch[1].trim()
+        if (candidate.toLowerCase() === 'slack' || candidate.toLowerCase() === 'teams') {
+          rawPlatform = candidate.toLowerCase()
+        } else {
+          let isChannel = false
+          if (project?.sources) {
+            for (const s of project.sources) {
+              if (s.channels?.some((c) => c.name.replace(/^[#@]/, '').toLowerCase() === candidate.toLowerCase())) {
+                isChannel = true
+                break
+              }
+            }
+          }
+          if (isChannel) {
+            rawTarget = candidate
+            rawPlatform = undefined
+          }
+        }
+      }
+
+      if (rawTarget?.toLowerCase() === 'slack' || rawTarget?.toLowerCase() === 'teams') {
+        rawPlatform = rawTarget.toLowerCase()
+        rawTarget = undefined
+      }
+
+      const target = rawTarget || activeChannelId || undefined
+      const persona = personaMatch ? personaMatch[1].toLowerCase().trim() : 'professional'
+
+      if (isAiAns) {
+        return {
+          type: 'generate_ai_reply',
+          platform: rawPlatform,
+          channelNameOrId: target,
+          targetChannels: target ? [target] : undefined,
+          persona,
+          text: payload || 'Please answer the last message professionally.'
+        }
+      }
+
+      if (isSend && payload) {
+        return {
+          type: 'send_slack',
+          platform: rawPlatform,
+          channelNameOrId: target,
+          targetChannels: target ? [target] : undefined,
+          text: payload
+        }
+      }
+    }
+  }
+
+  // 1E. Fallback /ai-ans command without colon:
+  // Examples:
+  // /ai-ans @slack #Ashutosh [friendly] ask how the project is going
+  // /ai-ans [professional] give an answer
   const aiAnsMatch = p.match(
     /^(?:\/ai-ans|\/ai-answer|ai-ans)\s*(?:@([a-zA-Z0-9_-]+)\s+)?(?:#([a-zA-Z0-9_-]+)\s*)?(?:\[([a-zA-Z0-9_-]+)\]\s*)?(?::\s*|\s+)?([\s\S]+)$/i
   )
@@ -332,35 +408,6 @@ export function detectAgentAction(
       targetChannels: rawTarget ? [rawTarget] : undefined,
       persona,
       text: instruction
-    }
-  }
-
-  // 1D. Explicit Colon Dispatch:
-  // Examples:
-  // /send @slack #Ashutosh : exact text here
-  // /send #agentworkprojecttesting : hello team
-  // send to #Ashutosh : exact text
-  // send : exact message text
-  // @slack #Ashutosh : hello bro
-  const explicitColonMatch = p.match(
-    /^(?:\/send|send)?\s*(?:to\s+)?(?:@([a-zA-Z0-9_-]+)\s+)?(?:[#@]?([a-zA-Z0-9_-]+)\s*)?:\s*([\s\S]+)$/i
-  )
-  if (explicitColonMatch) {
-    let targetPlatform = explicitColonMatch[1]?.trim()
-    let targetChannel = explicitColonMatch[2]?.trim() || activeChannelId
-    if (targetChannel?.toLowerCase() === 'slack') {
-      targetPlatform = 'slack'
-      targetChannel = activeChannelId
-    }
-    const messageText = explicitColonMatch[3]?.trim()
-    if (messageText && targetChannel) {
-      return {
-        type: 'send_slack',
-        platform: targetPlatform,
-        channelNameOrId: targetChannel,
-        targetChannels: [targetChannel],
-        text: messageText
-      }
     }
   }
 
@@ -426,6 +473,10 @@ export function detectAgentAction(
         )
         if (textMatch) {
           messageText = textMatch[1].trim()
+        }
+        if (!messageText && p.includes(':')) {
+          const colonText = p.slice(p.indexOf(':') + 1).trim()
+          if (colonText) messageText = colonText
         }
       }
       if (messageText) {

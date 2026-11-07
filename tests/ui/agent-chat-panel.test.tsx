@@ -46,6 +46,8 @@ interface Harness {
   projectChat: ReturnType<typeof vi.fn>
   cancelProjectChat: ReturnType<typeof vi.fn>
   clearProjectChat: ReturnType<typeof vi.fn>
+  updateSource: ReturnType<typeof vi.fn>
+  sendMessage: ReturnType<typeof vi.fn>
   emitChunk: (event: DashboardProjectChatChunkEvent) => void
   emitDone: (event: DashboardProjectChatDoneEvent) => void
   emitError: (event: DashboardProjectChatErrorEvent) => void
@@ -77,6 +79,11 @@ function installApi(
   )
   const cancelProjectChat = vi.fn(async () => ({ ok: true }))
   const clearProjectChat = vi.fn(async () => ({ ok: true }))
+  const updateSource = vi.fn(async () => ({ ok: true }))
+  const sendMessage = vi.fn(async () => ({
+    ok: true,
+    message: { channelId: 'C1', ts: '123', text: 'hi', atIso: new Date().toISOString() }
+  }))
 
   const dashboard = {
     getProjectChatHistory: history,
@@ -84,6 +91,8 @@ function installApi(
     projectChat,
     cancelProjectChat,
     clearProjectChat,
+    updateSource,
+    sendMessage,
     onProjectChatChunk: (callback: (event: DashboardProjectChatChunkEvent) => void) => {
       chunkListeners.add(callback)
       return () => {
@@ -118,6 +127,8 @@ function installApi(
     projectChat,
     cancelProjectChat,
     clearProjectChat,
+    updateSource,
+    sendMessage,
     emitChunk: (event) => chunkListeners.forEach((callback) => callback(event)),
     emitDone: (event) => doneListeners.forEach((callback) => callback(event)),
     emitError: (event) => errorListeners.forEach((callback) => callback(event)),
@@ -660,10 +671,12 @@ describe('AgentChatPanel', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByRole('textbox')).toBeTruthy()
+      expect(screen.getByRole('textbox', { name: 'Ask about this project' })).toBeTruthy()
     })
 
-    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+    const textarea = screen.getByRole('textbox', {
+      name: 'Ask about this project'
+    }) as HTMLTextAreaElement
 
     // 1. Type @ to open autocomplete popover
     fireEvent.change(textarea, { target: { value: '@' } })
@@ -696,6 +709,122 @@ describe('AgentChatPanel', () => {
       expect(harness.projectChat).toHaveBeenCalledWith(
         expect.objectContaining({
           message: '@AcmeSlack : how are you?'
+        })
+      )
+    })
+  })
+
+  it('renders Master Supervisor control bar with Target Scope, Auto-Reply, and Tone in mode="project"', async () => {
+    const harness = installApi()
+    render(
+      <AgentChatPanel
+        projectName="Acme Corp"
+        projectId="P1"
+        mode="project"
+        sources={[
+          {
+            id: 'src-1',
+            kind: 'browser',
+            platform: 'slack',
+            workspaceId: 'T1',
+            workspaceName: 'AgentWork',
+            role: 'client',
+            enabled: true,
+            backfillDays: 7,
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+            channels: [
+              {
+                id: 'C1',
+                name: 'agentworkprojecttesting',
+                isPrivate: true,
+                isDm: false,
+                enabled: true,
+                agentWrite: true,
+                autoReplyPolicy: 'mention_dm',
+                autoReplyPersona: 'professional'
+              }
+            ]
+          }
+        ]}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('🤖 Master Supervisor Copilot')).toBeTruthy()
+      expect(screen.getByText('⚡ Direct Dispatch Mode')).toBeTruthy()
+      expect(screen.getByLabelText('Target Scope')).toBeTruthy()
+      expect(screen.getByLabelText('Auto-Reply Policy')).toBeTruthy()
+      expect(screen.getByLabelText('AI Response Persona')).toBeTruthy()
+    })
+
+    // Changing policy with global scope updates source
+    const policySelect = screen.getByLabelText('Auto-Reply Policy') as HTMLSelectElement
+    fireEvent.change(policySelect, { target: { value: 'all' } })
+
+    await waitFor(() => {
+      expect(harness.updateSource).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: 'P1',
+          sourceId: 'src-1'
+        })
+      )
+    })
+  })
+
+  it('intercepts slash command /send : hello in reply mode and routes to projectChat instead of sendMessage', async () => {
+    const harness = installApi()
+    render(
+      <AgentChatPanel
+        projectName="Acme Corp"
+        projectId="P1"
+        mode="social"
+        socialSource={{
+          id: 'src-1',
+          kind: 'browser',
+          platform: 'slack',
+          workspaceId: 'T1',
+          workspaceName: 'AgentWork',
+          role: 'client',
+          enabled: true,
+          backfillDays: 7,
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+          channels: [
+            {
+              id: 'C1',
+              name: 'agentworkprojecttesting',
+              isPrivate: true,
+              isDm: false,
+              enabled: true,
+              agentWrite: true
+            }
+          ]
+        }}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('textbox', { name: 'Ask about this project' })).toBeTruthy()
+    })
+
+    const textarea = screen.getByRole('textbox', {
+      name: 'Ask about this project'
+    }) as HTMLTextAreaElement
+
+    // In reply mode, typing /send @AgentWork #agentworkprojecttesting : hello world
+    fireEvent.change(textarea, {
+      target: { value: '@AgentWork #agentworkprojecttesting /send : hello world' }
+    })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+
+    await waitFor(() => {
+      // Must NOT send directly via sendMessage
+      expect(harness.sendMessage).not.toHaveBeenCalled()
+      // Must route to projectChat (agent action runner)
+      expect(harness.projectChat).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: '@AgentWork #agentworkprojecttesting /send : hello world'
         })
       )
     })
