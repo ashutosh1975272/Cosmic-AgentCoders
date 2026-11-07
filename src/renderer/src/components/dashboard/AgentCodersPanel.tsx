@@ -1010,7 +1010,12 @@ export default function AgentCodersPanel({
         >
           {currentMessages.map((msg) => {
             const isUser = msg.senderId === 'user'
-            const isThreadReply = Boolean(msg.parentMessageId)
+            const isThreadReply = Boolean(
+              msg.isFollowUp ||
+                (msg.parentMessageId &&
+                  !msg.parentMessageId.startsWith('msg-user-') &&
+                  !msg.parentMessageId.startsWith('msg-task-'))
+            )
             return (
               <div
                 key={msg.id}
@@ -1025,7 +1030,7 @@ export default function AgentCodersPanel({
                   paddingLeft: isThreadReply && !isUser ? 10 : undefined
                 }}
               >
-                {isThreadReply && (
+                {isThreadReply && !isUser && (
                   <div
                     data-testid="threaded-reply-indicator"
                     style={{
@@ -1040,6 +1045,24 @@ export default function AgentCodersPanel({
                   >
                     <span>↳</span>
                     <span>Threaded follow-up</span>
+                  </div>
+                )}
+                {isThreadReply && isUser && (
+                  <div
+                    data-testid="threaded-question-indicator"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      fontSize: 9,
+                      color: '#c084fc',
+                      fontWeight: 650,
+                      marginBottom: -1,
+                      alignSelf: 'flex-end'
+                    }}
+                  >
+                    <span>↳</span>
+                    <span>Follow-up question</span>
                   </div>
                 )}
                 <div

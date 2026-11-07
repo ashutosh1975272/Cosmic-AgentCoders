@@ -1158,6 +1158,7 @@ export default function AgentChatPanel({
       if (
         mode === 'project' &&
         (lower.includes('@headagent') ||
+          lower.includes('@head') ||
           lower.includes('@architect') ||
           lower.includes('@coder') ||
           lower.includes('@reviewer') ||
@@ -1165,26 +1166,42 @@ export default function AgentChatPanel({
           lower.includes('@agentworkexecutor') ||
           lower.includes('@executor') ||
           lower.includes('$agentwork') ||
+          lower.includes('$agentcoder') ||
+          lower.includes('$agentcoders') ||
           (lower.includes('agentcoder') && lower.includes('progress')) ||
           (lower.includes('coding') && lower.includes('progress')))
       ) {
         // Free streaming state immediately so parallel queries can be submitted concurrently!
         setStreaming(false)
 
-        // 1. Identify target agent
+        // 1. Identify target agent (prioritize Head Agent as orchestrator when mentioned)
         let targetAgentId: SwarmAgentId = 'head'
-        if (lower.includes('@architect')) targetAgentId = 'architect'
-        else if (lower.includes('@coder')) targetAgentId = 'coder'
-        else if (lower.includes('@tester')) targetAgentId = 'tester'
-        else if (lower.includes('@reviewer')) targetAgentId = 'reviewer'
-        else if (lower.includes('@agentworkexecutor') || lower.includes('@executor')) targetAgentId = 'executor'
-        else if (lower.includes('@headagent') || lower.includes('@head')) targetAgentId = 'head'
-        else if (lower.includes('$agentwork')) targetAgentId = 'executor'
+        if (lower.includes('@headagent') || lower.includes('@head')) {
+          targetAgentId = 'head'
+        } else if (lower.includes('@architect')) {
+          targetAgentId = 'architect'
+        } else if (lower.includes('@coder')) {
+          targetAgentId = 'coder'
+        } else if (lower.includes('@tester')) {
+          targetAgentId = 'tester'
+        } else if (lower.includes('@reviewer')) {
+          targetAgentId = 'reviewer'
+        } else if (
+          lower.includes('@agentworkexecutor') ||
+          lower.includes('@executor') ||
+          lower.includes('$agentwork')
+        ) {
+          targetAgentId = 'executor'
+        } else {
+          targetAgentId = 'head'
+        }
 
-        // 2. Extract clean question prompt
+        // 2. Extract clean question prompt (strip leading trigger prefix while preserving inner mentions for intent analysis)
         let cleanPrompt = text
-          .replace(/\$agentwork\b/gi, '')
-          .replace(/@(headagent|head|architect|coder|tester|reviewer|agentworkexecutor|executor)\b/gi, '')
+          .replace(/^(\s*(\$(agentwork|agentcoders|agentcoder)|\/ask-matt|\/agentcoders)\b\s*)+/gi, '')
+          .trim()
+        cleanPrompt = cleanPrompt
+          .replace(/^(\s*@(headagent|head|architect|coder|tester|reviewer|agentworkexecutor|executor)\b\s*)+/gi, '')
           .trim()
         if (cleanPrompt.startsWith(':')) {
           cleanPrompt = cleanPrompt.slice(1).trim()
@@ -1193,12 +1210,19 @@ export default function AgentChatPanel({
           cleanPrompt = text.trim()
         }
 
-        // 3. Find parent query ID from recent messages for conversational threading
+        // 3. Find parent query ID ONLY if this is a conversational follow-up inquiry
+        const isFollowUpPattern =
+          /^(and\b|also\b|what\s+about\b|follow\s*up\b|can\s+you\s+(also|elaborate|clarify)|tell\s+me\s+more\b|furthermore\b|in\s+addition\b|why\b|how\s+about\b)/i.test(
+            cleanPrompt.trim()
+          ) || /follow-?up/i.test(cleanPrompt)
+
         let parentQueryId: string | undefined = undefined
-        for (let i = messages.length - 1; i >= 0; i--) {
-          if (messages[i].swarmQueryId) {
-            parentQueryId = messages[i].swarmQueryId
-            break
+        if (isFollowUpPattern) {
+          for (let i = messages.length - 1; i >= 0; i--) {
+            if (messages[i].swarmQueryId) {
+              parentQueryId = messages[i].swarmQueryId
+              break
+            }
           }
         }
 
@@ -1244,7 +1268,16 @@ export default function AgentChatPanel({
           .then((completedQuery) => {
             setMessages((previous) =>
               previous.map((m) =>
-                m.id === assistantMsgId ? { ...m, content: completedQuery.answerText || '' } : m
+                m.id === assistantMsgId
+                  ? {
+                      ...m,
+                      content: completedQuery.answerText || '',
+                      authorName:
+                        completedQuery.delegatedAgentId && completedQuery.delegatedAgentId !== 'head'
+                          ? `Cosmic (Head Agent ➔ @${completedQuery.delegatedAgentId})`
+                          : m.authorName
+                    }
+                  : m
               )
             )
           })
@@ -1817,10 +1850,10 @@ export default function AgentChatPanel({
                         DIRECT API
                       </span>
                     </div>
-                  ) : message.swarmQueryId && activeQueries[message.swarmQueryId] ? (
+                  ) : message.swarmQueryId ? (
                     (() => {
                       const q = activeQueries[message.swarmQueryId]
-                      const isDelegated = q.delegatedAgentId && q.delegatedAgentId !== 'head'
+                      const isDelegated = q?.delegatedAgentId && q.delegatedAgentId !== 'head'
                       return (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <span className="chat-msg-avatar ai-avatar">👑</span>
@@ -1856,7 +1889,8 @@ export default function AgentChatPanel({
                   {message.swarmQueryId ? (
                     (() => {
                       const q = activeQueries[message.swarmQueryId]
-                      if (!q || (q.status !== 'completed' && q.status !== 'error')) {
+                      const isWorking = q ? q.status !== 'completed' && q.status !== 'error' : !message.content
+                      if (isWorking) {
                         const elapsedSec = q ? ((timerTick - q.startedAt) / 1000).toFixed(1) : '0.1'
                         return (
                           <div
@@ -1932,7 +1966,7 @@ export default function AgentChatPanel({
                         )
                       }
 
-                      if (q.status === 'error') {
+                      if (q?.status === 'error') {
                         return (
                           <div
                             style={{
@@ -1950,7 +1984,9 @@ export default function AgentChatPanel({
                       }
 
                       // Completed query view
-                      const answerContent = q.answerText || message.content
+                      const answerContent = q?.answerText || message.content
+                      const telemetry = q?.telemetry
+                      const threadId = q?.threadId || message.swarmQueryId?.slice(-4) || 'live'
                       return (
                         <div>
                           <ChatMarkdown text={answerContent} />
@@ -1974,7 +2010,7 @@ export default function AgentChatPanel({
                                 flexWrap: 'wrap'
                               }}
                             >
-                              {q.telemetry && (
+                              {telemetry && (
                                 <>
                                   <span
                                     data-testid="swarm-execution-time-badge"
@@ -1988,7 +2024,7 @@ export default function AgentChatPanel({
                                       border: '1px solid rgba(59, 130, 246, 0.3)'
                                     }}
                                   >
-                                    ⏱️ {(q.telemetry.executionTimeMs / 1000).toFixed(1)}s
+                                    ⏱️ {(telemetry.executionTimeMs / 1000).toFixed(1)}s
                                   </span>
                                   <span
                                     data-testid="swarm-tokens-badge"
@@ -2001,9 +2037,9 @@ export default function AgentChatPanel({
                                       color: '#86efac',
                                       border: '1px solid rgba(34, 197, 94, 0.3)'
                                     }}
-                                    title={`${q.telemetry.promptTokens} in / ${q.telemetry.completionTokens} out`}
+                                    title={`${telemetry.promptTokens} in / ${telemetry.completionTokens} out`}
                                   >
-                                    🪙 ~{q.telemetry.estimatedTokens} tokens
+                                    🪙 ~{telemetry.estimatedTokens} tokens
                                   </span>
                                 </>
                               )}
@@ -2018,7 +2054,7 @@ export default function AgentChatPanel({
                                   color: '#cbd5e1'
                                 }}
                               >
-                                💬 Thread #{q.threadId.slice(-4)}
+                                💬 Thread #{threadId.slice(-4)}
                               </span>
                             </div>
 
@@ -2027,11 +2063,11 @@ export default function AgentChatPanel({
                                 type="button"
                                 data-testid="swarm-jump-workspace-btn"
                                 onClick={() => {
-                                  if (q.delegatedAgentId) {
+                                  if (q?.delegatedAgentId) {
                                     useAgentCodersStore
                                       .getState()
                                       .setActiveAgent(q.delegatedAgentId)
-                                  } else if (q.targetAgentId) {
+                                  } else if (q?.targetAgentId) {
                                     useAgentCodersStore.getState().setActiveAgent(q.targetAgentId)
                                   }
                                   onSelectAgentCoders()

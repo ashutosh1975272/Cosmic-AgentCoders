@@ -194,13 +194,123 @@ describe('AgentCoders Parallel Query Bridge & Threading', () => {
     expect(messageTelemetryBadges.length).toBeGreaterThan(0)
     expect(messageTelemetryBadges[0].textContent).toMatch(/⏱️.*s · 🪙 ~.*tokens/)
 
-    // Verify threaded follow-up grouping indicator is rendered
+    // Verify threaded follow-up grouping indicator is rendered on follow-up ONLY
     const threadIndicators = screen.getAllByTestId('threaded-reply-indicator')
-    expect(threadIndicators.length).toBeGreaterThan(0)
+    expect(threadIndicators.length).toBe(1)
     expect(threadIndicators[0].textContent).toContain('Threaded follow-up')
+
+    // Verify sender name correctly identifies Project Master Agent
+    expect(screen.getAllByText('Project Master Agent (Chat)').length).toBeGreaterThanOrEqual(1)
 
     // Verify thread ID tag is rendered
     const threadTags = screen.getAllByTestId('message-thread-tag')
     expect(threadTags.length).toBeGreaterThan(0)
+  })
+
+  it('populates both Head Agent and subagent histories when Head Agent delegates a task', async () => {
+    // Dispatch query to Head Agent requiring Architectural analysis
+    await useAgentCodersStore.getState().dispatchSwarmQuery({
+      prompt: 'Design modular domain model and seam boundaries',
+      targetAgentId: 'head',
+      source: 'project_chat'
+    })
+
+    const state = useAgentCodersStore.getState()
+    const headMessages = state.agentMessages.head
+    const architectMessages = state.agentMessages.architect
+
+    // In Head Agent history:
+    // 1. Initial inquiry from Project Master Agent
+    const headUserMsg = headMessages.find((m) => m.senderId === 'user')
+    expect(headUserMsg).toBeDefined()
+    expect(headUserMsg?.senderName).toBe('Project Master Agent (Chat)')
+    expect(headUserMsg?.provenance).toBe('project_chat')
+
+    // 2. Synthesized delegation answer in Head Agent history
+    const headConsultationMsg = headMessages.find((m) => m.statusBadge === 'DELEGATED TO ARCHITECT')
+    expect(headConsultationMsg).toBeDefined()
+    expect(headConsultationMsg?.text).toContain('@Architect Consultation')
+    expect(headConsultationMsg?.telemetry).toBeDefined()
+
+    // In Architect subagent history:
+    // 1. Delegated question from Head Agent is recorded!
+    const architectTaskMsg = architectMessages.find((m) => m.statusBadge === 'DELEGATED FROM HEAD')
+    expect(architectTaskMsg).toBeDefined()
+    expect(architectTaskMsg?.senderName).toContain('Head Agent (via Project Chat)')
+    expect(architectTaskMsg?.assignedFromHead).toBe(true)
+    expect(architectTaskMsg?.text).toContain('Design modular domain model')
+
+    // 2. Specialist reply in Architect history
+    const architectReplyMsg = architectMessages.find((m) => m.statusBadge === 'SPECIALIST REPLY')
+    expect(architectReplyMsg).toBeDefined()
+    expect(architectReplyMsg?.senderName).toBe('Architect')
+    expect(architectReplyMsg?.telemetry).toBeDefined()
+  })
+
+  it('routes @HeadAgent mention with sub-agent references to Head Agent orchestrator', async () => {
+    render(
+      <AgentChatPanel
+        projectId="p-priority"
+        projectName="Orbit Engine"
+        mode="project"
+      />
+    )
+
+    const textarea = (await screen.findByPlaceholderText(
+      /Ask about this project/i
+    )) as HTMLTextAreaElement
+
+    // User mentions HeadAgent, but text also mentions @Architect
+    fireEvent.change(textarea, {
+      target: {
+        value: '$AgentWork @HeadAgent : please consult with @Architect about data structures'
+      }
+    })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
+
+    // Must show working card with Head Agent orchestrating
+    expect(screen.getByTestId('swarm-working-card')).toBeDefined()
+
+    // Wait for resolution and verify Architect consultation occurred
+    await waitFor(
+      () => {
+        expect(screen.getByText(/Architect Specialist Assessment/i)).toBeDefined()
+      },
+      { timeout: 3000 }
+    )
+  })
+
+  it('renders completed message correctly even if query state is pruned', async () => {
+    render(
+      <AgentChatPanel
+        projectId="p-pruned"
+        projectName="Orbit Engine"
+        mode="project"
+      />
+    )
+
+    const textarea = (await screen.findByPlaceholderText(
+      /Ask about this project/i
+    )) as HTMLTextAreaElement
+
+    fireEvent.change(textarea, {
+      target: { value: '@HeadAgent : who are you and list agents' }
+    })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
+
+    // Wait for completed answer
+    await waitFor(
+      () => {
+        expect(screen.getByText(/Complete Roster & Agent Hierarchy/i)).toBeDefined()
+      },
+      { timeout: 3000 }
+    )
+
+    // Clear active queries from store (simulating cache pruning or store reset)
+    useAgentCodersStore.getState().resetSwarm()
+
+    // Message must STILL render the markdown answer and NOT revert to an infinite working spinner!
+    expect(screen.queryByTestId('swarm-working-card')).toBeNull()
+    expect(screen.getByText(/Complete Roster & Agent Hierarchy/i)).toBeDefined()
   })
 })

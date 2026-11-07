@@ -108,6 +108,7 @@ export interface SwarmMessage {
   provenance?: 'project_chat' | 'agentcoders_inner'
   threadId?: string
   parentMessageId?: string
+  isFollowUp?: boolean
   telemetry?: SwarmQueryTelemetry
   assignedFromHead?: boolean
   taskId?: string
@@ -494,24 +495,13 @@ export const useAgentCodersStore = create<AgentCodersStoreState>((set, get) => (
     const queryId = customQueryId || `query-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
     const startedAt = Date.now()
 
-    // Thread identification: link to parent if provided, or if follow-up, or create new thread
-    let threadId = `thread-${Date.now()}`
-    const existingQueries = Object.values(get().activeQueries)
+    // Thread identification: link to parent if explicitly provided or valid follow-up
+    const isFollowUp = Boolean(parentQueryId)
+    let threadId = `thread-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
     if (parentQueryId && get().activeQueries[parentQueryId]) {
       threadId = get().activeQueries[parentQueryId].threadId
     } else if (parentQueryId) {
       threadId = parentQueryId
-    } else {
-      // Auto-detect follow-up pattern if recent query exists
-      const isFollowUpPattern =
-        /^(and\b|also\b|what\s+about\b|follow\s*up\b|can\s+you\s+(also|elaborate|clarify)|tell\s+me\s+more\b|furthermore\b|in\s+addition\b)/i.test(
-          prompt.trim()
-        )
-      if (isFollowUpPattern && existingQueries.length > 0) {
-        const lastQuery = existingQueries[existingQueries.length - 1]
-        threadId = lastQuery.threadId
-        parentQueryId = lastQuery.id
-      }
     }
 
     const targetMeta = SWARM_AGENTS.find((a) => a.id === targetAgentId) || SWARM_AGENTS[0]
@@ -536,19 +526,30 @@ export const useAgentCodersStore = create<AgentCodersStoreState>((set, get) => (
       }
     }))
 
-    // 2. Post user message to target agent history
+    // 2. Post user question into history with proper sender identity
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    const userSenderName = source === 'project_chat' ? 'Project Master Agent (Chat)' : 'You'
     const userMsg: SwarmMessage = {
       id: `msg-user-${queryId}`,
       senderId: 'user',
-      senderName: 'You',
+      senderName: userSenderName,
       text: prompt,
       timestamp: timeStr,
       provenance: source,
       threadId,
-      parentMessageId: parentQueryId
+      parentMessageId: parentQueryId,
+      isFollowUp
     }
     get().postMessage(targetAgentId, userMsg)
+
+    // Cross-post to Head Agent if direct target was another sub-agent
+    if (targetAgentId !== 'head') {
+      get().postMessage('head', {
+        ...userMsg,
+        id: `msg-sync-head-user-${queryId}`,
+        statusBadge: `DIRECT DISPATCH TO ${targetAgentId.toUpperCase()}`
+      })
+    }
 
     // 3. Parallel Intent Analysis & Async Resolution
     return new Promise<SwarmQuery>((resolve) => {
@@ -596,6 +597,7 @@ export const useAgentCodersStore = create<AgentCodersStoreState>((set, get) => (
             provenance: 'agentcoders_inner',
             threadId,
             parentMessageId: `msg-user-${queryId}`,
+            isFollowUp,
             telemetry,
             statusBadge: 'ROSTER DISPATCH'
           })
@@ -689,6 +691,21 @@ export const useAgentCodersStore = create<AgentCodersStoreState>((set, get) => (
               }
             }
           }))
+
+          // Also post the delegated inquiry into the specialist feed so specialist has the question context!
+          get().postMessage(delegateMeta.id, {
+            id: `msg-task-${queryId}`,
+            senderId: 'head',
+            senderName: 'Head Agent (via Project Chat)',
+            text: `👑 **Delegated Inquiry from Head Agent**:\n*"${prompt}"*`,
+            timestamp: timeStr,
+            provenance: 'project_chat',
+            threadId,
+            parentMessageId: `msg-user-${queryId}`,
+            isFollowUp,
+            assignedFromHead: true,
+            statusBadge: 'DELEGATED FROM HEAD'
+          })
         }
 
         setTimeout(() => {
@@ -723,6 +740,7 @@ export const useAgentCodersStore = create<AgentCodersStoreState>((set, get) => (
 
           const replyTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           if (effectiveAgentId !== 'head' && targetAgentId === 'head') {
+            // 1. Specialist response in specialist agent feed
             get().postMessage(effectiveAgentId, {
               id: `msg-sub-${queryId}`,
               senderId: effectiveAgentId,
@@ -731,10 +749,12 @@ export const useAgentCodersStore = create<AgentCodersStoreState>((set, get) => (
               timestamp: replyTime,
               provenance: 'agentcoders_inner',
               threadId,
-              parentMessageId: `msg-user-${queryId}`,
+              parentMessageId: `msg-task-${queryId}`,
+              isFollowUp,
               telemetry,
               statusBadge: 'SPECIALIST REPLY'
             })
+            // 2. Synthesized answer in Head Agent feed
             get().postMessage('head', {
               id: `msg-head-delegate-${queryId}`,
               senderId: 'head',
@@ -744,10 +764,12 @@ export const useAgentCodersStore = create<AgentCodersStoreState>((set, get) => (
               provenance: 'agentcoders_inner',
               threadId,
               parentMessageId: `msg-user-${queryId}`,
+              isFollowUp,
               telemetry,
               statusBadge: `DELEGATED TO ${effectiveAgentId.toUpperCase()}`
             })
           } else {
+            // Direct reply to target agent feed
             get().postMessage(targetAgentId, {
               id: `msg-ans-${queryId}`,
               senderId: targetAgentId,
@@ -757,9 +779,27 @@ export const useAgentCodersStore = create<AgentCodersStoreState>((set, get) => (
               provenance: 'agentcoders_inner',
               threadId,
               parentMessageId: `msg-user-${queryId}`,
+              isFollowUp,
               telemetry,
               statusBadge: 'SWARM REPLY'
             })
+
+            // Also cross-sync direct answer to Head Agent feed if target was not Head
+            if (targetAgentId !== 'head') {
+              get().postMessage('head', {
+                id: `msg-sync-head-ans-${queryId}`,
+                senderId: targetAgentId,
+                senderName: targetMeta.name,
+                text: answerText,
+                timestamp: replyTime,
+                provenance: 'agentcoders_inner',
+                threadId,
+                parentMessageId: `msg-sync-head-user-${queryId}`,
+                isFollowUp,
+                telemetry,
+                statusBadge: 'SWARM REPLY'
+              })
+            }
           }
 
           const completedQuery: SwarmQuery = {
