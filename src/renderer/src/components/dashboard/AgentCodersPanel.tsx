@@ -327,6 +327,128 @@ export default function AgentCodersPanel({
           overflow: 'hidden'
         }}
       >
+        {/* Top Platform Switcher Bar */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '8px 16px',
+            background: 'rgba(10, 15, 30, 0.95)',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', marginRight: 4 }}>
+              PLATFORM:
+            </span>
+
+            {/* Platform 1: AgentWork */}
+            <button
+              type="button"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '4px 10px',
+                borderRadius: 5,
+                background: 'rgba(34, 197, 94, 0.15)',
+                border: '1px solid rgba(34, 197, 94, 0.4)',
+                color: '#4ade80',
+                fontSize: 11,
+                fontWeight: 650,
+                cursor: 'pointer'
+              }}
+            >
+              <span>⚡</span>
+              <span>AgentWork</span>
+              <span
+                style={{
+                  fontSize: 8,
+                  fontWeight: 700,
+                  padding: '1px 4px',
+                  borderRadius: 3,
+                  background: '#22c55e',
+                  color: '#000'
+                }}
+              >
+                ACTIVE
+              </span>
+            </button>
+
+            {/* Platform 2: Antigravity */}
+            <button
+              type="button"
+              disabled
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '4px 10px',
+                borderRadius: 5,
+                background: 'rgba(255, 255, 255, 0.04)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                color: '#64748b',
+                fontSize: 11,
+                cursor: 'not-allowed'
+              }}
+              title="Google Antigravity Agentic IDE (Preview)"
+            >
+              <span>🪐</span>
+              <span>Antigravity</span>
+              <span
+                style={{
+                  fontSize: 7.5,
+                  padding: '1px 4px',
+                  borderRadius: 2,
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  color: '#94a3b8'
+                }}
+              >
+                PREVIEW
+              </span>
+            </button>
+
+            {/* Platform 3: OpenCode */}
+            <button
+              type="button"
+              disabled
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '4px 10px',
+                borderRadius: 5,
+                background: 'rgba(255, 255, 255, 0.04)',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                color: '#64748b',
+                fontSize: 11,
+                cursor: 'not-allowed'
+              }}
+              title="OpenCode Autonomous Synthesis Engine (Preview)"
+            >
+              <span>💻</span>
+              <span>OpenCode</span>
+              <span
+                style={{
+                  fontSize: 7.5,
+                  padding: '1px 4px',
+                  borderRadius: 2,
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  color: '#94a3b8'
+                }}
+              >
+                PREVIEW
+              </span>
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: '#64748b' }}>
+            <span>A2A Swarm Bus:</span>
+            <span style={{ color: '#22c55e', fontWeight: 650 }}>● Online</span>
+          </div>
+        </div>
+
         {/* Agent Header */}
         <header
           style={{

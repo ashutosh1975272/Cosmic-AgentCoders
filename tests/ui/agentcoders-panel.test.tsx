@@ -22,6 +22,11 @@ describe('AgentCodersPanel UI tests', () => {
     expect(screen.getByText('Tester')).toBeDefined()
     expect(screen.getByText('Reviewer')).toBeDefined()
     expect(screen.getByText('AgentWork Executor')).toBeDefined()
+
+    // Platform switcher
+    expect(screen.getByText('PLATFORM:')).toBeDefined()
+    expect(screen.getByText('Antigravity')).toBeDefined()
+    expect(screen.getByText('OpenCode')).toBeDefined()
   })
 
   it('switches agent tab when clicked in inner sidebar', () => {

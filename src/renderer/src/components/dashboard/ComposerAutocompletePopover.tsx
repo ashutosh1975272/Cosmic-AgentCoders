@@ -44,17 +44,39 @@ export default function ComposerAutocompletePopover({
       const platforms: AutocompleteItem[] = []
 
       if (contextScope === 'agentcoders') {
-        // When already inside AgentCoders Swarm Workspace
-        platforms.push({
-          id: 'plat-agentwork-active',
-          label: '$AgentWork',
-          sublabel: 'Connected Swarm Workspace · Direct multi-agent coding active',
-          badge: 'ACTIVE PLATFORM',
-          badgeColor: '#22c55e',
-          icon: '⚡',
-          insertText: '$AgentWork ',
-          category: 'platform'
-        })
+        // When inside AgentCoders Swarm Workspace
+        platforms.push(
+          {
+            id: 'plat-agentwork-active',
+            label: '$AgentWork',
+            sublabel: 'Connected Swarm Workspace · Direct multi-agent coding active',
+            badge: 'ACTIVE PLATFORM',
+            badgeColor: '#22c55e',
+            icon: '⚡',
+            insertText: '$AgentWork ',
+            category: 'platform'
+          },
+          {
+            id: 'plat-antigravity',
+            label: '$Antigravity',
+            sublabel: 'Google Antigravity Agentic IDE (Preview)',
+            badge: 'PREVIEW',
+            badgeColor: '#8b5cf6',
+            icon: '🪐',
+            insertText: '$Antigravity ',
+            category: 'platform'
+          },
+          {
+            id: 'plat-opencode',
+            label: '$OpenCode',
+            sublabel: 'OpenCode Autonomous Code Synthesis (Preview)',
+            badge: 'PREVIEW',
+            badgeColor: '#3b82f6',
+            icon: '💻',
+            insertText: '$OpenCode ',
+            category: 'platform'
+          }
+        )
       } else {
         // When in Master Chat / other views
         platforms.push(
@@ -62,30 +84,30 @@ export default function ComposerAutocompletePopover({
             id: 'plat-agentwork',
             label: '$AgentWork',
             sublabel: 'Autonomous Multi-Agent Coding Environment (Swarm & A2A)',
-            badge: 'CODING SWARM',
-            badgeColor: '#a855f7',
-            icon: '🤖',
+            badge: 'ACTIVE SWARM',
+            badgeColor: '#22c55e',
+            icon: '⚡',
             insertText: '$AgentWork ',
             category: 'platform'
           },
           {
-            id: 'plat-claude',
-            label: '$Claude',
-            sublabel: 'Claude Code / Anthropic Agent Ecosystem',
-            badge: 'CLAUDE',
-            badgeColor: '#d97706',
-            icon: '🟣',
-            insertText: '$Claude ',
+            id: 'plat-antigravity',
+            label: '$Antigravity',
+            sublabel: 'Google DeepMind Advanced Agentic Coding Environment',
+            badge: 'ANTIGRAVITY',
+            badgeColor: '#8b5cf6',
+            icon: '🪐',
+            insertText: '$Antigravity ',
             category: 'platform'
           },
           {
-            id: 'plat-codex',
-            label: '$Codex',
-            sublabel: 'OpenAI Codex / Swarm Engine',
-            badge: 'CODEX',
-            badgeColor: '#10b981',
-            icon: '🟢',
-            insertText: '$Codex ',
+            id: 'plat-opencode',
+            label: '$OpenCode',
+            sublabel: 'Open-Source Autonomous Code Synthesis Engine',
+            badge: 'OPENCODE',
+            badgeColor: '#3b82f6',
+            icon: '💻',
+            insertText: '$OpenCode ',
             category: 'platform'
           }
         )

@@ -299,6 +299,7 @@ export default function WorkspaceSidebar({
   const isAddHidden = layout.custom.hideAddButton ?? true
   const [globalAccountsOpen, setGlobalAccountsOpen] = useState(true)
   const [socialsDropdownOpen, setSocialsDropdownOpen] = useState(false)
+  const [agentCodersDropdownOpen, setAgentCodersDropdownOpen] = useState(true)
 
   // Filter connected social media accounts with active session tokens or authenticated cookies.
   // Note: Internal team workspaces (role === 'ours' or matching AgentWork) belong to "Talk to AgentWork" above and are excluded.
@@ -1055,21 +1056,158 @@ export default function WorkspaceSidebar({
                       )
                     })()}
 
-                    {/* 2. Talk to AgentCoders (Standalone Swarm Button) */}
-                    {section.rows.find((r) => r.id === 'm:agentwork') && (() => {
-                      const row = section.rows.find((r) => r.id === 'm:agentwork')!
-                      return (
-                        <Row
-                          key={row.id}
-                          icon={row.icon}
-                          label={row.label}
-                          title={row.desc}
-                          active={rowActive(row)}
-                          count={rowCount(view, row.id)}
-                          onClick={() => onSelect(row.id)}
-                        />
-                      )
-                    })()}
+                    {/* 2. Talk to AgentCoders (Two-tier Group with AgentWork, Antigravity, OpenCode) */}
+                    <div className="ws-nav-group" style={{ marginBottom: 4 }}>
+                      <button
+                        type="button"
+                        className={`ws-nav-groupbtn ws-nav-connector${agentCodersDropdownOpen ? ' is-open' : ''}`}
+                        aria-expanded={agentCodersDropdownOpen}
+                        title="Autonomous multi-agent coding swarms & engines"
+                        onClick={() => setAgentCodersDropdownOpen((prev) => !prev)}
+                      >
+                        <span className="ws-nav-icon">
+                          <NavIcon name="agent" />
+                        </span>
+                        <span className="ws-nav-label" style={{ fontWeight: 600 }}>Talk to AgentCoders</span>
+                        <span
+                          className="ws-nav-count"
+                          style={{
+                            background: 'rgba(168, 85, 247, 0.25)',
+                            color: '#d8b4fe',
+                            fontSize: 9,
+                            fontWeight: 700,
+                            padding: '1px 5px',
+                            borderRadius: 4
+                          }}
+                        >
+                          3
+                        </span>
+                        <Chevron open={agentCodersDropdownOpen} />
+                      </button>
+
+                      {agentCodersDropdownOpen && (
+                        <div className="ws-nav-sublist" style={{ paddingLeft: 6, marginTop: 2 }}>
+                          {/* Platform 1: AgentWork (Active Swarm Workspace) */}
+                          <button
+                            type="button"
+                            className={`ws-nav-row${nav.selection === 'm:agentwork' ? ' is-active' : ''}`}
+                            title="AgentWork Autonomous Multi-Agent Coding Swarm"
+                            onClick={() => onSelect('m:agentwork' as SelectionId)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8,
+                              width: '100%',
+                              padding: '6px 10px 6px 18px',
+                              background:
+                                nav.selection === 'm:agentwork'
+                                  ? 'rgba(168, 85, 247, 0.2)'
+                                  : 'transparent',
+                              border:
+                                nav.selection === 'm:agentwork'
+                                  ? '1px solid rgba(168, 85, 247, 0.4)'
+                                  : '1px solid transparent',
+                              borderRadius: 6,
+                              cursor: 'pointer',
+                              textAlign: 'left'
+                            }}
+                          >
+                            <span style={{ fontSize: 13, flexShrink: 0 }}>⚡</span>
+                            <span
+                              style={{
+                                fontSize: 12,
+                                fontWeight: 650,
+                                flex: 1,
+                                color: nav.selection === 'm:agentwork' ? '#f8fafc' : '#cbd5e1'
+                              }}
+                            >
+                              AgentWork
+                            </span>
+                            <span
+                              style={{
+                                fontSize: 8.5,
+                                fontWeight: 700,
+                                padding: '1px 5px',
+                                borderRadius: 3,
+                                background: 'rgba(34, 197, 94, 0.2)',
+                                color: '#4ade80',
+                                border: '1px solid rgba(34, 197, 94, 0.4)'
+                              }}
+                            >
+                              CONNECTED
+                            </span>
+                          </button>
+
+                          {/* Platform 2: Antigravity (Preview) */}
+                          <div
+                            className="ws-nav-row"
+                            title="Google Antigravity Agentic IDE (Preview)"
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8,
+                              width: '100%',
+                              padding: '6px 10px 6px 18px',
+                              borderRadius: 6,
+                              opacity: 0.65,
+                              cursor: 'default',
+                              marginTop: 2
+                            }}
+                          >
+                            <span style={{ fontSize: 13, flexShrink: 0 }}>🪐</span>
+                            <span style={{ fontSize: 12, fontWeight: 550, flex: 1, color: '#94a3b8' }}>
+                              Antigravity
+                            </span>
+                            <span
+                              style={{
+                                fontSize: 8,
+                                fontWeight: 650,
+                                padding: '1px 4px',
+                                borderRadius: 3,
+                                background: 'rgba(255, 255, 255, 0.08)',
+                                color: '#94a3b8'
+                              }}
+                            >
+                              PREVIEW
+                            </span>
+                          </div>
+
+                          {/* Platform 3: OpenCode (Preview) */}
+                          <div
+                            className="ws-nav-row"
+                            title="OpenCode Autonomous Synthesis (Preview)"
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8,
+                              width: '100%',
+                              padding: '6px 10px 6px 18px',
+                              borderRadius: 6,
+                              opacity: 0.65,
+                              cursor: 'default',
+                              marginTop: 2
+                            }}
+                          >
+                            <span style={{ fontSize: 13, flexShrink: 0 }}>💻</span>
+                            <span style={{ fontSize: 12, fontWeight: 550, flex: 1, color: '#94a3b8' }}>
+                              OpenCode
+                            </span>
+                            <span
+                              style={{
+                                fontSize: 8,
+                                fontWeight: 650,
+                                padding: '1px 4px',
+                                borderRadius: 3,
+                                background: 'rgba(255, 255, 255, 0.08)',
+                                color: '#94a3b8'
+                              }}
+                            >
+                              PREVIEW
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
 
                     {/* 3. Chat with Socials (Collapsible dropdown - collapsed by default) */}
                     <div className="ws-nav-group" style={{ marginBottom: 4 }}>

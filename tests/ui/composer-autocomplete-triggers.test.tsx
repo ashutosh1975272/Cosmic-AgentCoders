@@ -22,8 +22,8 @@ describe('ComposerAutocompletePopover Multi-Trigger Tests', () => {
 
     expect(screen.getByRole('listbox')).toBeDefined()
     expect(screen.getByText('$AgentWork')).toBeDefined()
-    expect(screen.getByText('$Claude')).toBeDefined()
-    expect(screen.getByText('$Codex')).toBeDefined()
+    expect(screen.getByText('$Antigravity')).toBeDefined()
+    expect(screen.getByText('$OpenCode')).toBeDefined()
 
     // Click $AgentWork
     fireEvent.click(screen.getByText('$AgentWork'))
@@ -34,7 +34,7 @@ describe('ComposerAutocompletePopover Multi-Trigger Tests', () => {
     )
   })
 
-  it('renders single locked $AgentWork active platform when trigger is $ in agentcoders scope', () => {
+  it('renders $AgentWork as active and $Antigravity/$OpenCode as preview when trigger is $ in agentcoders scope', () => {
     const onSelect = vi.fn()
     const onClose = vi.fn()
 
@@ -50,8 +50,8 @@ describe('ComposerAutocompletePopover Multi-Trigger Tests', () => {
 
     expect(screen.getByText('$AgentWork')).toBeDefined()
     expect(screen.getByText('ACTIVE PLATFORM')).toBeDefined()
-    expect(screen.queryByText('$Claude')).toBeNull()
-    expect(screen.queryByText('$Codex')).toBeNull()
+    expect(screen.getByText('$Antigravity')).toBeDefined()
+    expect(screen.getByText('$OpenCode')).toBeDefined()
   })
 
   it('renders specialized coding agents when trigger is @', () => {
