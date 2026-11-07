@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
-import { homedir, tmpdir } from 'node:os'
-import { existsSync, mkdtempSync, rmSync, mkdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { mkdtempSync, rmSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import {
@@ -128,9 +128,12 @@ describe('chromeCookieProbe (unit & isolated DB)', () => {
 
 describe('chromeCookieProbe (on-device profiles)', () => {
   it('does not false-positive Slack on unauthenticated profiles', () => {
-    const unauthDir = join(homedir(), '.config/slack-dashboard/chrome-login-profiles/card-proj-mw5a399z-u5s1')
-    if (existsSync(unauthDir)) {
+    const unauthDir = join(tmpdir(), 'slack-test-unauth-profile-' + Date.now())
+    mkdirSync(join(unauthDir, 'Default'), { recursive: true })
+    try {
       expect(chromeProfileHasSlackSession(unauthDir)).toBe(false)
+    } finally {
+      rmSync(unauthDir, { recursive: true, force: true })
     }
   })
 })

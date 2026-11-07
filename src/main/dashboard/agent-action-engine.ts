@@ -291,13 +291,23 @@ export function detectAgentAction(
     if (quoteMatch) {
       messageText = quoteMatch[1].trim()
     } else {
-      const textMatch = p.match(
-        /(?:(?:and\s+)?t(?:h)?en\s+)?(?:send\s+(?:the\s+|that\s+|him\s+|her\s+)?message\s+(?:thier|there)?\s*[:,-]?\s*|\s+(?:message|text)\s*[:,-]\s*|\s+saying\s+)(.+)$/i
+      // Check trailing delivery clause first: e.g. "... and ten send the message thier hiii or hlw"
+      const trailingMatch = p.match(
+        /(?:(?:and\s+)?(?:then|ten)\s+send\s+(?:the\s+|that\s+|him\s+|her\s+)?message\s*(?:thier|there)?\s*[:,-]?\s*)(.+)$/i
       )
-      if (textMatch) {
-        messageText = textMatch[1]
-          .trim()
-          .replace(/\s*(?:as\s+(?:y+ou|u)\s+want)?\s*(?:in\s+thier|in\s+there)?$/i, '')
+      if (trailingMatch) {
+        messageText = trailingMatch[1].trim()
+      } else {
+        const textMatch = p.match(
+          /(?:send\s+(?:the\s+|that\s+|him\s+|her\s+)?message\s*(?:thier|there)?\s*[:,-]?\s*|\s+(?:message|text)\s*[:,-]\s*|\s+saying\s+)(.+)$/i
+        )
+        if (textMatch) {
+          messageText = textMatch[1].trim()
+        }
+      }
+      if (messageText) {
+        messageText = messageText
+          .replace(/\s*(?:as\s+(?:y+ou|u)\s+want)?\s*(?:in\s+(?:thier|there))?$/i, '')
           .trim()
       }
     }

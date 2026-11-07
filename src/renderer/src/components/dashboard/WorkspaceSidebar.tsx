@@ -301,7 +301,7 @@ export default function WorkspaceSidebar({
   const [socialsDropdownOpen, setSocialsDropdownOpen] = useState(false)
 
   // Filter connected social media accounts with active session tokens or authenticated cookies.
-  // Note: Internal team workspaces (role === 'ours') belong to "Talk to AgentWork" above and are excluded.
+  // Note: Internal team workspaces (role === 'ours' or matching AgentWork) belong to "Talk to AgentWork" above and are excluded.
   const connectedSocialSources = useMemo(() => {
     const seen = new Set<string>()
     return (sources ?? []).filter((s) => {
@@ -325,13 +325,27 @@ export default function WorkspaceSidebar({
       const hasSession = Boolean(s.workspaceId) || Boolean(s.profileId)
       if (!hasToken && !hasSession) return false
 
-      // Deduplicate by platform + workspaceId to prevent duplicate entries
-      const key = s.workspaceId ? `${p}:${s.workspaceId}` : s.id
-      if (seen.has(key)) return false
-      seen.add(key)
+      // Deduplicate by platform so only one workspace per platform appears in Chat with Socials
+      if (seen.has(p)) return false
+      seen.add(p)
       return true
     })
   }, [sources])
+
+  // Prevent temporary flicker of "No active social sessions" during project load
+  const lastSocialSourcesRef = useRef<typeof connectedSocialSources>([])
+  useEffect(() => {
+    if (connectedSocialSources.length > 0) {
+      lastSocialSourcesRef.current = connectedSocialSources
+    }
+  }, [connectedSocialSources])
+
+  const effectiveSocialSources =
+    connectedSocialSources.length > 0
+      ? connectedSocialSources
+      : sources === undefined && lastSocialSourcesRef.current.length > 0
+        ? lastSocialSourcesRef.current
+        : connectedSocialSources
 
   useEffect(() => {
     if (nav.selection?.startsWith('m:social:')) {
@@ -1070,20 +1084,20 @@ export default function WorkspaceSidebar({
                           <NavIcon name="users" />
                         </span>
                         <span className="ws-nav-label" style={{ fontWeight: 600 }}>Chat with Socials</span>
-                        {connectedSocialSources.length > 0 && (
-                          <span className="ws-nav-count">{connectedSocialSources.length}</span>
+                        {effectiveSocialSources.length > 0 && (
+                          <span className="ws-nav-count">{effectiveSocialSources.length}</span>
                         )}
                         <Chevron open={socialsDropdownOpen} />
                       </button>
 
                       {socialsDropdownOpen && (
                         <div className="ws-nav-sublist" style={{ paddingLeft: 6, marginTop: 2 }}>
-                          {connectedSocialSources.length === 0 ? (
+                          {effectiveSocialSources.length === 0 ? (
                             <p className="ws-nav-note" style={{ paddingLeft: 22, fontStyle: 'italic', color: '#64748b' }}>
                               No active social sessions. Connect Slack, Teams or WhatsApp in Settings.
                             </p>
                           ) : (
-                            connectedSocialSources.map((source) => {
+                            effectiveSocialSources.map((source) => {
                               const selId = `m:social:${source.id}` as SelectionId
                               const isSelected = nav.selection === selId
                               const platform = (source.platform || 'slack').toLowerCase()

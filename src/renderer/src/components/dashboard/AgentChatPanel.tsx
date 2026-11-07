@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   DashboardProjectChatErrorCode,
-  DashboardProjectChatMessage,
   DashboardProjectChatPayload,
   DashboardProjectChatSourceRef,
   DashboardProjectChatStatus,
@@ -339,10 +338,24 @@ function retryableCode(code: DashboardProjectChatErrorCode): boolean {
   )
 }
 
+export interface DisplayChatMessage {
+  id: string
+  role: 'user' | 'assistant' | 'client'
+  authorName: string
+  atIso: string
+  content: string
+  isAutoReply?: boolean
+  isMine?: boolean
+  pending?: boolean
+  failed?: boolean
+  sources?: DashboardProjectChatSourceRef[]
+  stopped?: boolean
+}
+
 function dropOptimisticUser(
-  messages: DashboardProjectChatMessage[],
+  messages: DisplayChatMessage[],
   text: string
-): DashboardProjectChatMessage[] {
+): DisplayChatMessage[] {
   const last = messages.at(-1)
   return last && last.role === 'user' && last.content === text ? messages.slice(0, -1) : messages
 }
@@ -382,7 +395,7 @@ export default function AgentChatPanel({
   onOpenLiveEmbed,
   onOpenSource
 }: AgentChatPanelProps): React.ReactElement {
-  const [messages, setMessages] = useState<DashboardProjectChatMessage[]>([])
+  const [messages, setMessages] = useState<DisplayChatMessage[]>([])
   const [loadingHistory, setLoadingHistory] = useState(true)
   const [status, setStatus] = useState<DashboardProjectChatStatus | null>(null)
   const [draft, setDraft] = useState<string>(() => initialQuestion ?? '')
@@ -394,6 +407,8 @@ export default function AgentChatPanel({
   const [confirmClear, setConfirmClear] = useState(false)
   const [showJump, setShowJump] = useState(false)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
+  const [composerMode, setComposerMode] = useState<'reply' | 'agent'>('reply')
+  const [sendingReply, setSendingReply] = useState(false)
 
   // Track active channel when in social mode
   const [activeChannelId, setActiveChannelId] = useState<string | null>(() => {
@@ -418,6 +433,15 @@ export default function AgentChatPanel({
     if (!activeChannelId || !socialSource?.channels) return null
     return socialSource.channels.find((c) => c.id === activeChannelId) ?? null
   }, [activeChannelId, socialSource])
+
+  // Synchronize default composer mode when channel changes
+  useEffect(() => {
+    if (activeChannel?.agentWrite) {
+      setComposerMode('reply')
+    } else {
+      setComposerMode('agent')
+    }
+  }, [activeChannelId, activeChannel?.agentWrite])
 
   const runIdRef = useRef<string | null>(null)
   const completedRef = useRef<Set<string>>(new Set())
@@ -466,41 +490,207 @@ export default function AgentChatPanel({
     onOpenSettings?.()
   }, [onOpenSettings])
 
-  // ---- history + status -------------------------------------------------
-  useEffect(() => {
-    let cancelled = false
-    setLoadingHistory(true)
+  // ---- unified channel & chat history loader ----------------------------
+  const loadChannelAndChatHistory = useCallback(async (): Promise<void> => {
     const query = activeChannelId
       ? { projectId, channelId: activeChannelId, sourceId: socialSource?.id }
       : mode === 'social' && socialSource?.id
         ? { projectId, sourceId: socialSource.id }
         : projectId
 
-    void window.api.dashboard
-      .getProjectChatHistory(query)
-      .then((result) => {
-        if (cancelled) return
-        setMessages(result.messages)
-        stickRef.current = true
-        requestAnimationFrame(() => scrollToBottom(false))
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setFailure({
-            message: 'Could not load this conversation. Try again in a moment.',
-            retryable: false,
-            mode: 'none',
-            question: ''
+    try {
+      const chatHistoryPromise = window.api.dashboard.getProjectChatHistory(query)
+      const channelMessagesPromise =
+        activeChannelId && typeof window.api.dashboard?.getMessages === 'function'
+          ? window.api.dashboard
+              .getMessages({
+                projectId,
+                channelId: activeChannelId,
+                source: 'client',
+                limit: 80
+              })
+              .catch(() => ({ messages: [] }))
+          : Promise.resolve({ messages: [] })
+
+      const [chatResult, channelPage] = await Promise.all([
+        chatHistoryPromise,
+        channelMessagesPromise
+      ])
+
+      const unified: DisplayChatMessage[] = []
+
+      // 1. Channel messages (scraped from Slack or posted by user/agent)
+      for (const m of channelPage?.messages || []) {
+        const isAutoReply = Boolean(
+          m.isMine &&
+            (m.text.includes('Thanks for reaching out') ||
+              m.text.includes('Thanks for mentioning me') ||
+              m.text.includes('I received your message'))
+        )
+        if (m.isMine) {
+          if (isAutoReply) {
+            unified.push({
+              id: `slack-${m.channelId}-${m.ts}`,
+              role: 'assistant',
+              authorName: 'Cosmic AI',
+              atIso: m.atIso || new Date(Number(m.ts) * 1000).toISOString(),
+              content: m.text,
+              isAutoReply: true
+            })
+          } else {
+            unified.push({
+              id: `slack-${m.channelId}-${m.ts}`,
+              role: 'user',
+              authorName: 'You',
+              atIso: m.atIso || new Date(Number(m.ts) * 1000).toISOString(),
+              content: m.text,
+              isMine: true,
+              pending: m.pending,
+              failed: m.failed
+            })
+          }
+        } else {
+          unified.push({
+            id: `slack-${m.channelId}-${m.ts}`,
+            role: 'client',
+            authorName: m.userName ? `@${m.userName}` : activeChannel ? `@${activeChannel.name}` : 'Contact',
+            atIso: m.atIso || new Date(Number(m.ts) * 1000).toISOString(),
+            content: m.text
           })
         }
-      })
+      }
+
+      // 2. Project chat messages (human <-> agent dialogs, action cards)
+      for (let i = 0; i < (chatResult?.messages || []).length; i++) {
+        const c = chatResult.messages[i]
+        const cTime = new Date(c.atIso).getTime()
+        const isDup = unified.some(
+          (u) =>
+            u.content.trim() === c.content.trim() &&
+            Math.abs(new Date(u.atIso).getTime() - cTime) < 5000
+        )
+        if (!isDup) {
+          unified.push({
+            id: `pchat-${i}-${c.atIso}`,
+            role: c.role,
+            authorName: c.role === 'user' ? 'You' : 'Cosmic',
+            atIso: c.atIso,
+            content: c.content,
+            sources: c.sources,
+            stopped: c.stopped
+          })
+        }
+      }
+
+      // 3. Sort chronologically
+      unified.sort((a, b) => new Date(a.atIso).getTime() - new Date(b.atIso).getTime())
+
+      setMessages(unified)
+    } catch {
+      // ignore
+    }
+  }, [projectId, activeChannelId, socialSource?.id, mode, activeChannel])
+
+  const streamingRef = useRef(streaming)
+  streamingRef.current = streaming
+
+  useEffect(() => {
+    let cancelled = false
+    setLoadingHistory(true)
+    loadChannelAndChatHistory()
+      .catch(() => undefined)
       .finally(() => {
         if (!cancelled) setLoadingHistory(false)
       })
+
+    // Subscribe to snapshot sync changes to refresh real-time channel messages
+    const offSnapshot =
+      typeof window.api.dashboard?.onSnapshotChanged === 'function'
+        ? window.api.dashboard.onSnapshotChanged(() => {
+            if (!cancelled) void loadChannelAndChatHistory()
+          })
+        : () => {}
+
+    // If scoped to a channel, poll every 5s for newly scraped messages
+    let timer: NodeJS.Timeout | null = null
+    if (activeChannelId) {
+      timer = setInterval(() => {
+        if (!cancelled && !streamingRef.current) void loadChannelAndChatHistory()
+      }, 5000)
+    }
+
     return () => {
       cancelled = true
+      offSnapshot()
+      if (timer) clearInterval(timer)
     }
-  }, [projectId, activeChannelId, mode, socialSource?.id, scrollToBottom])
+  }, [loadChannelAndChatHistory, activeChannelId])
+
+  const sendDirectSlackReply = useCallback(
+    async (textOverride?: string): Promise<void> => {
+      const text = (textOverride ?? draft).trim()
+      if (!text || !activeChannelId || sendingReply) return
+
+      const tempId = `temp-${Date.now()}`
+      const tempMsg: DisplayChatMessage = {
+        id: tempId,
+        role: 'user',
+        authorName: 'You',
+        atIso: new Date().toISOString(),
+        content: text,
+        isMine: true,
+        pending: true
+      }
+
+      setDraft('')
+      setSendingReply(true)
+      setFailure(null)
+      setNotice(null)
+      setMessages((prev) => [...prev, tempMsg])
+      stickRef.current = true
+      scrollToBottom(true)
+
+      try {
+        const res = await window.api.dashboard.sendMessage({
+          projectId,
+          channelId: activeChannelId,
+          text
+        })
+
+        if (res.ok && res.message) {
+          const sent = res.message
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === tempId
+                ? {
+                    id: `slack-${sent.channelId}-${sent.ts}`,
+                    role: 'user',
+                    authorName: 'You',
+                    atIso: sent.atIso,
+                    content: sent.text,
+                    isMine: true,
+                    pending: false
+                  }
+                : m
+            )
+          )
+        } else {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === tempId ? { ...m, pending: false, failed: true } : m))
+          )
+          setNotice(res.error || 'Failed to send message to Slack.')
+        }
+      } catch (err) {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === tempId ? { ...m, pending: false, failed: true } : m))
+        )
+        setNotice(err instanceof Error ? err.message : 'Error sending message to Slack.')
+      } finally {
+        setSendingReply(false)
+      }
+    },
+    [draft, activeChannelId, sendingReply, projectId, scrollToBottom]
+  )
 
   const refreshStatus = useCallback((): void => {
     void window.api.dashboard
@@ -545,7 +735,9 @@ export default function AgentChatPanel({
         setMessages((previous) => [
           ...previous,
           {
+            id: `done-${Date.now()}`,
             role: 'assistant',
+            authorName: 'Cosmic',
             content: event.content,
             atIso: new Date().toISOString(),
             sources: event.sources,
@@ -633,7 +825,13 @@ export default function AgentChatPanel({
       stickRef.current = true
       setMessages((previous) => [
         ...previous,
-        { role: 'user', content: text, atIso: new Date().toISOString() }
+        {
+          id: `user-${Date.now()}`,
+          role: 'user',
+          authorName: 'You',
+          content: text,
+          atIso: new Date().toISOString()
+        }
       ])
       try {
         const payload: DashboardProjectChatPayload = {
@@ -700,19 +898,12 @@ export default function AgentChatPanel({
         setStopping(false)
         setStreaming(false)
         setStreamText('')
-        const query = activeChannelId
-          ? { projectId, channelId: activeChannelId, sourceId: socialSource?.id }
-          : mode === 'social' && socialSource?.id
-            ? { projectId, sourceId: socialSource.id }
-            : projectId
-        void window.api.dashboard.getProjectChatHistory(query).then((history) => {
-          setMessages(history.messages)
-        })
+        void loadChannelAndChatHistory()
       }
     } catch {
       setStopping(false)
     }
-  }, [streaming, projectId, activeChannelId, socialSource?.id, mode])
+  }, [streaming, projectId, activeChannelId, socialSource?.id, loadChannelAndChatHistory])
 
   const retry = useCallback(async (): Promise<void> => {
     if (!failure || !failure.retryable || failure.mode === 'none' || streaming) return
@@ -727,7 +918,13 @@ export default function AgentChatPanel({
     if (retryMode === 'append') {
       setMessages((previous) => [
         ...previous,
-        { role: 'user', content: question, atIso: new Date().toISOString() }
+        {
+          id: `retry-${Date.now()}`,
+          role: 'user',
+          authorName: 'You',
+          content: question,
+          atIso: new Date().toISOString()
+        }
       ])
     }
     try {
@@ -791,7 +988,7 @@ export default function AgentChatPanel({
         question: ''
       })
     }
-  }, [streaming, projectId])
+  }, [streaming, projectId, activeChannelId, socialSource?.id, mode, loadChannelAndChatHistory])
 
   const applySuggestion = useCallback(
     (text: string): void => {
@@ -817,9 +1014,13 @@ export default function AgentChatPanel({
       if (event.key !== 'Enter' || event.shiftKey) return
       if (composingRef.current || event.nativeEvent.isComposing) return
       event.preventDefault()
-      void send()
+      if (activeChannel && composerMode === 'reply') {
+        void sendDirectSlackReply()
+      } else {
+        void send()
+      }
     },
-    [send]
+    [activeChannel, composerMode, sendDirectSlackReply, send]
   )
 
   if (mode === 'agentwork') {
@@ -841,7 +1042,11 @@ export default function AgentChatPanel({
         ? 'Stopping'
         : ''
 
-  const canSend = !streaming && !keyMissing && draft.trim().length > 0
+  const canSend =
+    !streaming &&
+    !sendingReply &&
+    draft.trim().length > 0 &&
+    (activeChannel && composerMode === 'reply' ? true : !keyMissing)
 
   return (
     <div style={{ display: 'flex', width: '100%', height: '100%', overflow: 'hidden' }}>
@@ -1092,11 +1297,17 @@ export default function AgentChatPanel({
 
           {!loadingHistory && messages.length === 0 && !streaming ? (
             <div className="chat-empty">
-              <p className="chat-empty-title">Ask about {projectName}</p>
+              <p className="chat-empty-title">
+                {activeChannel
+                  ? `Conversation in #${activeChannel.name.replace(/^[#@]+/, '')}`
+                  : `Ask about ${projectName}`}
+              </p>
               <p className="chat-empty-hint">
-                {keyMissing
-                  ? 'Add an AI key in Settings, then ask what the client needs, what changed, or what is blocked.'
-                  : 'I answer from this project’s Slack history and the state this card has already derived. Nothing is posted to Slack.'}
+                {activeChannel
+                  ? 'No stored messages for this channel yet. Type a message below to start the conversation!'
+                  : keyMissing
+                    ? 'Add an AI key in Settings, then ask what the client needs, what changed, or what is blocked.'
+                    : 'I answer from this project’s Slack history and the state this card has already derived. Nothing is posted to Slack.'}
               </p>
               <div className="chat-suggestions">
                 {SUGGESTIONS.map((suggestion) => (
@@ -1114,19 +1325,46 @@ export default function AgentChatPanel({
           ) : null}
 
           {messages.map((message, index) => {
-            const key = `${index}-${message.atIso}`
+            const key = message.id || `${index}-${message.atIso}`
+            const isClient = message.role === 'client'
+            const isAuto = Boolean(message.isAutoReply)
             return (
               <div
-                className={`chat-msg is-${message.role}${message.stopped ? ' is-stopped' : ''}`}
+                className={`chat-msg is-${message.role}${isAuto ? ' is-auto-reply' : ''}${message.stopped ? ' is-stopped' : ''}`}
                 key={key}
               >
                 <div className="chat-msg-meta">
-                  <span>{message.role === 'user' ? 'You' : 'Cosmic'}</span>
+                  {isClient ? (
+                    <span style={{ color: '#818cf8', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#818cf8' }} />
+                      {message.authorName}
+                    </span>
+                  ) : isAuto ? (
+                    <span style={{ color: '#4ade80', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <span>⚡ Cosmic AI</span>
+                      <span
+                        style={{
+                          fontSize: 9,
+                          background: 'rgba(34, 197, 94, 0.2)',
+                          color: '#86efac',
+                          padding: '1px 5px',
+                          borderRadius: 3,
+                          fontWeight: 700
+                        }}
+                      >
+                        AUTO-REPLY (~150ms)
+                      </span>
+                    </span>
+                  ) : (
+                    <span>{message.authorName}</span>
+                  )}
                   <span>{timeLabel(message.atIso)}</span>
+                  {message.pending ? <span style={{ color: '#fbbf24', fontSize: 10 }}>sending…</span> : null}
+                  {message.failed ? <span style={{ color: '#f87171', fontSize: 10 }}>failed</span> : null}
                   {message.stopped ? <span>stopped</span> : null}
                 </div>
                 <div className="chat-bubble">
-                  {message.role === 'assistant' ? (
+                  {message.role === 'assistant' && !isAuto ? (
                     (() => {
                       const { cleanContent, card, rawAction } = parseActionCard(message.content)
                       return (
@@ -1289,11 +1527,61 @@ export default function AgentChatPanel({
         </div>
       ) : null}
 
+      {activeChannel ? (
+        <div className="chat-composer-mode-bar">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button
+              type="button"
+              style={{
+                background: composerMode === 'reply' ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
+                color: composerMode === 'reply' ? '#a5b4fc' : 'var(--text-muted)',
+                border: composerMode === 'reply' ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid transparent',
+                borderRadius: 4,
+                padding: '2px 8px',
+                fontSize: 10,
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+              onClick={() => setComposerMode('reply')}
+            >
+              💬 Reply in #{activeChannel.name.replace(/^[#@]+/, '')}
+            </button>
+            <button
+              type="button"
+              style={{
+                background: composerMode === 'agent' ? 'rgba(168, 85, 247, 0.2)' : 'transparent',
+                color: composerMode === 'agent' ? '#c084fc' : 'var(--text-muted)',
+                border: composerMode === 'agent' ? '1px solid rgba(168, 85, 247, 0.4)' : '1px solid transparent',
+                borderRadius: 4,
+                padding: '2px 8px',
+                fontSize: 10,
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+              onClick={() => setComposerMode('agent')}
+            >
+              🤖 Instruct Cosmic AI
+            </button>
+          </div>
+          <span style={{ fontSize: 10, color: 'var(--text-faint)', marginLeft: 'auto' }}>
+            {composerMode === 'reply'
+              ? activeChannel.agentWrite
+                ? '⚡ Posts to Slack via Direct API (~150ms)'
+                : '⚠️ Agent Write is disabled in Workspace Control'
+              : '🧠 Answers from this channel’s history & context'}
+          </span>
+        </div>
+      ) : null}
+
       <form
         className="chat-composer"
         onSubmit={(event) => {
           event.preventDefault()
-          void send()
+          if (activeChannel && composerMode === 'reply') {
+            void sendDirectSlackReply()
+          } else {
+            void send()
+          }
         }}
       >
         <textarea
@@ -1302,13 +1590,15 @@ export default function AgentChatPanel({
           rows={1}
           aria-label="Ask about this project"
           placeholder={
-            keyMissing
-              ? 'Add an AI key to start chatting'
-              : activeChannel
-                ? `Ask or instruct agent in #${activeChannel.name.replace(/^[#@]+/, '')}…`
-                : 'Ask about this project…'
+            activeChannel && composerMode === 'reply'
+              ? `Message #${activeChannel.name.replace(/^[#@]+/, '')} directly on Slack (Enter to send)…`
+              : keyMissing
+                ? 'Add an AI key to start chatting'
+                : activeChannel
+                  ? `Ask or instruct agent in #${activeChannel.name.replace(/^[#@]+/, '')}…`
+                  : 'Ask about this project…'
           }
-          disabled={streaming || keyMissing}
+          disabled={streaming || sendingReply || (composerMode === 'agent' && keyMissing)}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={handleComposerKeyDown}
           onCompositionStart={() => {
@@ -1329,7 +1619,7 @@ export default function AgentChatPanel({
           </button>
         ) : (
           <button type="submit" className="chat-send" disabled={!canSend}>
-            Send
+            {sendingReply ? 'Sending…' : 'Send'}
           </button>
         )}
       </form>
