@@ -324,20 +324,35 @@ export class DashboardChatService {
     const rawUser = msg.user ?? ''
     const isSlackId = /^U[A-Z0-9_]+$/.test(rawUser)
     const selfUserId = project.selfUserId ?? context?.selfUserId ?? null
+    const text = msg.text ?? ''
+    const hasAutoReplyText = Boolean(
+      text &&
+        (text.includes('Thanks for reaching out') ||
+          text.includes('Thanks for mentioning me') ||
+          text.includes('I received your message') ||
+          text.includes('reviewing this and will get back to you'))
+    )
+    const isExplicitMine = rawUser === 'You' || rawUser === 'me' || rawUser === 'bot' || hasAutoReplyText
+    const isMine = Boolean(isExplicitMine || (selfUserId && rawUser === selfUserId))
     const resolved =
       context?.names.get(rawUser) ||
       slackUserCache.get(rawUser) ||
-      (!isSlackId && rawUser ? rawUser : undefined)
-    const isMine = Boolean(selfUserId && (rawUser === selfUserId || rawUser === 'You' || rawUser === 'me'))
-    const fallbackName = project.name?.includes('Ashutosh') ? 'Ashutosh' : (rawUser || 'Unknown')
+      (!isSlackId && rawUser && rawUser !== 'me' ? rawUser : undefined)
+    const fallbackName = project.name?.includes('Ashutosh') ? 'Ashutosh' : (rawUser && rawUser !== 'me' ? rawUser : 'Contact')
+    const finalUserName = isMine
+      ? hasAutoReplyText
+        ? 'Cosmic AI'
+        : 'Me'
+      : (resolved || fallbackName)
+
     return {
       ts: msg.ts,
       channelId: row.channelId,
       channelName: row.channelName,
-      userId: rawUser,
-      userName: resolved || (isMine ? 'You' : fallbackName),
+      userId: isMine ? (selfUserId || 'me') : rawUser,
+      userName: finalUserName,
       source,
-      text: msg.text ?? '',
+      text,
       atIso: isoFromTs(msg.ts),
       isMine
     }

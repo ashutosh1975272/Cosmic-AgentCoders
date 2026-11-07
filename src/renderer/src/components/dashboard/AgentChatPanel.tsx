@@ -73,6 +73,33 @@ function parseActionCard(content: string): {
   return { cleanContent, card, rawAction }
 }
 
+export function formatChannelDisplayName(
+  channelOrName: string | { name: string; isDm?: boolean; kind?: string }
+): { symbol: string; cleanName: string; fullName: string; isDm: boolean } {
+  const rawName = typeof channelOrName === 'string' ? channelOrName : channelOrName.name
+  const isDm =
+    typeof channelOrName === 'string'
+      ? rawName.startsWith('@') || rawName.toLowerCase().includes('you')
+      : Boolean(
+          channelOrName.isDm ||
+            channelOrName.kind === 'dm' ||
+            rawName.startsWith('@') ||
+            rawName.toLowerCase().includes('you')
+        )
+  let cleanName = rawName
+    .replace(/^[#@]+/, '')
+    .replace(/\s*\(?you\)?$/i, '')
+    .trim()
+  if (!cleanName) cleanName = 'channel'
+  const symbol = isDm ? '@' : '#'
+  return {
+    symbol,
+    cleanName,
+    fullName: `${symbol}${cleanName}`,
+    isDm
+  }
+}
+
 function ActionCard({
   card,
   onOpenControl
@@ -521,14 +548,24 @@ export default function AgentChatPanel({
 
       // 1. Channel messages (scraped from Slack or posted by user/agent)
       for (const m of channelPage?.messages || []) {
-        const isAutoReply = Boolean(
-          m.isMine &&
-            (m.text.includes('Thanks for reaching out') ||
-              m.text.includes('Thanks for mentioning me') ||
-              m.text.includes('I received your message'))
+        const text = m.text || ''
+        const hasAutoReplyText = Boolean(
+          text &&
+            (text.includes('Thanks for reaching out') ||
+              text.includes('Thanks for mentioning me') ||
+              text.includes('I received your message') ||
+              text.includes('reviewing this and will get back to you'))
         )
-        if (m.isMine) {
-          if (isAutoReply) {
+        const isMine = Boolean(
+          m.isMine ||
+            m.userId === 'me' ||
+            m.userName === 'You' ||
+            m.userName === 'Cosmic AI' ||
+            hasAutoReplyText
+        )
+
+        if (isMine) {
+          if (hasAutoReplyText || m.userName === 'Cosmic AI') {
             unified.push({
               id: `slack-${m.channelId}-${m.ts}`,
               role: 'assistant',
@@ -550,10 +587,21 @@ export default function AgentChatPanel({
             })
           }
         } else {
+          const rawAuthor =
+            m.userName && m.userName !== 'me'
+              ? m.userName
+              : activeChannel
+                ? activeChannel.name
+                : 'Contact'
+          const cleanAuthor =
+            rawAuthor
+              .replace(/^[#@]+/, '')
+              .replace(/\s*\(?you\)?$/i, '')
+              .trim() || 'Contact'
           unified.push({
             id: `slack-${m.channelId}-${m.ts}`,
             role: 'client',
-            authorName: m.userName ? `@${m.userName}` : activeChannel ? `@${activeChannel.name}` : 'Contact',
+            authorName: `@${cleanAuthor}`,
             atIso: m.atIso || new Date(Number(m.ts) * 1000).toISOString(),
             content: m.text
           })
@@ -1048,6 +1096,8 @@ export default function AgentChatPanel({
     draft.trim().length > 0 &&
     (activeChannel && composerMode === 'reply' ? true : !keyMissing)
 
+  const activeChanDisplay = activeChannel ? formatChannelDisplayName(activeChannel) : null
+
   return (
     <div style={{ display: 'flex', width: '100%', height: '100%', overflow: 'hidden' }}>
       {mode === 'social' && socialSource && (
@@ -1074,7 +1124,7 @@ export default function AgentChatPanel({
                             ? 'WhatsApp'
                             : 'Slack Workspace'
                     })()}
-                    {activeChannel ? ` · ${activeChannel.name.startsWith('@') ? '' : '#'}${activeChannel.name}` : ' · All Channels'}
+                    {activeChanDisplay ? ` · ${activeChanDisplay.fullName}` : ' · All Channels'}
                   </h3>
                   <span
                     style={{
@@ -1115,8 +1165,8 @@ export default function AgentChatPanel({
                   )}
                 </div>
                 <span className="chat-head-sub">
-                  {activeChannel
-                    ? `Autonomous ${socialSource.platform ? socialSource.platform.toUpperCase() : 'Social'} Agent · Scoped to ${activeChannel.name.startsWith('@') ? '' : '#'}${activeChannel.name} messages and actions`
+                  {activeChanDisplay
+                    ? `Autonomous ${socialSource.platform ? socialSource.platform.toUpperCase() : 'Social'} Agent · Scoped to ${activeChanDisplay.fullName} messages and actions`
                     : `Autonomous ${socialSource.platform ? socialSource.platform.toUpperCase() : 'Social'} Agent · Scoped to ${socialSource.workspaceName || 'connected account'} channels and direct messages`}
                 </span>
               </>
@@ -1298,12 +1348,12 @@ export default function AgentChatPanel({
           {!loadingHistory && messages.length === 0 && !streaming ? (
             <div className="chat-empty">
               <p className="chat-empty-title">
-                {activeChannel
-                  ? `Conversation in #${activeChannel.name.replace(/^[#@]+/, '')}`
+                {activeChanDisplay
+                  ? `Conversation in ${activeChanDisplay.fullName}`
                   : `Ask about ${projectName}`}
               </p>
               <p className="chat-empty-hint">
-                {activeChannel
+                {activeChanDisplay
                   ? 'No stored messages for this channel yet. Type a message below to start the conversation!'
                   : keyMissing
                     ? 'Add an AI key in Settings, then ask what the client needs, what changed, or what is blocked.'
@@ -1328,6 +1378,10 @@ export default function AgentChatPanel({
             const key = message.id || `${index}-${message.atIso}`
             const isClient = message.role === 'client'
             const isAuto = Boolean(message.isAutoReply)
+            const isUser = message.role === 'user'
+            const initialLetter = isClient
+              ? (message.authorName.replace(/^[#@]+/, '').charAt(0) || 'C').toUpperCase()
+              : ''
             return (
               <div
                 className={`chat-msg is-${message.role}${isAuto ? ' is-auto-reply' : ''}${message.stopped ? ' is-stopped' : ''}`}
@@ -1335,26 +1389,56 @@ export default function AgentChatPanel({
               >
                 <div className="chat-msg-meta">
                   {isClient ? (
-                    <span style={{ color: '#818cf8', display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#818cf8' }} />
-                      {message.authorName}
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span className="chat-msg-avatar client-avatar">
+                        {initialLetter}
+                      </span>
+                      <span style={{ color: '#a5b4fc', fontWeight: 650 }}>
+                        {message.authorName}
+                      </span>
+                    </div>
                   ) : isAuto ? (
-                    <span style={{ color: '#4ade80', display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <span>⚡ Cosmic AI</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span className="chat-msg-avatar ai-avatar">
+                        ⚡
+                      </span>
+                      <span style={{ color: '#4ade80', fontWeight: 700 }}>
+                        Cosmic AI
+                      </span>
                       <span
                         style={{
                           fontSize: 9,
                           background: 'rgba(34, 197, 94, 0.2)',
                           color: '#86efac',
-                          padding: '1px 5px',
+                          padding: '1px 6px',
                           borderRadius: 3,
                           fontWeight: 700
                         }}
                       >
                         AUTO-REPLY (~150ms)
                       </span>
-                    </span>
+                    </div>
+                  ) : isUser ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span className="chat-msg-avatar user-avatar">
+                        Y
+                      </span>
+                      <span style={{ color: '#c084fc', fontWeight: 650 }}>
+                        You
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 9,
+                          background: 'rgba(168, 85, 247, 0.2)',
+                          color: '#e9d5ff',
+                          padding: '1px 6px',
+                          borderRadius: 3,
+                          fontWeight: 700
+                        }}
+                      >
+                        DIRECT API
+                      </span>
+                    </div>
                   ) : (
                     <span>{message.authorName}</span>
                   )}
@@ -1413,7 +1497,7 @@ export default function AgentChatPanel({
                     message.content
                   )}
                 </div>
-                {message.role === 'assistant' ? (
+                {message.role === 'assistant' && !isAuto ? (
                   <div className="chat-msg-actions">
                     <button
                       type="button"
@@ -1527,7 +1611,7 @@ export default function AgentChatPanel({
         </div>
       ) : null}
 
-      {activeChannel ? (
+      {activeChannel && activeChanDisplay ? (
         <div className="chat-composer-mode-bar">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <button
@@ -1544,7 +1628,7 @@ export default function AgentChatPanel({
               }}
               onClick={() => setComposerMode('reply')}
             >
-              💬 Reply in #{activeChannel.name.replace(/^[#@]+/, '')}
+              💬 Reply in {activeChanDisplay.fullName}
             </button>
             <button
               type="button"
@@ -1590,12 +1674,12 @@ export default function AgentChatPanel({
           rows={1}
           aria-label="Ask about this project"
           placeholder={
-            activeChannel && composerMode === 'reply'
-              ? `Message #${activeChannel.name.replace(/^[#@]+/, '')} directly on Slack (Enter to send)…`
+            activeChanDisplay && composerMode === 'reply'
+              ? `Message ${activeChanDisplay.fullName} directly on Slack (Enter to send)…`
               : keyMissing
                 ? 'Add an AI key to start chatting'
-                : activeChannel
-                  ? `Ask or instruct agent in #${activeChannel.name.replace(/^[#@]+/, '')}…`
+                : activeChanDisplay
+                  ? `Ask or instruct agent in ${activeChanDisplay.fullName}…`
                   : 'Ask about this project…'
           }
           disabled={streaming || sendingReply || (composerMode === 'agent' && keyMissing)}

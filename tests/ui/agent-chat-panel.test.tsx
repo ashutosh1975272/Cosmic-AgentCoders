@@ -545,4 +545,82 @@ describe('AgentChatPanel', () => {
     expect(screen.getByText('⚡ Slack: Acme Slack')).toBeTruthy()
     expect(screen.queryByText(/AgentWork/)).toBeNull()
   })
+
+  it('renders inbound client messages on left with avatar and auto-replies on right with Cosmic AI badge', async () => {
+    installApi()
+    ;(window as any).api.dashboard.getMessages = vi.fn(async () => ({
+      messages: [
+        {
+          channelId: 'C1',
+          channelName: 'dev',
+          ts: '1000.0001',
+          userId: 'U_ASHUTOSH',
+          userName: 'Ashutosh',
+          text: 'hello team, what are we doing today?',
+          atIso: new Date(1000000).toISOString(),
+          isMine: false
+        },
+        {
+          channelId: 'C1',
+          channelName: 'dev',
+          ts: '1000.0002',
+          userId: 'me',
+          userName: 'Cosmic AI',
+          text: 'Hi @Ashutosh! I received your message. Thanks for reaching out — I am reviewing this and will get back to you shortly.',
+          atIso: new Date(1001000).toISOString(),
+          isMine: true
+        },
+        {
+          channelId: 'C1',
+          channelName: 'dev',
+          ts: '1000.0003',
+          userId: 'me',
+          userName: 'You',
+          text: 'Manual direct user send to channel',
+          atIso: new Date(1002000).toISOString(),
+          isMine: true
+        }
+      ]
+    }))
+
+    renderPanel({
+      mode: 'social',
+      socialSource: {
+        id: 'src-1',
+        kind: 'browser',
+        platform: 'slack',
+        workspaceId: 'T1',
+        workspaceName: 'Acme Slack',
+        channels: [
+          {
+            id: 'C1',
+            name: 'dev',
+            isPrivate: false,
+            isDm: false,
+            enabled: true,
+            agentWrite: true
+          }
+        ],
+        role: 'client',
+        enabled: true,
+        backfillDays: 7
+      }
+    } as any)
+
+    await waitFor(() => {
+      expect(screen.getByText('hello team, what are we doing today?')).toBeTruthy()
+    })
+
+    // Contact message on left
+    expect(screen.getByText('@Ashutosh')).toBeTruthy()
+    expect(screen.getByText('A')).toBeTruthy()
+
+    // Cosmic AI Auto-reply on right
+    expect(screen.getByText('Cosmic AI')).toBeTruthy()
+    expect(screen.getByText('AUTO-REPLY (~150ms)')).toBeTruthy()
+
+    // Direct user send on right
+    expect(screen.getByText('You')).toBeTruthy()
+    expect(screen.getByText('DIRECT API')).toBeTruthy()
+  })
 })

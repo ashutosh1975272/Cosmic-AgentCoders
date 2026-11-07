@@ -94,27 +94,25 @@ export default function SocialChannelSidebar({
     return allChannels.filter((ch) => ch.name.toLowerCase().includes(q))
   }, [allChannels, filterQuery])
 
-  const publicChannels = useMemo(() => {
-    return filteredChannels.filter(
-      (c) =>
-        !c.isPrivate &&
-        !c.isDm &&
-        c.kind !== 'private' &&
-        c.kind !== 'dm' &&
-        !c.name.startsWith('@')
+  const isDmChannel = (c: ProjectSourceChannel): boolean =>
+    Boolean(
+      c.isDm ||
+        c.kind === 'dm' ||
+        c.name.startsWith('@') ||
+        c.name.startsWith('#@') ||
+        c.name.toLowerCase().includes('you')
     )
+
+  const publicChannels = useMemo(() => {
+    return filteredChannels.filter((c) => !c.isPrivate && c.kind !== 'private' && !isDmChannel(c))
   }, [filteredChannels])
 
   const privateChannels = useMemo(() => {
-    return filteredChannels.filter(
-      (c) => (c.isPrivate || c.kind === 'private') && !c.isDm && !c.name.startsWith('@')
-    )
+    return filteredChannels.filter((c) => (c.isPrivate || c.kind === 'private') && !isDmChannel(c))
   }, [filteredChannels])
 
   const dmChannels = useMemo(() => {
-    return filteredChannels.filter(
-      (c) => c.isDm || c.kind === 'dm' || c.name.startsWith('@') || c.name.startsWith('#@')
-    )
+    return filteredChannels.filter(isDmChannel)
   }, [filteredChannels])
 
   const platform = (source.platform || 'slack').toLowerCase()
@@ -468,14 +466,16 @@ function renderChannelRow(
   onSelect: (id: string) => void
 ): React.JSX.Element {
   const isSelected = activeChannelId === channel.id
-  const displayName = channel.name.replace(/^[#@]+/, '')
+  const isDm = channel.isDm || channel.kind === 'dm' || channel.name.startsWith('@') || channel.name.toLowerCase().includes('you')
+  const cleanName = channel.name.replace(/^[#@]+/, '').replace(/\s*\(?you\)?$/i, '').trim() || 'channel'
+  const displaySymbol = isDm ? '👤' : symbol
 
   return (
     <button
       key={channel.id}
       type="button"
       onClick={() => onSelect(channel.id)}
-      title={`${symbol} ${channel.name} · ${channel.agentWrite ? 'Agent Write Authorized' : 'Read Monitored'}`}
+      title={`${displaySymbol} ${cleanName} · ${channel.agentWrite ? 'Agent Write Authorized' : 'Read Monitored'}`}
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -495,14 +495,14 @@ function renderChannelRow(
     >
       <span
         style={{
-          fontSize: symbol === '#' ? 13 : 11,
+          fontSize: displaySymbol === '#' ? 13 : 11,
           color: isSelected ? '#c084fc' : '#64748b',
           fontWeight: 700,
           width: 14,
           textAlign: 'center'
         }}
       >
-        {symbol}
+        {displaySymbol}
       </span>
 
       <span
@@ -514,7 +514,7 @@ function renderChannelRow(
           fontWeight: isSelected ? 650 : 500
         }}
       >
-        {displayName}
+        {cleanName}
       </span>
 
       {channel.agentWrite && (

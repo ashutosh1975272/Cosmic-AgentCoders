@@ -92,6 +92,33 @@ describe('agent-action-fuzzy and multi-clause tests', () => {
       expect(action?.text).toBe('hiii or hlw')
     })
 
+    it('strips preamble "to the <target> properly like" and delivers clean text', () => {
+      const prompt = 'send the message to the Ashutosh properly like hiii how are you bro'
+      const action = detectAgentAction(prompt, project)
+      expect(action).not.toBeNull()
+      expect(action?.type).toBe('send_slack')
+      expect(action?.channelNameOrId).toBe('Ashutosh')
+      expect(action?.text).toBe('hiii how are you bro')
+    })
+
+    it('strips preamble with channel and colon delimiter', () => {
+      const prompt = 'send message to newtrestinggrup: Hello team!'
+      const action = detectAgentAction(prompt, project)
+      expect(action).not.toBeNull()
+      expect(action?.type).toBe('send_slack')
+      expect(action?.channelNameOrId).toBe('newtrestinggrup')
+      expect(action?.text).toBe('Hello team!')
+    })
+
+    it('strips preamble with "in ... channel properly saying"', () => {
+      const prompt = 'send message in agentworkprojecttesting channel properly saying welcome aboard'
+      const action = detectAgentAction(prompt, project)
+      expect(action).not.toBeNull()
+      expect(action?.type).toBe('send_slack')
+      expect(action?.channelNameOrId).toBe('agentworkprojecttesting')
+      expect(action?.text).toBe('welcome aboard')
+    })
+
     it('correctly parses read channel request with typo channel name', () => {
       const prompt =
         'tell me what are the last 3 message in the newtestinggroup tell me last 3 messages'

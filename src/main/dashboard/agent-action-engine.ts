@@ -285,6 +285,8 @@ export function detectAgentAction(
   // - "send message in agentworkprojecttesting channel hiii"
   // - "here try to send the message in the agentworkprojecttesting channel you try to send the message properly see that all proeprly and ten send the message thier hiii or hlw as yyou want in thier"
   if (/\b(?:send|post|write)\b/i.test(p)) {
+    const targetSet = new Set<string>()
+
     // 5A. Extract message text
     let messageText = ''
     const quoteMatch = p.match(/["'“]([^"'“”]+)["'”]/)
@@ -306,15 +308,28 @@ export function detectAgentAction(
         }
       }
       if (messageText) {
+        // Strip routing preamble like "to the Ashutosh properly like", "in #dev saying", "to @user:"
+        const preambleMatch = messageText.match(
+          /^(?:(?:to|in|for|into)\s+(?:the\s+)?(?:#|@)?([a-zA-Z0-9_\s-]+?)\s*(?:channel)?\s*(?:properly\s*)?(?:like|saying|that|:|-|,)\s*)/i
+        )
+        if (preambleMatch) {
+          const candidateTarget = preambleMatch[1]?.trim()
+          if (candidateTarget && targetSet.size === 0) {
+            targetSet.add(candidateTarget)
+          }
+          messageText = messageText.slice(preambleMatch[0].length).trim()
+        }
+        // Also strip standalone leading filler like "properly like", "just like", "saying", "that"
+        messageText = messageText.replace(/^(?:(?:properly\s+)?(?:like|saying|that|as)\s*[:,-]?\s*)/i, '').trim()
+        // Strip trailing conversational fillers like "as you want in there", "thier"
         messageText = messageText
           .replace(/\s*(?:as\s+(?:y+ou|u)\s+want)?\s*(?:in\s+(?:thier|there))?$/i, '')
+          .replace(/\s*(?:properly)?\s*(?:in\s+(?:thier|there))?$/i, '')
           .trim()
       }
     }
 
     // 5B. Extract target channels / people
-    const targetSet = new Set<string>()
-
     // If project is available, check for channel/contact names in prompt
     if (project) {
       const allChannels = (project.sources ?? []).flatMap((s) => s.channels ?? [])
