@@ -190,7 +190,7 @@ describe('ComposerAutocompletePopover UI tests', () => {
     expect(stopImmediateSpy).toHaveBeenCalled()
     expect(onSelect).toHaveBeenCalledWith(
       expect.objectContaining({
-        insertText: '@AgentWork '
+        insertText: '@HeadAgent '
       })
     )
   })

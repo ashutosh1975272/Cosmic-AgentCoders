@@ -9,15 +9,16 @@ export interface AutocompleteItem {
   badgeColor?: string
   icon: string
   insertText: string
-  category: 'account' | 'channel' | 'command' | 'persona'
+  category: 'account' | 'channel' | 'command' | 'persona' | 'platform' | 'agent' | 'skill'
 }
 
 interface ComposerAutocompletePopoverProps {
-  trigger: '@' | '#' | '/' | null
+  trigger: '@' | '#' | '/' | '$' | null
   query: string
   sources?: ProjectSource[]
   channels?: ProjectSourceChannel[]
   isScoped?: boolean
+  contextScope?: 'project' | 'agentcoders' | 'social'
   onSelect: (item: AutocompleteItem) => void
   onClose: () => void
 }
@@ -28,6 +29,7 @@ export default function ComposerAutocompletePopover({
   sources = [],
   channels = [],
   isScoped = false,
+  contextScope = 'project',
   onSelect,
   onClose
 }: ComposerAutocompletePopoverProps): React.JSX.Element | null {
@@ -37,11 +39,134 @@ export default function ComposerAutocompletePopover({
   const items = useMemo<AutocompleteItem[]>(() => {
     const q = (query || '').toLowerCase().trim()
 
-    if (trigger === '@') {
-      // 1. Account / Session mentions
-      const accounts: AutocompleteItem[] = []
-      const seen = new Set<string>()
+    // 0. Platform Triggers ($)
+    if (trigger === '$') {
+      const platforms: AutocompleteItem[] = []
 
+      if (contextScope === 'agentcoders') {
+        // When already inside AgentCoders Swarm Workspace
+        platforms.push({
+          id: 'plat-agentwork-active',
+          label: '$AgentWork',
+          sublabel: 'Connected Swarm Workspace · Direct multi-agent coding active',
+          badge: 'ACTIVE PLATFORM',
+          badgeColor: '#22c55e',
+          icon: '⚡',
+          insertText: '$AgentWork ',
+          category: 'platform'
+        })
+      } else {
+        // When in Master Chat / other views
+        platforms.push(
+          {
+            id: 'plat-agentwork',
+            label: '$AgentWork',
+            sublabel: 'Autonomous Multi-Agent Coding Environment (Swarm & A2A)',
+            badge: 'CODING SWARM',
+            badgeColor: '#a855f7',
+            icon: '🤖',
+            insertText: '$AgentWork ',
+            category: 'platform'
+          },
+          {
+            id: 'plat-claude',
+            label: '$Claude',
+            sublabel: 'Claude Code / Anthropic Agent Ecosystem',
+            badge: 'CLAUDE',
+            badgeColor: '#d97706',
+            icon: '🟣',
+            insertText: '$Claude ',
+            category: 'platform'
+          },
+          {
+            id: 'plat-codex',
+            label: '$Codex',
+            sublabel: 'OpenAI Codex / Swarm Engine',
+            badge: 'CODEX',
+            badgeColor: '#10b981',
+            icon: '🟢',
+            insertText: '$Codex ',
+            category: 'platform'
+          }
+        )
+      }
+
+      if (!q) return platforms
+      return platforms.filter(
+        (p) => p.label.toLowerCase().includes(q) || (p.sublabel && p.sublabel.toLowerCase().includes(q))
+      )
+    }
+
+    // 1. Account & Coding Agent Mentions (@)
+    if (trigger === '@') {
+      const agentsAndAccounts: AutocompleteItem[] = []
+
+      // Specialized Coding Swarm Agents
+      agentsAndAccounts.push(
+        {
+          id: 'agent-head',
+          label: '@HeadAgent',
+          sublabel: '👑 Swarm Coordinator & Planner · Partitions tasks & delegates via A2A',
+          badge: 'SWARM LEADER',
+          badgeColor: '#eab308',
+          icon: '👑',
+          insertText: '@HeadAgent ',
+          category: 'agent'
+        },
+        {
+          id: 'agent-architect',
+          label: '@Architect',
+          sublabel: '🏗️ System & Codebase Architecture · Deep modules & domain modeling',
+          badge: 'ARCHITECTURE',
+          badgeColor: '#3b82f6',
+          icon: '🏗️',
+          insertText: '@Architect ',
+          category: 'agent'
+        },
+        {
+          id: 'agent-coder',
+          label: '@Coder',
+          sublabel: '💻 Implementation Engine · TDD, feature implementation, refactoring',
+          badge: 'DEVELOPER',
+          badgeColor: '#22c55e',
+          icon: '💻',
+          insertText: '@Coder ',
+          category: 'agent'
+        },
+        {
+          id: 'agent-reviewer',
+          label: '@Reviewer',
+          sublabel: '🔍 Code Reviewer · Two-axis review (Standards + Spec) & git guardrails',
+          badge: 'REVIEWER',
+          badgeColor: '#f97316',
+          icon: '🔍',
+          insertText: '@Reviewer ',
+          category: 'agent'
+        },
+        {
+          id: 'agent-tester',
+          label: '@Tester',
+          sublabel: '🧪 Test Engineer · TDD verification, unit & integration test suites',
+          badge: 'TESTING',
+          badgeColor: '#ec4899',
+          icon: '🧪',
+          insertText: '@Tester ',
+          category: 'agent'
+        },
+        {
+          id: 'agent-executor',
+          label: '@AgentWorkExecutor',
+          sublabel: '⚡ Runtime Execution Runner · Terminal commands & MCP execution bridge',
+          badge: 'EXECUTOR',
+          badgeColor: '#a855f7',
+          icon: '⚡',
+          insertText: '@AgentWorkExecutor ',
+          category: 'agent'
+        }
+      )
+
+      // Connected Social Accounts & Sessions
+      const seen = new Set<string>()
       for (const s of sources) {
         if (s.enabled === false) continue
         if (s.role === 'ours') continue
@@ -56,7 +181,7 @@ export default function ComposerAutocompletePopover({
         const badgeColor =
           plat === 'teams' ? '#3b82f6' : plat === 'whatsapp' ? '#22c55e' : plat === 'discord' ? '#5865f2' : '#a855f7'
 
-        accounts.push({
+        agentsAndAccounts.push({
           id: s.id,
           label: `@${cleanToken}`,
           sublabel: `${platBadge} Session · ${s.channels?.length || 0} channels`,
@@ -68,14 +193,14 @@ export default function ComposerAutocompletePopover({
         })
       }
 
-      if (!q) return accounts
-      return accounts.filter(
+      if (!q) return agentsAndAccounts
+      return agentsAndAccounts.filter(
         (a) => a.label.toLowerCase().includes(q) || (a.sublabel && a.sublabel.toLowerCase().includes(q))
       )
     }
 
+    // 2. Channel & Contact Mentions (#)
     if (trigger === '#') {
-      // 2. Channel & Contact mentions
       const chanItems: AutocompleteItem[] = []
       for (const ch of channels) {
         if (ch.enabled === false) continue
@@ -105,9 +230,122 @@ export default function ComposerAutocompletePopover({
       )
     }
 
+    // 3. Slash Commands & Coding Skills (/)
     if (trigger === '/') {
-      // 3. Slash Commands
-      const commands: AutocompleteItem[] = [
+      const skillsAndCommands: AutocompleteItem[] = [
+        // Matt Pocock Skills (1st Priority)
+        {
+          id: 'skill-ask-matt',
+          label: '/ask-matt',
+          sublabel: '🧭 Ask which skill or flow fits your situation · Router over skills',
+          badge: 'SKILL ROUTER',
+          badgeColor: '#8b5cf6',
+          icon: '🧭',
+          insertText: '/ask-matt ',
+          category: 'skill'
+        },
+        {
+          id: 'skill-tdd',
+          label: '/tdd',
+          sublabel: '🧪 Test-Driven Development · Red-green-refactor cycle with automated tests',
+          badge: 'TDD',
+          badgeColor: '#10b981',
+          icon: '🧪',
+          insertText: '/tdd ',
+          category: 'skill'
+        },
+        {
+          id: 'skill-code-review',
+          label: '/code-review',
+          sublabel: '⚖️ Two-axis code review · Standards + Spec verification',
+          badge: 'REVIEW',
+          badgeColor: '#f59e0b',
+          icon: '⚖️',
+          insertText: '/code-review ',
+          category: 'skill'
+        },
+        {
+          id: 'skill-plan',
+          label: '/plan',
+          sublabel: '📝 Write comprehensive implementation plan before touching code',
+          badge: 'PLANNING',
+          badgeColor: '#3b82f6',
+          icon: '📝',
+          insertText: '/plan ',
+          category: 'skill'
+        },
+        {
+          id: 'skill-grill-me',
+          label: '/grill-me',
+          sublabel: '🔥 Stress-test architecture & design decisions with interactive interview',
+          badge: 'INTERVIEW',
+          badgeColor: '#ec4899',
+          icon: '🔥',
+          insertText: '/grill-me ',
+          category: 'skill'
+        },
+        {
+          id: 'skill-implement',
+          label: '/implement',
+          sublabel: '⚡ Autonomous implementation of tickets and specifications',
+          badge: 'IMPLEMENT',
+          badgeColor: '#06b6d4',
+          icon: '⚡',
+          insertText: '/implement ',
+          category: 'skill'
+        },
+        {
+          id: 'skill-codebase-design',
+          label: '/codebase-design',
+          sublabel: '📐 Design deep modules, interfaces, and AI-navigable architecture',
+          badge: 'DESIGN',
+          badgeColor: '#6366f1',
+          icon: '📐',
+          insertText: '/codebase-design ',
+          category: 'skill'
+        },
+        {
+          id: 'skill-domain-modeling',
+          label: '/domain-modeling',
+          sublabel: '🏛️ Build and sharpen domain models, glossary, and architectural records',
+          badge: 'DOMAIN',
+          badgeColor: '#84cc16',
+          icon: '🏛️',
+          insertText: '/domain-modeling ',
+          category: 'skill'
+        },
+        {
+          id: 'skill-diagnosing-bugs',
+          label: '/diagnosing-bugs',
+          sublabel: '🐛 Diagnosis loop for hard bugs, flakiness, and regressions',
+          badge: 'DEBUG',
+          badgeColor: '#ef4444',
+          icon: '🐛',
+          insertText: '/diagnosing-bugs ',
+          category: 'skill'
+        },
+        {
+          id: 'skill-migrate-to-shoehorn',
+          label: '/migrate-to-shoehorn',
+          sublabel: '👞 Migrate test assertions from "as" to shoehorn partial fixtures',
+          badge: 'SHOEHORN',
+          badgeColor: '#14b8a6',
+          icon: '👞',
+          insertText: '/migrate-to-shoehorn ',
+          category: 'skill'
+        },
+        {
+          id: 'skill-wizard',
+          label: '/wizard',
+          sublabel: '🧙 Generate interactive wizard for credential or infra provisioning',
+          badge: 'WIZARD',
+          badgeColor: '#a855f7',
+          icon: '🧙',
+          insertText: '/wizard ',
+          category: 'skill'
+        },
+
+        // System & Action Commands
         {
           id: 'cmd-send',
           label: '/send',
@@ -170,14 +408,14 @@ export default function ComposerAutocompletePopover({
         }
       ]
 
-      if (!q) return commands
-      return commands.filter(
+      if (!q) return skillsAndCommands
+      return skillsAndCommands.filter(
         (cmd) => cmd.label.toLowerCase().includes(q) || (cmd.sublabel && cmd.sublabel.toLowerCase().includes(q))
       )
     }
 
     return []
-  }, [trigger, query, sources, channels])
+  }, [trigger, query, sources, channels, contextScope])
 
   // Reset selected index when items change
   useEffect(() => {
@@ -234,7 +472,7 @@ export default function ComposerAutocompletePopover({
         bottom: 'calc(100% + 8px)',
         left: 12,
         right: 12,
-        maxHeight: 240,
+        maxHeight: 260,
         overflowY: 'auto',
         background: 'rgba(15, 23, 42, 0.96)',
         backdropFilter: 'blur(16px)',
@@ -265,13 +503,19 @@ export default function ComposerAutocompletePopover({
         }}
       >
         <span>
-          {trigger === '@'
-            ? isScoped
-              ? 'Workspace Accounts'
-              : 'Mention Account / Session'
-            : trigger === '#'
-              ? 'Mention Channel / Contact'
-              : 'Slash Commands'}
+          {trigger === '$'
+            ? contextScope === 'agentcoders'
+              ? 'Active Platform'
+              : 'Choose Platform / Engine'
+            : trigger === '@'
+              ? contextScope === 'agentcoders'
+                ? 'Coding Swarm Agents'
+                : isScoped
+                  ? 'Workspace Accounts'
+                  : 'Mention Agent / Session'
+              : trigger === '#'
+                ? 'Mention Channel / Contact'
+                : 'Skills & Slash Commands'}
         </span>
         <span style={{ fontSize: 9, color: '#64748b' }}>↑↓ navigate · ↵ select · esc close</span>
       </div>

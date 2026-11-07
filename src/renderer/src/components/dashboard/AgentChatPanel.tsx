@@ -11,6 +11,7 @@ import type {
 import ChatMarkdown from './ChatMarkdown'
 import SocialChannelSidebar from './SocialChannelSidebar'
 import ComposerAutocompletePopover, { AutocompleteItem } from './ComposerAutocompletePopover'
+import { useAgentCodersStore } from '../../hooks/useAgentCodersStore'
 import type { XomniModeKey } from './workspace-nav'
 
 interface AgentChatPanelProps {
@@ -26,6 +27,7 @@ interface AgentChatPanelProps {
   onOpenControl?: (sourceId?: string) => void
   onOpenLiveEmbed?: () => void
   onOpenSource?: (ref: DashboardProjectChatSourceRef) => void
+  onSelectAgentCoders?: () => void
 }
 
 type RetryMode = 'append' | 'retry' | 'none'
@@ -105,11 +107,68 @@ export function formatChannelDisplayName(
 
 function ActionCard({
   card,
-  onOpenControl
+  onOpenControl,
+  onSelectAgentCoders
 }: {
   card: { type: string; ok: boolean; data?: any }
   onOpenControl?: () => void
+  onSelectAgentCoders?: () => void
 }): React.ReactElement | null {
+  if (card.type === 'jump_agentcoders') {
+    const progress = card.data?.progress ?? 0
+    return (
+      <div
+        style={{
+          marginTop: 10,
+          padding: '12px 14px',
+          background: 'rgba(168, 85, 247, 0.12)',
+          border: '1px solid rgba(168, 85, 247, 0.35)',
+          borderRadius: 8,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#c084fc', fontWeight: 650, fontSize: 13 }}>
+            <span>👑</span>
+            <span>AgentCoders Swarm Active</span>
+          </div>
+          <span style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8' }}>
+            {progress}% Complete
+          </span>
+        </div>
+        <p style={{ margin: 0, fontSize: 12, color: '#cbd5e1', lineHeight: 1.4 }}>
+          Autonomous subtasks dispatched across @Architect, @Tester, @Coder, and @Reviewer using Matt Pocock skills and Ruflo A2A orchestration.
+        </p>
+        {onSelectAgentCoders && (
+          <button
+            type="button"
+            onClick={onSelectAgentCoders}
+            style={{
+              alignSelf: 'flex-start',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              background: '#8b5cf6',
+              border: 'none',
+              color: '#ffffff',
+              borderRadius: 6,
+              padding: '6px 14px',
+              fontSize: 12,
+              fontWeight: 650,
+              cursor: 'pointer',
+              marginTop: 2
+            }}
+          >
+            <span>🚀</span>
+            <span>Jump to AgentCoders Workspace</span>
+          </button>
+        )}
+      </div>
+    )
+  }
+
   if (card.type === 'permission_denied') {
     const lockedNames = card.data?.lockedChannels
       ? card.data.lockedChannels.map((c: any) => `#${c.name}`).join(', ')
@@ -465,7 +524,8 @@ export default function AgentChatPanel({
   onOpenSettings,
   onOpenControl,
   onOpenLiveEmbed,
-  onOpenSource
+  onOpenSource,
+  onSelectAgentCoders
 }: AgentChatPanelProps): React.ReactElement {
   const [messages, setMessages] = useState<DisplayChatMessage[]>([])
   const [loadingHistory, setLoadingHistory] = useState(true)
@@ -482,7 +542,7 @@ export default function AgentChatPanel({
   const [sendingReply, setSendingReply] = useState(false)
 
   // Autocomplete state
-  const [autocompleteTrigger, setAutocompleteTrigger] = useState<'@' | '#' | '/' | null>(null)
+  const [autocompleteTrigger, setAutocompleteTrigger] = useState<'@' | '#' | '/' | '$' | null>(null)
   const [autocompleteQuery, setAutocompleteQuery] = useState<string>('')
   const [triggerPos, setTriggerPos] = useState<number>(-1)
   const justSelectedRef = useRef<boolean>(false)
@@ -522,10 +582,10 @@ export default function AgentChatPanel({
     const cursor = textarea.selectionStart ?? text.length
     const textBeforeCursor = text.slice(0, cursor)
 
-    // Trigger is @, #, or / preceded by space or start of line
-    const match = textBeforeCursor.match(/(?:^|\s)([@#/])([a-zA-Z0-9_-]*)$/)
+    // Trigger is $, @, #, or / preceded by space or start of line
+    const match = textBeforeCursor.match(/(?:^|\s)([@#/$])([a-zA-Z0-9_-]*)$/)
     if (match) {
-      setAutocompleteTrigger(match[1] as '@' | '#' | '/')
+      setAutocompleteTrigger(match[1] as '@' | '#' | '/' | '$')
       setAutocompleteQuery(match[2] || '')
       setTriggerPos(cursor - (match[2]?.length || 0) - 1)
     } else {
@@ -1074,6 +1134,48 @@ export default function AgentChatPanel({
           atIso: new Date().toISOString()
         }
       ])
+
+      const lower = text.toLowerCase()
+      if (
+        mode === 'project' &&
+        (lower.includes('@headagent') ||
+          lower.includes('@architect') ||
+          lower.includes('@coder') ||
+          lower.includes('@reviewer') ||
+          lower.includes('@tester') ||
+          lower.includes('$agentwork') ||
+          (lower.includes('agentcoder') && lower.includes('progress')) ||
+          (lower.includes('coding') && lower.includes('progress')))
+      ) {
+        const { tasks, swarmProgress, swarmGoal } = useAgentCodersStore.getState()
+        const taskSummary =
+          tasks.length > 0
+            ? tasks
+                .map(
+                  (t) =>
+                    `• **@${t.assignedAgentName}**: [${t.status.toUpperCase()}] ${t.title} (${t.progress}%)`
+                )
+                .join('\n')
+            : '• All coding agents standing by in AgentCoders swarm.'
+
+        const replyContent = `👑 **AgentCoders Swarm Status**: **${swarmProgress}% Complete**\n**Goal**: ${swarmGoal || 'No active swarm goal. Direct dispatch available in AgentCoders.'}\n\n**A2A Subtask Allocation**:\n${taskSummary}\n\n<!-- ACTION_CARD: {"type":"jump_agentcoders","progress":${swarmProgress}} -->`
+
+        window.setTimeout(() => {
+          setStreaming(false)
+          setMessages((previous) => [
+            ...previous,
+            {
+              id: `swarm-status-${Date.now()}`,
+              role: 'assistant',
+              authorName: 'Cosmic (Head Agent Bridge)',
+              content: replyContent,
+              atIso: new Date().toISOString()
+            }
+          ])
+        }, 300)
+        return
+      }
+
       try {
         const payload: DashboardProjectChatPayload = {
           projectId,
@@ -1689,7 +1791,13 @@ export default function AgentChatPanel({
                             </details>
                           ) : null}
                           {cleanContent ? <ChatMarkdown text={cleanContent} /> : null}
-                          {card ? <ActionCard card={card} onOpenControl={onOpenControl} /> : null}
+                          {card ? (
+                            <ActionCard
+                              card={card}
+                              onOpenControl={onOpenControl}
+                              onSelectAgentCoders={onSelectAgentCoders}
+                            />
+                          ) : null}
                         </>
                       )
                     })()
@@ -1775,7 +1883,13 @@ export default function AgentChatPanel({
                           </details>
                         ) : null}
                         {cleanContent ? <ChatMarkdown text={cleanContent} /> : null}
-                        {card ? <ActionCard card={card} onOpenControl={onOpenControl} /> : null}
+                        {card ? (
+                          <ActionCard
+                            card={card}
+                            onOpenControl={onOpenControl}
+                            onSelectAgentCoders={onSelectAgentCoders}
+                          />
+                        ) : null}
                       </>
                     )
                   })()
@@ -1900,6 +2014,7 @@ export default function AgentChatPanel({
             sources={sources || (socialSource ? [socialSource] : [])}
             channels={socialSource?.channels || (activeChannel ? [activeChannel] : [])}
             isScoped={mode === 'social'}
+            contextScope={mode === 'social' ? 'social' : 'project'}
             onSelect={handleSelectAutocomplete}
             onClose={() => setAutocompleteTrigger(null)}
           />
@@ -1913,7 +2028,7 @@ export default function AgentChatPanel({
                 ? `Message ${activeChanDisplay.fullName} directly on Slack (type @ for accounts, # for channels, / for commands)…`
                 : keyMissing
                   ? 'Add an AI key to start chatting'
-                  : 'Ask about this project (type @ for accounts, # for channels, / for commands)…'
+                  : 'Ask about this project (type $ for platforms, @ for agents, # for channels, / for skills)…'
             }
             disabled={streaming || sendingReply || (!activeChannel && keyMissing)}
             onChange={(event) => handleDraftChange(event.target.value)}

@@ -1,0 +1,728 @@
+import React, { useState, useRef, useEffect, useCallback } from 'react'
+import {
+  useAgentCodersStore,
+  SWARM_AGENTS,
+  type SwarmAgentId
+} from '../../hooks/useAgentCodersStore'
+import ComposerAutocompletePopover, { AutocompleteItem } from './ComposerAutocompletePopover'
+
+interface AgentCodersPanelProps {
+  projectId: string
+  projectName: string
+}
+
+export default function AgentCodersPanel({
+  projectId: _projectId,
+  projectName
+}: AgentCodersPanelProps): React.JSX.Element {
+  const activeAgentId = useAgentCodersStore((s) => s.activeAgentId)
+  const agentMessages = useAgentCodersStore((s) => s.agentMessages)
+  const tasks = useAgentCodersStore((s) => s.tasks)
+  const swarmGoal = useAgentCodersStore((s) => s.swarmGoal)
+  const swarmProgress = useAgentCodersStore((s) => s.swarmProgress)
+  const isOrchestrating = useAgentCodersStore((s) => s.isOrchestrating)
+  const setActiveAgent = useAgentCodersStore((s) => s.setActiveAgent)
+  const dispatchTaskFromHead = useAgentCodersStore((s) => s.dispatchTaskFromHead)
+  const postMessage = useAgentCodersStore((s) => s.postMessage)
+  const resetSwarm = useAgentCodersStore((s) => s.resetSwarm)
+
+  const [draft, setDraft] = useState('')
+  const [autocompleteTrigger, setAutocompleteTrigger] = useState<'@' | '#' | '/' | '$' | null>(null)
+  const [autocompleteQuery, setAutocompleteQuery] = useState('')
+  const [triggerPos, setTriggerPos] = useState(-1)
+  const justSelectedRef = useRef(false)
+
+  const composerRef = useRef<HTMLTextAreaElement>(null)
+  const chatEndRef = useRef<HTMLDivElement>(null)
+
+  const activeAgent = SWARM_AGENTS.find((a) => a.id === activeAgentId) || SWARM_AGENTS[0]
+  const currentMessages = agentMessages[activeAgentId] || []
+
+  // Auto scroll to bottom of chat
+  useEffect(() => {
+    if (typeof chatEndRef.current?.scrollIntoView === 'function') {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [currentMessages.length, activeAgentId])
+
+  const handleDraftChange = useCallback((text: string) => {
+    setDraft(text)
+    const textarea = composerRef.current
+    if (!textarea) return
+
+    const cursor = textarea.selectionStart ?? text.length
+    const textBeforeCursor = text.slice(0, cursor)
+
+    const match = textBeforeCursor.match(/(?:^|\s)([@#/$])([a-zA-Z0-9_-]*)$/)
+    if (match) {
+      setAutocompleteTrigger(match[1] as '@' | '#' | '/' | '$')
+      setAutocompleteQuery(match[2] || '')
+      setTriggerPos(cursor - (match[2]?.length || 0) - 1)
+    } else {
+      setAutocompleteTrigger(null)
+      setAutocompleteQuery('')
+      setTriggerPos(-1)
+    }
+  }, [])
+
+  const handleSelectAutocomplete = useCallback(
+    (item: AutocompleteItem) => {
+      const textarea = composerRef.current
+      if (!textarea || triggerPos < 0) return
+
+      justSelectedRef.current = true
+      setTimeout(() => {
+        justSelectedRef.current = false
+      }, 150)
+
+      const before = draft.slice(0, triggerPos)
+      const after = draft.slice(textarea.selectionStart ?? draft.length)
+      const nextDraft = `${before}${item.insertText}${after}`
+      setDraft(nextDraft)
+      setAutocompleteTrigger(null)
+      setAutocompleteQuery('')
+      setTriggerPos(-1)
+
+      setTimeout(() => {
+        textarea.focus()
+        const newCursorPos = before.length + item.insertText.length
+        textarea.setSelectionRange(newCursorPos, newCursorPos)
+      }, 10)
+    },
+    [draft, triggerPos]
+  )
+
+  const handleSend = () => {
+    const text = draft.trim()
+    if (!text) return
+
+    if (activeAgentId === 'head') {
+      dispatchTaskFromHead(text)
+    } else {
+      postMessage(activeAgentId, {
+        senderId: 'user',
+        senderName: 'You',
+        text
+      })
+
+      // Generate contextual response from sub-agent
+      setTimeout(() => {
+        postMessage(activeAgentId, {
+          senderId: activeAgentId,
+          senderName: activeAgent.name,
+          text: `Acknowledged: "${text}". Applying ${activeAgent.skills.join(', ')} directly to codebase.`
+        })
+      }, 800)
+    }
+
+    setDraft('')
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (autocompleteTrigger !== null || justSelectedRef.current) {
+      return
+    }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
+    }
+  }
+
+  const activeTaskCountFor = (agentId: SwarmAgentId) => {
+    return tasks.filter((t) => t.assignedTo === agentId && t.status !== 'completed').length
+  }
+
+  return (
+    <div
+      className="agentcoders-workspace"
+      style={{
+        display: 'flex',
+        width: '100%',
+        height: '100%',
+        background: '#0a0d14',
+        color: '#e2e8f0',
+        overflow: 'hidden'
+      }}
+    >
+      {/* 1. Inner Sub-Agent Sidebar */}
+      <aside
+        style={{
+          width: 280,
+          background: 'rgba(15, 23, 42, 0.95)',
+          borderRight: '1px solid rgba(255, 255, 255, 0.08)',
+          display: 'flex',
+          flexDirection: 'column',
+          flexShrink: 0
+        }}
+      >
+        <div
+          style={{
+            padding: '16px 14px 12px',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#f8fafc', letterSpacing: '0.02em' }}>
+              🤖 AgentCoders Swarm
+            </span>
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 700,
+                padding: '2px 6px',
+                borderRadius: 4,
+                background: isOrchestrating ? 'rgba(34, 197, 94, 0.25)' : 'rgba(168, 85, 247, 0.2)',
+                color: isOrchestrating ? '#4ade80' : '#c084fc',
+                border: isOrchestrating
+                  ? '1px solid rgba(34, 197, 94, 0.5)'
+                  : '1px solid rgba(168, 85, 247, 0.4)'
+              }}
+            >
+              {isOrchestrating ? '⚡ A2A RUNNING' : 'A2A ACTIVE'}
+            </span>
+          </div>
+          <p style={{ margin: '4px 0 0', fontSize: 11, color: '#94a3b8' }}>
+            {projectName} · Matt Pocock (1st) & Ruflo A2A
+          </p>
+        </div>
+
+        {/* Agent List */}
+        <nav style={{ flex: 1, overflowY: 'auto', padding: '8px 6px' }}>
+          {SWARM_AGENTS.map((agent) => {
+            const isSelected = agent.id === activeAgentId
+            const activeTasks = activeTaskCountFor(agent.id)
+            return (
+              <button
+                key={agent.id}
+                type="button"
+                onClick={() => setActiveAgent(agent.id)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  width: '100%',
+                  gap: 10,
+                  padding: '9px 10px',
+                  borderRadius: 6,
+                  background: isSelected ? 'rgba(168, 85, 247, 0.2)' : 'transparent',
+                  border: isSelected ? '1px solid rgba(168, 85, 247, 0.4)' : '1px solid transparent',
+                  color: isSelected ? '#f8fafc' : '#cbd5e1',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  marginBottom: 3,
+                  transition: 'background 0.12s ease'
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 16,
+                    width: 28,
+                    height: 28,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 6,
+                    background: `${agent.accentColor}22`,
+                    border: `1px solid ${agent.accentColor}44`,
+                    flexShrink: 0
+                  }}
+                >
+                  {agent.icon}
+                </span>
+
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: 12, fontWeight: 650 }}>{agent.name}</span>
+                    {activeTasks > 0 && (
+                      <span
+                        style={{
+                          fontSize: 9,
+                          fontWeight: 700,
+                          padding: '1px 5px',
+                          borderRadius: 3,
+                          background: 'rgba(234, 179, 8, 0.25)',
+                          color: '#fef08a'
+                        }}
+                      >
+                        {activeTasks} active
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 10.5,
+                      color: isSelected ? '#cbd5e1' : '#64748b',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {agent.handle} · {agent.role.split('&')[0]}
+                  </div>
+                </div>
+              </button>
+            )
+          })}
+        </nav>
+
+        {/* Swarm Status Footer */}
+        <div
+          style={{
+            padding: '12px 14px',
+            borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+            background: 'rgba(10, 15, 30, 0.6)'
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
+            <span style={{ color: '#94a3b8' }}>Swarm Progress:</span>
+            <span style={{ fontWeight: 700, color: '#38bdf8' }}>{swarmProgress}%</span>
+          </div>
+          <div
+            style={{
+              width: '100%',
+              height: 5,
+              borderRadius: 3,
+              background: 'rgba(255, 255, 255, 0.1)',
+              overflow: 'hidden'
+            }}
+          >
+            <div
+              style={{
+                width: `${swarmProgress}%`,
+                height: '100%',
+                background: swarmProgress === 100 ? '#22c55e' : 'linear-gradient(90deg, #3b82f6, #a855f7)',
+                transition: 'width 0.4s ease'
+              }}
+            />
+          </div>
+          {tasks.length > 0 && (
+            <button
+              type="button"
+              onClick={resetSwarm}
+              style={{
+                marginTop: 8,
+                width: '100%',
+                padding: '4px 8px',
+                fontSize: 10,
+                color: '#94a3b8',
+                background: 'transparent',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
+                borderRadius: 4,
+                cursor: 'pointer'
+              }}
+            >
+              Reset Swarm State
+            </button>
+          )}
+        </div>
+      </aside>
+
+      {/* 2. Main Agent Content Area */}
+      <main
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          minWidth: 0,
+          height: '100%',
+          overflow: 'hidden'
+        }}
+      >
+        {/* Agent Header */}
+        <header
+          style={{
+            padding: '12px 20px',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            background: 'rgba(15, 23, 42, 0.8)',
+            backdropFilter: 'blur(10px)'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 20 }}>{activeAgent.icon}</span>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: '#f8fafc' }}>{activeAgent.name}</span>
+                <span
+                  style={{
+                    fontSize: 9.5,
+                    fontWeight: 700,
+                    padding: '1px 6px',
+                    borderRadius: 3,
+                    background: `${activeAgent.accentColor}25`,
+                    color: activeAgent.accentColor,
+                    border: `1px solid ${activeAgent.accentColor}50`
+                  }}
+                >
+                  {activeAgent.handle}
+                </span>
+                <span
+                  style={{
+                    fontSize: 9,
+                    padding: '1px 5px',
+                    borderRadius: 3,
+                    background: 'rgba(255, 255, 255, 0.07)',
+                    color: '#94a3b8'
+                  }}
+                >
+                  {activeAgent.priority}
+                </span>
+              </div>
+              <p style={{ margin: '2px 0 0', fontSize: 11, color: '#94a3b8' }}>{activeAgent.role}</p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {activeAgent.skills.map((skill) => (
+              <span
+                key={skill}
+                style={{
+                  fontSize: 10,
+                  padding: '2px 7px',
+                  borderRadius: 4,
+                  background: 'rgba(168, 85, 247, 0.15)',
+                  color: '#d8b4fe',
+                  border: '1px solid rgba(168, 85, 247, 0.3)'
+                }}
+              >
+                {skill}
+              </span>
+            ))}
+          </div>
+        </header>
+
+        {/* If Head Agent: Show A2A Task Partitioning Board */}
+        {activeAgentId === 'head' && tasks.length > 0 && (
+          <section
+            style={{
+              padding: '12px 20px',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'rgba(10, 18, 36, 0.75)'
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: 8
+              }}
+            >
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#cbd5e1', letterSpacing: '0.04em' }}>
+                📋 A2A TASK PARTITIONING BOARD ({tasks.length} SUBTASKS)
+              </span>
+              {swarmGoal && (
+                <span
+                  style={{
+                    fontSize: 10.5,
+                    color: '#38bdf8',
+                    maxWidth: 360,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  Goal: {swarmGoal}
+                </span>
+              )}
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                gap: 8
+              }}
+            >
+              {tasks.map((task) => {
+                const statusColor =
+                  task.status === 'completed'
+                    ? '#22c55e'
+                    : task.status === 'in_progress'
+                      ? '#38bdf8'
+                      : task.status === 'blocked'
+                        ? '#ef4444'
+                        : '#64748b'
+
+                return (
+                  <div
+                    key={task.id}
+                    onClick={() => setActiveAgent(task.assignedTo)}
+                    style={{
+                      background: 'rgba(15, 23, 42, 0.75)',
+                      border: `1px solid ${statusColor}44`,
+                      borderRadius: 6,
+                      padding: 8,
+                      cursor: 'pointer',
+                      transition: 'border-color 0.15s ease'
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        marginBottom: 4
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 9,
+                          fontWeight: 700,
+                          padding: '1px 5px',
+                          borderRadius: 3,
+                          background: `${statusColor}22`,
+                          color: statusColor
+                        }}
+                      >
+                        {task.status.toUpperCase()}
+                      </span>
+                      <span style={{ fontSize: 9.5, color: '#94a3b8' }}>@{task.assignedAgentName}</span>
+                    </div>
+
+                    <div
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: '#f1f5f9',
+                        marginBottom: 4,
+                        lineHeight: 1.2
+                      }}
+                    >
+                      {task.title}
+                    </div>
+
+                    <div
+                      style={{
+                        width: '100%',
+                        height: 3,
+                        background: 'rgba(255, 255, 255, 0.08)',
+                        borderRadius: 2,
+                        overflow: 'hidden'
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: `${task.progress}%`,
+                          height: '100%',
+                          background: statusColor,
+                          transition: 'width 0.3s ease'
+                        }}
+                      />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        )}
+
+        {/* Chat Feed */}
+        <div
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            padding: '16px 20px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12
+          }}
+        >
+          {currentMessages.map((msg) => {
+            const isUser = msg.senderId === 'user'
+            return (
+              <div
+                key={msg.id}
+                style={{
+                  alignSelf: isUser ? 'flex-end' : 'flex-start',
+                  maxWidth: '82%',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 4
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    alignSelf: isUser ? 'flex-end' : 'flex-start',
+                    fontSize: 10,
+                    color: '#94a3b8'
+                  }}
+                >
+                  <span style={{ fontWeight: 650 }}>{msg.senderName}</span>
+                  <span>{msg.timestamp}</span>
+                  {msg.assignedFromHead && (
+                    <span
+                      style={{
+                        fontSize: 8.5,
+                        fontWeight: 700,
+                        padding: '1px 5px',
+                        borderRadius: 3,
+                        background: 'rgba(234, 179, 8, 0.2)',
+                        color: '#facc15'
+                      }}
+                    >
+                      A2A DELEGATION
+                    </span>
+                  )}
+                  {msg.statusBadge && (
+                    <span
+                      style={{
+                        fontSize: 8.5,
+                        fontWeight: 700,
+                        padding: '1px 5px',
+                        borderRadius: 3,
+                        background: 'rgba(34, 197, 94, 0.2)',
+                        color: '#4ade80'
+                      }}
+                    >
+                      {msg.statusBadge}
+                    </span>
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    padding: '10px 14px',
+                    borderRadius: 8,
+                    background: isUser ? '#6366f1' : 'rgba(30, 41, 59, 0.85)',
+                    border: isUser ? '1px solid #818cf8' : '1px solid rgba(255, 255, 255, 0.08)',
+                    color: '#f8fafc',
+                    fontSize: 12.5,
+                    lineHeight: 1.5,
+                    whiteSpace: 'pre-wrap'
+                  }}
+                >
+                  {msg.text}
+
+                  {msg.codeSnippet && (
+                    <pre
+                      style={{
+                        marginTop: 8,
+                        padding: 8,
+                        borderRadius: 4,
+                        background: '#090d16',
+                        border: '1px solid rgba(255, 255, 255, 0.1)',
+                        fontSize: 11,
+                        color: '#38bdf8',
+                        overflowX: 'auto',
+                        fontFamily: 'monospace'
+                      }}
+                    >
+                      {msg.codeSnippet}
+                    </pre>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+          <div ref={chatEndRef} />
+        </div>
+
+        {/* Quick Skill Action Pills */}
+        <div
+          style={{
+            padding: '6px 20px',
+            borderTop: '1px solid rgba(255, 255, 255, 0.05)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            overflowX: 'auto',
+            background: 'rgba(15, 23, 42, 0.6)'
+          }}
+        >
+          <span style={{ fontSize: 10, color: '#64748b', fontWeight: 600 }}>Skills:</span>
+          {['/ask-matt', '/tdd', '/code-review', '/plan', '/grill-me', '/implement'].map((sk) => (
+            <button
+              key={sk}
+              type="button"
+              onClick={() => {
+                setDraft((prev) => `${prev ? `${prev} ` : ''}${sk} `)
+                composerRef.current?.focus()
+              }}
+              style={{
+                padding: '2px 8px',
+                borderRadius: 4,
+                background: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                color: '#cbd5e1',
+                fontSize: 10,
+                cursor: 'pointer'
+              }}
+            >
+              {sk}
+            </button>
+          ))}
+        </div>
+
+        {/* Dedicated Swarm Composer */}
+        <div
+          style={{
+            padding: '12px 20px',
+            borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+            background: 'rgba(15, 23, 42, 0.95)',
+            position: 'relative'
+          }}
+        >
+          <ComposerAutocompletePopover
+            trigger={autocompleteTrigger}
+            query={autocompleteQuery}
+            contextScope="agentcoders"
+            onSelect={handleSelectAutocomplete}
+            onClose={() => setAutocompleteTrigger(null)}
+          />
+
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+            <textarea
+              ref={composerRef}
+              value={draft}
+              onChange={(e) => handleDraftChange(e.target.value)}
+              onKeyDown={handleKeyDown}
+              rows={2}
+              placeholder={
+                activeAgentId === 'head'
+                  ? 'Submit high-level coding goal to @HeadAgent (type @ for agents, / for skills)…'
+                  : `Message ${activeAgent.name} directly (type @ for agents, / for skills)…`
+              }
+              style={{
+                flex: 1,
+                background: '#090d16',
+                border: '1px solid rgba(168, 85, 247, 0.3)',
+                borderRadius: 6,
+                padding: '8px 12px',
+                color: '#f8fafc',
+                fontSize: 12.5,
+                lineHeight: 1.4,
+                resize: 'none',
+                outline: 'none',
+                fontFamily: 'inherit'
+              }}
+            />
+
+            <button
+              type="button"
+              onClick={handleSend}
+              disabled={draft.trim().length === 0}
+              style={{
+                padding: '8px 16px',
+                borderRadius: 6,
+                background: draft.trim().length > 0 ? '#8b5cf6' : 'rgba(255, 255, 255, 0.1)',
+                border: 'none',
+                color: draft.trim().length > 0 ? '#fff' : '#64748b',
+                fontWeight: 650,
+                fontSize: 12,
+                cursor: draft.trim().length > 0 ? 'pointer' : 'not-allowed',
+                height: 40
+              }}
+            >
+              {activeAgentId === 'head' ? 'Dispatch Swarm' : 'Send'}
+            </button>
+          </div>
+        </div>
+      </main>
+    </div>
+  )
+}

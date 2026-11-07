@@ -1055,7 +1055,7 @@ export default function WorkspaceSidebar({
                       )
                     })()}
 
-                    {/* 2. Talk to AgentWork (Untouched standalone button) */}
+                    {/* 2. Talk to AgentCoders (Standalone Swarm Button) */}
                     {section.rows.find((r) => r.id === 'm:agentwork') && (() => {
                       const row = section.rows.find((r) => r.id === 'm:agentwork')!
                       return (

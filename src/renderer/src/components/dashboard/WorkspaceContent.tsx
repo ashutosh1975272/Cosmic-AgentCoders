@@ -15,6 +15,7 @@ import CardLiveSlackEmbed from './CardLiveSlackEmbed'
 import CardLiveWebEmbed from './CardLiveWebEmbed'
 import ProjectSettingsTab from './ProjectSettingsTab'
 import AgentChatPanel from './AgentChatPanel'
+import AgentCodersPanel from './AgentCodersPanel'
 import { requestMessageJump } from './jump-to-message'
 import SchedulesPage from './SchedulesPage'
 import { AppIcon } from '../AppIcon'
@@ -359,6 +360,14 @@ export default function WorkspaceContent({
   if (nav.openGroup === 'xomni') {
     if (xomniModeOf(nav) === 'schedules') {
       body = <SchedulesPage />
+    } else if (xomniModeOf(nav) === 'agentwork') {
+      body = (
+        <AgentCodersPanel
+          projectId={summary.projectId}
+          projectName={identity.name}
+        />
+      )
+      bare = true
     } else if (nav.selection && isSocialChatId(nav.selection)) {
       const sourceId = socialSourceIdOf(nav.selection)
       const targetSource = (project.sources ?? []).find((s) => s.id === sourceId) ?? null
@@ -384,6 +393,7 @@ export default function WorkspaceContent({
               onSelect('s:client')
             }
           }}
+          onSelectAgentCoders={() => onSelect('m:agentwork' as SelectionId)}
           onOpenSource={(ref) => {
             requestMessageJump({
               projectId: summary.projectId,
@@ -412,6 +422,7 @@ export default function WorkspaceContent({
           onOpenControl={() => {
             if (primarySource) setControlSource(primarySource)
           }}
+          onSelectAgentCoders={() => onSelect('m:agentwork' as SelectionId)}
           onOpenSource={(ref) => {
             // Always navigate to the channel; the Slack tab consumes this
             // target and scrolls/flashes when the message is loaded.

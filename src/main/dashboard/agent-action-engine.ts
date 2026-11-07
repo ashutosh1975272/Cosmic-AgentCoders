@@ -358,6 +358,13 @@ export function detectAgentAction(
         }
       }
 
+      if (!rawTarget) {
+        const toMatch = header.match(/\b(?:to|in)\s+(?:the\s+)?([a-zA-Z0-9_-]+)$/i)
+        if (toMatch) {
+          rawTarget = toMatch[1].trim()
+        }
+      }
+
       if (rawTarget?.toLowerCase() === 'slack' || rawTarget?.toLowerCase() === 'teams') {
         rawPlatform = rawTarget.toLowerCase()
         rawTarget = undefined

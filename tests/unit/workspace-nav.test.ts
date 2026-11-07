@@ -61,7 +61,7 @@ describe('nav model shape (v6)', () => {
   })
 
   it('carries the reference row lists per section', () => {
-    expect(rowsOf('xomni')).toEqual(['Chat with project', 'Talk to AgentWork', 'Schedules'])
+    expect(rowsOf('xomni')).toEqual(['Chat with project', 'Talk to AgentCoders', 'Schedules'])
     expect(rowsOf('slack')).toEqual(['All channels', 'All channels'])
     expect(NAV_SECTIONS.find((s) => s.key === 'slack')!.rows.map((r) => r.id)).toEqual([
       's:client',

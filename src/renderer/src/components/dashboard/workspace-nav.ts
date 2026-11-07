@@ -235,8 +235,8 @@ export const NAV_SECTIONS: NavSection[] = [
       },
       {
         id: 'm:agentwork',
-        label: 'Talk to AgentWork',
-        desc: 'Hand a task to the agent. Opens up once AgentWork is connected.',
+        label: 'Talk to AgentCoders',
+        desc: 'Autonomous multi-agent coding swarm with Head Agent coordinator, specialized Ruflo/Matt Pocock skills, and AgentWork executor.',
         icon: 'robot'
       },
       {

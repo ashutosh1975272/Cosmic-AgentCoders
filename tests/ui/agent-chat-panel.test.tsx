@@ -678,8 +678,8 @@ describe('AgentChatPanel', () => {
       name: 'Ask about this project'
     }) as HTMLTextAreaElement
 
-    // 1. Type @ to open autocomplete popover
-    fireEvent.change(textarea, { target: { value: '@' } })
+    // 1. Type @Acme to open autocomplete popover filtered to AcmeSlack
+    fireEvent.change(textarea, { target: { value: '@Acme' } })
 
     await waitFor(() => {
       expect(screen.getByRole('listbox')).toBeTruthy()

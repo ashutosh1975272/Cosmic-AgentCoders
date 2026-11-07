@@ -146,8 +146,8 @@ describe('WorkspaceSidebar: Chat with Socials Dropdown', () => {
 
     // Chat with project exists
     expect(screen.getByText('Chat with project')).toBeDefined()
-    // Talk to AgentWork exists untouched
-    expect(screen.getByText('Talk to AgentWork')).toBeDefined()
+    // Talk to AgentCoders exists
+    expect(screen.getByText('Talk to AgentCoders')).toBeDefined()
     // Chat with Socials exists
     expect(screen.getByText('Chat with Socials')).toBeDefined()
     // Schedules exists

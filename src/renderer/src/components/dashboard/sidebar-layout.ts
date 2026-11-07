@@ -72,7 +72,7 @@ export const SIDEBAR_REGISTRY: SidebarSection[] = [
     icon: 'xomni',
     items: [
       { id: 'm:project', label: 'Chat with project', icon: 'chat', status: 'ready' },
-      { id: 'm:agentwork', label: 'Talk to AgentWork', icon: 'agent', status: 'ready' },
+      { id: 'm:agentwork', label: 'Talk to AgentCoders', icon: 'agent', status: 'ready' },
       { id: 'm:schedules', label: 'Schedules', icon: 'schedule', status: 'ready' }
     ]
   },
