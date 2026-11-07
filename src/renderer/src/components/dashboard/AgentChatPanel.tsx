@@ -477,6 +477,7 @@ export default function AgentChatPanel({
   const [autocompleteTrigger, setAutocompleteTrigger] = useState<'@' | '#' | '/' | null>(null)
   const [autocompleteQuery, setAutocompleteQuery] = useState<string>('')
   const [triggerPos, setTriggerPos] = useState<number>(-1)
+  const justSelectedRef = useRef<boolean>(false)
 
   // Track active channel when in social mode
   const [activeChannelId, setActiveChannelId] = useState<string | null>(() => {
@@ -536,6 +537,11 @@ export default function AgentChatPanel({
     (item: AutocompleteItem) => {
       const textarea = composerRef.current
       if (!textarea || triggerPos < 0) return
+
+      justSelectedRef.current = true
+      setTimeout(() => {
+        justSelectedRef.current = false
+      }, 150)
 
       const before = draft.slice(0, triggerPos)
       const after = draft.slice(textarea.selectionStart ?? draft.length)
@@ -1200,6 +1206,13 @@ export default function AgentChatPanel({
     (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
       if (event.key !== 'Enter' || event.shiftKey) return
       if (composingRef.current || event.nativeEvent.isComposing) return
+
+      // If autocomplete popover is open or an item was just inserted, do NOT send to chat
+      if (autocompleteTrigger !== null || justSelectedRef.current) {
+        event.preventDefault()
+        return
+      }
+
       event.preventDefault()
       if (activeChannel && composerMode === 'reply') {
         void sendDirectSlackReply()
@@ -1207,7 +1220,7 @@ export default function AgentChatPanel({
         void send()
       }
     },
-    [activeChannel, composerMode, sendDirectSlackReply, send]
+    [autocompleteTrigger, activeChannel, composerMode, sendDirectSlackReply, send]
   )
 
   if (mode === 'agentwork') {

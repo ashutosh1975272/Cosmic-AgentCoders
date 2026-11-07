@@ -191,17 +191,22 @@ export default function ComposerAutocompletePopover({
     const handleKeyDown = (e: KeyboardEvent): void => {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
+        e.stopPropagation()
         setSelectedIndex((prev) => (prev + 1) % items.length)
       } else if (e.key === 'ArrowUp') {
         e.preventDefault()
+        e.stopPropagation()
         setSelectedIndex((prev) => (prev - 1 + items.length) % items.length)
       } else if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault()
+        e.stopPropagation()
+        e.stopImmediatePropagation()
         if (items[selectedIndex]) {
           onSelect(items[selectedIndex])
         }
       } else if (e.key === 'Escape') {
         e.preventDefault()
+        e.stopPropagation()
         onClose()
       }
     }

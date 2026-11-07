@@ -165,4 +165,56 @@ describe('ComposerAutocompletePopover UI tests', () => {
     expect(screen.getByText('/help-slack')).toBeDefined()
     expect(screen.queryByText('/send')).toBeNull()
   })
+
+  it('stops propagation and calls onSelect when Enter is pressed on window', () => {
+    const onSelect = vi.fn()
+    const onClose = vi.fn()
+
+    render(
+      <ComposerAutocompletePopover
+        trigger="@"
+        query=""
+        sources={sampleSources}
+        onSelect={onSelect}
+        onClose={onClose}
+      />
+    )
+
+    const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    const stopPropagationSpy = vi.spyOn(event, 'stopPropagation')
+    const stopImmediateSpy = vi.spyOn(event, 'stopImmediatePropagation')
+
+    window.dispatchEvent(event)
+
+    expect(stopPropagationSpy).toHaveBeenCalled()
+    expect(stopImmediateSpy).toHaveBeenCalled()
+    expect(onSelect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        insertText: '@AgentWork '
+      })
+    )
+  })
+
+  it('stops propagation and calls onClose when Escape is pressed on window', () => {
+    const onSelect = vi.fn()
+    const onClose = vi.fn()
+
+    render(
+      <ComposerAutocompletePopover
+        trigger="@"
+        query=""
+        sources={sampleSources}
+        onSelect={onSelect}
+        onClose={onClose}
+      />
+    )
+
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    const stopPropagationSpy = vi.spyOn(event, 'stopPropagation')
+
+    window.dispatchEvent(event)
+
+    expect(stopPropagationSpy).toHaveBeenCalled()
+    expect(onClose).toHaveBeenCalled()
+  })
 })

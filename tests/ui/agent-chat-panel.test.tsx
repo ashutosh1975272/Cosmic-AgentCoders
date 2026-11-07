@@ -623,4 +623,81 @@ describe('AgentChatPanel', () => {
     expect(screen.getByText('You')).toBeTruthy()
     expect(screen.getByText('DIRECT API')).toBeTruthy()
   })
+
+  it('does NOT send message on first Enter when selecting autocomplete item, and sends on second Enter', async () => {
+    const harness = installApi({ status: status({ hasKey: true }) })
+
+    render(
+      <AgentChatPanel
+        projectName="Acme Corp"
+        projectId="P1"
+        mode="project"
+        sources={[
+          {
+            id: 'src-1',
+            kind: 'browser',
+            platform: 'slack',
+            workspaceId: 'T1',
+            workspaceName: 'Acme Slack',
+            role: 'client',
+            enabled: true,
+            backfillDays: 7,
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+            channels: [
+              {
+                id: 'C1',
+                name: 'general',
+                isPrivate: false,
+                isDm: false,
+                enabled: true,
+                agentWrite: true
+              }
+            ]
+          }
+        ]}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('textbox')).toBeTruthy()
+    })
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement
+
+    // 1. Type @ to open autocomplete popover
+    fireEvent.change(textarea, { target: { value: '@' } })
+
+    await waitFor(() => {
+      expect(screen.getByRole('listbox')).toBeTruthy()
+    })
+
+    // 2. Press Enter on window to select the highlighted autocomplete item
+    fireEvent.keyDown(window, { key: 'Enter' })
+
+    // Popover item was selected and draft updated
+    await waitFor(() => {
+      expect(textarea.value).toContain('@AcmeSlack')
+    })
+
+    // Assert that projectChat was NOT called on this first Enter
+    expect(harness.projectChat).not.toHaveBeenCalled()
+
+    // 3. Complete the message by typing rest of query
+    fireEvent.change(textarea, { target: { value: '@AcmeSlack : how are you?' } })
+
+    // Wait for the selection debounce window to expire
+    await new Promise((resolve) => setTimeout(resolve, 200))
+
+    // 4. Press Enter on textarea to dispatch completed message
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+
+    await waitFor(() => {
+      expect(harness.projectChat).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: '@AcmeSlack : how are you?'
+        })
+      )
+    })
+  })
 })
