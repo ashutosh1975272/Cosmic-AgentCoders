@@ -1429,10 +1429,28 @@ export class DashboardSyncEngine {
         const recipientName = check.channel?.name ? `#${check.channel.name}` : `#${channelId}`
         const sender = msg.user ? `@${msg.user}` : 'there'
 
-        const replyText =
-          check.reason === 'dm'
-            ? `Hi ${sender}! I received your message. Thanks for reaching out — I am reviewing this and will get back to you shortly.`
-            : `Hello ${sender}! Thanks for mentioning me. Noted, I am looking into this right away.`
+        const persona = check.channel?.autoReplyPersona || 'professional'
+        let replyText = ''
+        if (persona === 'friendly') {
+          replyText =
+            check.reason === 'dm'
+              ? `Hi ${sender}! Thanks for reaching out 😊 I received your message and I'm already looking into this for you!`
+              : `Hello ${sender}! Thanks for reaching out! Noted, I am on it.`
+        } else if (persona === 'concise') {
+          replyText = `Received. Reviewing now.`
+        } else if (persona === 'empathetic') {
+          replyText = `Hi ${sender}, thank you so much for reaching out! I want to reassure you that I've received your note and am prioritizing it right away. Will follow up shortly.`
+        } else if (persona === 'technical') {
+          replyText = `Message acknowledged. Technical context and parameters recorded. Reviewing specifications and initiating follow-up.`
+        } else if (persona === 'executive') {
+          replyText = `Status update: Message received and logged. Action items will be tracked against current milestone deliverables.`
+        } else {
+          // professional default
+          replyText =
+            check.reason === 'dm'
+              ? `Hi ${sender}! I received your message. Thanks for reaching out — I am reviewing this and will get back to you shortly.`
+              : `Hello ${sender}! Thanks for mentioning me. Noted, I am looking into this right away.`
+        }
 
         try {
           const res = await this.chatService.sendMessage({

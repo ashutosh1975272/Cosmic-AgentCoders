@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
+  AutoReplyPersona,
+  AutoReplyPolicy,
   DashboardProjectChatErrorCode,
   DashboardProjectChatPayload,
   DashboardProjectChatSourceRef,
@@ -8,6 +10,7 @@ import type {
 } from '../../../../shared/dashboard-contract'
 import ChatMarkdown from './ChatMarkdown'
 import SocialChannelSidebar from './SocialChannelSidebar'
+import ComposerAutocompletePopover, { AutocompleteItem } from './ComposerAutocompletePopover'
 import type { XomniModeKey } from './workspace-nav'
 
 interface AgentChatPanelProps {
@@ -323,6 +326,39 @@ function ActionCard({
     )
   }
 
+  if (card.type === 'help_cheatsheet') {
+    return (
+      <div
+        style={{
+          marginTop: 10,
+          padding: '12px 16px',
+          background: 'rgba(99, 102, 241, 0.08)',
+          border: '1px solid rgba(99, 102, 241, 0.3)',
+          borderRadius: 8,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#818cf8', fontWeight: 700, fontSize: 13 }}>
+          <span>💡</span>
+          <span>Cosmic Command & Mentions Guide</span>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, background: 'rgba(255,255,255,0.06)', padding: '3px 8px', borderRadius: 4, color: '#cbd5e1' }}>
+            Type <strong style={{ color: '#a855f7' }}>@</strong> for Accounts
+          </span>
+          <span style={{ fontSize: 11, background: 'rgba(255,255,255,0.06)', padding: '3px 8px', borderRadius: 4, color: '#cbd5e1' }}>
+            Type <strong style={{ color: '#3b82f6' }}>#</strong> for Channels/Contacts
+          </span>
+          <span style={{ fontSize: 11, background: 'rgba(255,255,255,0.06)', padding: '3px 8px', borderRadius: 4, color: '#22c55e' }}>
+            Type <strong style={{ color: '#22c55e' }}>/</strong> for Slash Commands
+          </span>
+        </div>
+      </div>
+    )
+  }
+
   return null
 }
 
@@ -437,6 +473,11 @@ export default function AgentChatPanel({
   const [composerMode, setComposerMode] = useState<'reply' | 'agent'>('reply')
   const [sendingReply, setSendingReply] = useState(false)
 
+  // Autocomplete state
+  const [autocompleteTrigger, setAutocompleteTrigger] = useState<'@' | '#' | '/' | null>(null)
+  const [autocompleteQuery, setAutocompleteQuery] = useState<string>('')
+  const [triggerPos, setTriggerPos] = useState<number>(-1)
+
   // Track active channel when in social mode
   const [activeChannelId, setActiveChannelId] = useState<string | null>(() => {
     if (mode === 'social' && socialSource?.channels && socialSource.channels.length > 0) {
@@ -469,6 +510,104 @@ export default function AgentChatPanel({
       setComposerMode('agent')
     }
   }, [activeChannelId, activeChannel?.agentWrite])
+
+  const handleDraftChange = useCallback((text: string) => {
+    setDraft(text)
+    const textarea = composerRef.current
+    if (!textarea) return
+
+    const cursor = textarea.selectionStart ?? text.length
+    const textBeforeCursor = text.slice(0, cursor)
+
+    // Trigger is @, #, or / preceded by space or start of line
+    const match = textBeforeCursor.match(/(?:^|\s)([@#/])([a-zA-Z0-9_-]*)$/)
+    if (match) {
+      setAutocompleteTrigger(match[1] as '@' | '#' | '/')
+      setAutocompleteQuery(match[2] || '')
+      setTriggerPos(cursor - (match[2]?.length || 0) - 1)
+    } else {
+      setAutocompleteTrigger(null)
+      setAutocompleteQuery('')
+      setTriggerPos(-1)
+    }
+  }, [])
+
+  const handleSelectAutocomplete = useCallback(
+    (item: AutocompleteItem) => {
+      const textarea = composerRef.current
+      if (!textarea || triggerPos < 0) return
+
+      const before = draft.slice(0, triggerPos)
+      const after = draft.slice(textarea.selectionStart ?? draft.length)
+      const nextDraft = `${before}${item.insertText}${after}`
+      setDraft(nextDraft)
+      setAutocompleteTrigger(null)
+      setAutocompleteQuery('')
+      setTriggerPos(-1)
+
+      setTimeout(() => {
+        textarea.focus()
+        const newCursorPos = before.length + item.insertText.length
+        textarea.setSelectionRange(newCursorPos, newCursorPos)
+      }, 10)
+    },
+    [draft, triggerPos]
+  )
+
+  const handleUpdatePolicy = useCallback(
+    async (policy: AutoReplyPolicy) => {
+      if (!socialSource || !activeChannel) return
+      try {
+        await window.api.dashboard.updateSource({
+          projectId,
+          sourceId: socialSource.id,
+          patch: {
+            channels: socialSource.channels.map((c) =>
+              c.id === activeChannel.id
+                ? {
+                    ...c,
+                    autoReplyPolicy: policy,
+                    autoReply: policy !== 'disabled'
+                  }
+                : c
+            )
+          }
+        })
+        setNotice(`Auto-reply policy set to "${policy}"`)
+        setTimeout(() => setNotice(null), 3000)
+      } catch (err) {
+        setNotice(err instanceof Error ? err.message : 'Failed to update policy')
+      }
+    },
+    [socialSource, activeChannel, projectId]
+  )
+
+  const handleUpdatePersona = useCallback(
+    async (persona: AutoReplyPersona) => {
+      if (!socialSource || !activeChannel) return
+      try {
+        await window.api.dashboard.updateSource({
+          projectId,
+          sourceId: socialSource.id,
+          patch: {
+            channels: socialSource.channels.map((c) =>
+              c.id === activeChannel.id
+                ? {
+                    ...c,
+                    autoReplyPersona: persona
+                  }
+                : c
+            )
+          }
+        })
+        setNotice(`AI persona set to "${persona}"`)
+        setTimeout(() => setNotice(null), 3000)
+      } catch (err) {
+        setNotice(err instanceof Error ? err.message : 'Failed to update persona')
+      }
+    },
+    [socialSource, activeChannel, projectId]
+  )
 
   const runIdRef = useRef<string | null>(null)
   const completedRef = useRef<Set<string>>(new Set())
@@ -1647,13 +1786,62 @@ export default function AgentChatPanel({
               🤖 Instruct Cosmic AI
             </button>
           </div>
-          <span style={{ fontSize: 10, color: 'var(--text-faint)', marginLeft: 'auto' }}>
-            {composerMode === 'reply'
-              ? activeChannel.agentWrite
-                ? '⚡ Posts to Slack via Direct API (~150ms)'
-                : '⚠️ Agent Write is disabled in Workspace Control'
-              : '🧠 Answers from this channel’s history & context'}
-          </span>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: 9.5, color: '#94a3b8', fontWeight: 650 }}>Auto-Reply:</span>
+              <select
+                aria-label="Auto-Reply Policy"
+                value={activeChannel?.autoReplyPolicy || (activeChannel?.autoReply ? 'mention_dm' : 'disabled')}
+                onChange={(e) => void handleUpdatePolicy(e.target.value as AutoReplyPolicy)}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.07)',
+                  border: '1px solid rgba(255, 255, 255, 0.14)',
+                  borderRadius: 4,
+                  color: '#cbd5e1',
+                  fontSize: 10,
+                  fontWeight: 600,
+                  padding: '2px 5px',
+                  cursor: 'pointer',
+                  outline: 'none'
+                }}
+              >
+                <option value="disabled" style={{ background: '#0f172a', color: '#94a3b8' }}>🛑 No Auto-Reply</option>
+                <option value="all" style={{ background: '#0f172a', color: '#4ade80' }}>⚡ Reply to All</option>
+                <option value="needs_reply" style={{ background: '#0f172a', color: '#60a5fa' }}>🧠 Smart Needs-Reply</option>
+                <option value="task_only" style={{ background: '#0f172a', color: '#f59e0b' }}>📋 Task &amp; Project Only</option>
+                <option value="mention_dm" style={{ background: '#0f172a', color: '#c084fc' }}>👤 Mention &amp; DM Only</option>
+                <option value="draft_only" style={{ background: '#0f172a', color: '#f43f5e' }}>📝 Draft Approval Mode</option>
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: 9.5, color: '#94a3b8', fontWeight: 650 }}>Tone:</span>
+              <select
+                aria-label="AI Response Persona"
+                value={activeChannel?.autoReplyPersona || 'professional'}
+                onChange={(e) => void handleUpdatePersona(e.target.value as AutoReplyPersona)}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.07)',
+                  border: '1px solid rgba(255, 255, 255, 0.14)',
+                  borderRadius: 4,
+                  color: '#cbd5e1',
+                  fontSize: 10,
+                  fontWeight: 600,
+                  padding: '2px 5px',
+                  cursor: 'pointer',
+                  outline: 'none'
+                }}
+              >
+                <option value="professional" style={{ background: '#0f172a', color: '#e2e8f0' }}>👔 Professional</option>
+                <option value="friendly" style={{ background: '#0f172a', color: '#86efac' }}>😊 Friendly &amp; Warm</option>
+                <option value="concise" style={{ background: '#0f172a', color: '#93c5fd' }}>⚡ Direct &amp; Concise</option>
+                <option value="empathetic" style={{ background: '#0f172a', color: '#fbcfe8' }}>🤝 Empathetic ("Good Person")</option>
+                <option value="technical" style={{ background: '#0f172a', color: '#fde047' }}>🛠️ Technical &amp; Detailed</option>
+                <option value="executive" style={{ background: '#0f172a', color: '#c084fc' }}>📊 Executive Summary</option>
+              </select>
+            </div>
+          </div>
         </div>
       ) : null}
 
@@ -1668,30 +1856,41 @@ export default function AgentChatPanel({
           }
         }}
       >
-        <textarea
-          ref={composerRef}
-          value={draft}
-          rows={1}
-          aria-label="Ask about this project"
-          placeholder={
-            activeChanDisplay && composerMode === 'reply'
-              ? `Message ${activeChanDisplay.fullName} directly on Slack (Enter to send)…`
-              : keyMissing
-                ? 'Add an AI key to start chatting'
-                : activeChanDisplay
-                  ? `Ask or instruct agent in ${activeChanDisplay.fullName}…`
-                  : 'Ask about this project…'
-          }
-          disabled={streaming || sendingReply || (composerMode === 'agent' && keyMissing)}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={handleComposerKeyDown}
-          onCompositionStart={() => {
-            composingRef.current = true
-          }}
-          onCompositionEnd={() => {
-            composingRef.current = false
-          }}
-        />
+        <div style={{ position: 'relative', width: '100%', flex: 1, display: 'flex' }}>
+          <ComposerAutocompletePopover
+            trigger={autocompleteTrigger}
+            query={autocompleteQuery}
+            sources={sources || (socialSource ? [socialSource] : [])}
+            channels={socialSource?.channels || (activeChannel ? [activeChannel] : [])}
+            isScoped={mode === 'social'}
+            onSelect={handleSelectAutocomplete}
+            onClose={() => setAutocompleteTrigger(null)}
+          />
+          <textarea
+            ref={composerRef}
+            value={draft}
+            rows={1}
+            aria-label="Ask about this project"
+            placeholder={
+              activeChanDisplay && composerMode === 'reply'
+                ? `Message ${activeChanDisplay.fullName} directly on Slack (Enter to send)…`
+                : keyMissing
+                  ? 'Add an AI key to start chatting'
+                  : activeChanDisplay
+                    ? `Ask or instruct agent in ${activeChanDisplay.fullName} (type @ for accounts, # for channels, / for commands)…`
+                    : 'Ask about this project (type @ for accounts, # for channels, / for commands)…'
+            }
+            disabled={streaming || sendingReply || (composerMode === 'agent' && keyMissing)}
+            onChange={(event) => handleDraftChange(event.target.value)}
+            onKeyDown={handleComposerKeyDown}
+            onCompositionStart={() => {
+              composingRef.current = true
+            }}
+            onCompositionEnd={() => {
+              composingRef.current = false
+            }}
+          />
+        </div>
         {streaming ? (
           <button
             type="button"

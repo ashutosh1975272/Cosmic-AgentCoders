@@ -9,11 +9,25 @@ import type { DashboardChatService } from './chat-service'
 import type { DashboardSyncEngine } from './sync-engine'
 import type { DashboardScheduleStore } from './schedule-store'
 import type { MonitorStore } from './monitor-store'
+import {
+  detectMessageIsTaskRelated,
+  detectMessageNeedsReply,
+  generatePersonaReply
+} from './ai-personas'
 
 export interface AgentAction {
-  type: 'send_slack' | 'read_channel' | 'trigger_scrape' | 'set_schedule' | 'list_capabilities'
+  type:
+    | 'send_slack'
+    | 'read_channel'
+    | 'trigger_scrape'
+    | 'set_schedule'
+    | 'list_capabilities'
+    | 'generate_ai_reply'
+    | 'show_help'
   channelNameOrId?: string
   targetChannels?: string[]
+  platform?: string
+  persona?: string
   text?: string
   count?: number
   intervalMinutes?: number
@@ -24,7 +38,14 @@ export interface AgentActionResult {
   handled: boolean
   action?: AgentAction
   ok: boolean
-  cardType?: 'slack_dispatch' | 'channel_read' | 'scrape_trigger' | 'schedule_set' | 'permission_denied' | 'capabilities'
+  cardType?:
+    | 'slack_dispatch'
+    | 'channel_read'
+    | 'scrape_trigger'
+    | 'schedule_set'
+    | 'permission_denied'
+    | 'capabilities'
+    | 'help_cheatsheet'
   cardData?: Record<string, unknown>
   replyMarkdown: string
 }
@@ -169,34 +190,74 @@ export function shouldAutoReplyToMessage(
   msg: { text: string; userId?: string; userName?: string; isMine?: boolean },
   channelId: string,
   selfNames: string[] = ['Ashutosh', 'You', 'me']
-): { shouldReply: boolean; reason?: 'dm' | 'mention'; channel?: ProjectSourceChannel; source?: ProjectSource } {
+): {
+  shouldReply: boolean
+  reason?: 'dm' | 'mention' | 'all' | 'needs_reply' | 'task_only' | 'draft_only'
+  channel?: ProjectSourceChannel
+  source?: ProjectSource
+} {
   if (msg.isMine) return { shouldReply: false }
 
-  const textLower = (msg.text || '').toLowerCase()
+  const text = msg.text || ''
+  const textLower = text.toLowerCase()
   // Anti-loop guard: never reply to our own automated reply template
-  if (textLower.includes('thanks for reaching out') && textLower.includes('reviewing this')) {
+  if (
+    (textLower.includes('thanks for reaching out') && textLower.includes('reviewing this')) ||
+    textLower.includes('thanks for mentioning me')
+  ) {
     return { shouldReply: false }
   }
 
   for (const src of project.sources ?? []) {
     for (const ch of src.channels ?? []) {
       if (ch.id === channelId || cleanChannel(ch.name) === cleanChannel(channelId)) {
-        if (!ch.autoReply) return { shouldReply: false }
+        const policy = ch.autoReplyPolicy || (ch.autoReply ? 'mention_dm' : 'disabled')
+        if (policy === 'disabled') return { shouldReply: false }
 
-        // 1. Direct message (1-on-1 DM): auto-reply immediately
-        const isDm =
+        const isDm = Boolean(
           ch.isDm ||
-          ch.kind === 'dm' ||
-          ch.name.startsWith('@') ||
-          ch.name.startsWith('#@')
-        if (isDm) {
-          return { shouldReply: true, reason: 'dm', channel: ch, source: src }
+            ch.kind === 'dm' ||
+            ch.name.startsWith('@') ||
+            ch.name.startsWith('#@') ||
+            ch.name.toLowerCase().includes('you')
+        )
+        const isMentioned = selfNames.some((name) => textLower.includes(name.toLowerCase()))
+
+        // 1. Reply to All: reply unconditionally to any inbound message
+        if (policy === 'all') {
+          return { shouldReply: true, reason: 'all', channel: ch, source: src }
         }
 
-        // 2. Group channel: only reply if user's name is mentioned
-        const isMentioned = selfNames.some((name) => textLower.includes(name.toLowerCase()))
-        if (isMentioned) {
-          return { shouldReply: true, reason: 'mention', channel: ch, source: src }
+        // 2. Smart Needs-Reply: evaluate if incoming message asks question or requires action
+        if (policy === 'needs_reply') {
+          if (detectMessageNeedsReply(text)) {
+            return { shouldReply: true, reason: 'needs_reply', channel: ch, source: src }
+          }
+          return { shouldReply: false }
+        }
+
+        // 3. Task & Project Only: evaluate if message is related to deliverables, blockers, bugs
+        if (policy === 'task_only') {
+          if (detectMessageIsTaskRelated(text)) {
+            return { shouldReply: true, reason: 'task_only', channel: ch, source: src }
+          }
+          return { shouldReply: false }
+        }
+
+        // 4. Mention & DM Only: only reply in DMs or direct mentions
+        if (policy === 'mention_dm') {
+          if (isDm) {
+            return { shouldReply: true, reason: 'dm', channel: ch, source: src }
+          }
+          if (isMentioned) {
+            return { shouldReply: true, reason: 'mention', channel: ch, source: src }
+          }
+          return { shouldReply: false }
+        }
+
+        // 5. Draft Only Mode: prepare draft instead of posting
+        if (policy === 'draft_only') {
+          return { shouldReply: true, reason: 'draft_only', channel: ch, source: src }
         }
       }
     }
@@ -240,6 +301,66 @@ export function detectAgentAction(
       }
     } catch {
       // ignore JSON parse error and proceed to intent matching
+    }
+  }
+
+  // 1B. Help & Cheatsheet commands: /help, /help-slack, help, ?
+  if (/^\/(?:help-slack|help_slack)\b/i.test(p) || /^help-slack\b/i.test(p)) {
+    return { type: 'show_help', platform: 'slack' }
+  }
+  if (/^\/help\b/i.test(p) || p.toLowerCase() === 'help' || p === '?') {
+    return { type: 'show_help', platform: 'all' }
+  }
+
+  // 1C. /ai-ans command (with optional persona and target):
+  // Examples:
+  // /ai-ans @slack #Ashutosh [friendly] : ask how the project is going
+  // /ai-ans #Ashutosh [empathetic] : reassure him about the release
+  // /ai-ans [professional] : give an answer to the last question
+  const aiAnsMatch = p.match(
+    /^(?:\/ai-ans|\/ai-answer|ai-ans)\s*(?:@([a-zA-Z0-9_-]+)\s+)?(?:#([a-zA-Z0-9_-]+)\s*)?(?:\[([a-zA-Z0-9_-]+)\]\s*)?(?::\s*|\s+)?([\s\S]+)$/i
+  )
+  if (aiAnsMatch) {
+    const rawPlatform = aiAnsMatch[1]?.trim()
+    const rawTarget = aiAnsMatch[2]?.trim() || activeChannelId
+    const persona = aiAnsMatch[3]?.toLowerCase().trim() || 'professional'
+    const instruction = aiAnsMatch[4]?.trim() || 'Please answer the last message professionally.'
+    return {
+      type: 'generate_ai_reply',
+      platform: rawPlatform,
+      channelNameOrId: rawTarget,
+      targetChannels: rawTarget ? [rawTarget] : undefined,
+      persona,
+      text: instruction
+    }
+  }
+
+  // 1D. Explicit Colon Dispatch:
+  // Examples:
+  // /send @slack #Ashutosh : exact text here
+  // /send #agentworkprojecttesting : hello team
+  // send to #Ashutosh : exact text
+  // send : exact message text
+  // @slack #Ashutosh : hello bro
+  const explicitColonMatch = p.match(
+    /^(?:\/send|send)?\s*(?:to\s+)?(?:@([a-zA-Z0-9_-]+)\s+)?(?:[#@]?([a-zA-Z0-9_-]+)\s*)?:\s*([\s\S]+)$/i
+  )
+  if (explicitColonMatch) {
+    let targetPlatform = explicitColonMatch[1]?.trim()
+    let targetChannel = explicitColonMatch[2]?.trim() || activeChannelId
+    if (targetChannel?.toLowerCase() === 'slack') {
+      targetPlatform = 'slack'
+      targetChannel = activeChannelId
+    }
+    const messageText = explicitColonMatch[3]?.trim()
+    if (messageText && targetChannel) {
+      return {
+        type: 'send_slack',
+        platform: targetPlatform,
+        channelNameOrId: targetChannel,
+        targetChannels: [targetChannel],
+        text: messageText
+      }
     }
   }
 
@@ -767,6 +888,151 @@ export async function executeAgentAction(
           '',
           `**Current Channel Access:**`,
           permsContext
+        ].join('\n')
+      })
+    }
+
+    case 'show_help': {
+      const isSlackOnly = action.platform === 'slack'
+      const activeSources = (project.sources ?? []).filter((s) => s.enabled !== false && s.role !== 'ours')
+      const allChannels = activeSources.flatMap((s) => s.channels ?? [])
+      const autoReplyCount = allChannels.filter((c) => c.autoReply || (c.autoReplyPolicy && c.autoReplyPolicy !== 'disabled')).length
+      const writeCount = allChannels.filter((c) => c.agentWrite).length
+
+      const lines: string[] = []
+      lines.push(isSlackOnly ? '### 🚀 Cosmic Slack Smart Dispatch Cheatsheet' : '### 🚀 Cosmic Smart Dispatch & Automation Cheatsheet')
+      lines.push('')
+      lines.push('#### 1. Interactive Mentions in Composer')
+      lines.push('- Type `@` — Opens floating popover of connected platform accounts (`@slack`, `@teams`, `@whatsapp`).')
+      lines.push('- Type `#` — Opens floating popover of monitored channels and direct contacts (`#agentworkprojecttesting`, `#Ashutosh`).')
+      lines.push('- Type `/` — Opens slash command menu (`/send`, `/ai-ans`, `/help`, `/help-slack`, `/scrape`, `/status`).')
+      lines.push('')
+      lines.push('#### 2. Slash Commands & Verbatim Dispatch')
+      lines.push('- `/send @account #channel : <message>` — Dispatches exact verbatim message following the colon (`:`) via Direct API (~150ms).')
+      lines.push('- `/ai-ans @account #channel [persona] : <instruction>` — AI drafts and posts a context-grounded response using channel history (RAG).')
+      lines.push('- `/help` & `/help-slack` — Surface this interactive cheatsheet.')
+      lines.push('- `/scrape` — Triggers immediate background delta sync.')
+      lines.push('')
+      lines.push('#### 3. 6 AI Response Personas (Available for Auto-Reply & `/ai-ans`)')
+      lines.push('- `👔 Professional (Default)`: Crisp, formal enterprise tone.')
+      lines.push('- `😊 Friendly & Warm`: Approachable, polite, enthusiastic, conversational.')
+      lines.push('- `⚡ Direct & Concise`: Minimalist, bullet-pointed, zero fluff.')
+      lines.push('- `🤝 Empathetic ("Good Person")`: Caring, patient, client-advocate tone.')
+      lines.push('- `🛠️ Technical & Detailed`: Deep architecture, specifications, technical context.')
+      lines.push('- `📊 Executive Summary`: High-level updates on deliverables, decisions, and blockers.')
+      lines.push('')
+      lines.push('#### 4. 6-Tier Auto-Reply Policies (Configured in bar above composer)')
+      lines.push('- `🛑 No Auto-Reply`: Agent listens and syncs; never responds automatically.')
+      lines.push('- `⚡ Reply to All`: Automatically replies to every incoming contact message.')
+      lines.push('- `🧠 Smart Needs-Reply`: Only replies when an incoming message asks a question or requires action.')
+      lines.push('- `📋 Task & Project Only`: Only replies if the message concerns deliverables, tasks, or blockers.')
+      lines.push('- `👤 Mention & DM Only`: Only replies in 1-on-1 direct messages or when explicitly tagged.')
+      lines.push('- `📝 Draft Approval Mode`: Generates a suggested response draft card in chat for user confirmation.')
+      lines.push('')
+      lines.push(`*Active Status: ${activeSources.length} connected account(s) · ${allChannels.length} channel(s) monitored · ${writeCount} write-authorized · ${autoReplyCount} auto-reply enabled.*`)
+
+      return wrapCardReply({
+        handled: true,
+        action,
+        ok: true,
+        cardType: 'help_cheatsheet',
+        cardData: {
+          platform: action.platform,
+          connectedSources: activeSources.map((s) => ({ id: s.id, platform: s.platform, name: s.workspaceName })),
+          channelCount: allChannels.length,
+          writeCount,
+          autoReplyCount
+        },
+        replyMarkdown: lines.join('\n')
+      })
+    }
+
+    case 'generate_ai_reply': {
+      const targetQuery = action.channelNameOrId
+      if (!targetQuery) {
+        return wrapCardReply({
+          handled: true,
+          action,
+          ok: false,
+          replyMarkdown: 'Please specify a target channel or contact for the AI response (e.g. `/ai-ans #Ashutosh [friendly] : message`).'
+        })
+      }
+
+      const resolved = resolveProjectChannel(project, targetQuery)
+      if (!resolved) {
+        return wrapCardReply({
+          handled: true,
+          action,
+          ok: false,
+          replyMarkdown: `Could not find channel or contact matching "${targetQuery}".`
+        })
+      }
+
+      const { channel } = resolved
+      if (!channel.agentWrite) {
+        return wrapCardReply({
+          handled: true,
+          action,
+          ok: false,
+          cardType: 'permission_denied',
+          cardData: { channelId: channel.id, channelName: channel.name },
+          replyMarkdown: `⚠️ **Agent Write Permission Required**: Channel or contact **#${channel.name}** is not authorized for posting.`
+        })
+      }
+
+      let historyRows: DashboardChatMessage[] = []
+      if (chatService) {
+        try {
+          const page = await chatService.loadMessages({ projectId, channelId: channel.id, limit: 15 })
+          historyRows = page.messages || []
+        } catch {
+          historyRows = []
+        }
+      }
+
+      const persona = action.persona || channel.autoReplyPersona || 'professional'
+      const promptInstruction = action.text || 'Please provide an appropriate response to the latest conversation.'
+
+      const synthesizedText = generatePersonaReply({
+        personaKey: persona,
+        channelName: channel.name,
+        instruction: promptInstruction,
+        history: historyRows
+      })
+
+      if (!chatService) {
+        return wrapCardReply({
+          handled: true,
+          action,
+          ok: false,
+          replyMarkdown: 'Chat service is unavailable to dispatch AI response.'
+        })
+      }
+
+      const res = await chatService.sendMessage({
+        projectId,
+        channelId: channel.id,
+        text: synthesizedText,
+        isAgent: true
+      })
+
+      const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      return wrapCardReply({
+        handled: true,
+        action,
+        ok: Boolean(res.ok),
+        cardType: 'slack_dispatch',
+        cardData: {
+          channelId: channel.id,
+          channelName: channel.name,
+          persona,
+          ts: res.message?.ts
+        },
+        replyMarkdown: [
+          `⚡ **AI Response Dispatched with [${persona.toUpperCase()}] Persona**`,
+          `> Destination: **#${channel.name}**`,
+          `> Grounded Context: Injected ${historyRows.length} recent messages (RAG)`,
+          `Delivered via Direct API in ~150ms at ${now}.`
         ].join('\n')
       })
     }

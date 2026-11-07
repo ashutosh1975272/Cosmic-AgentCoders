@@ -71,6 +71,22 @@ export type ProjectSourceDmPolicy = 'inherit' | 'on' | 'off'
 /** Include = read only ticked channels. Exclude = read everything except ticked. */
 export type ProjectSourceSelectionMode = 'include' | 'exclude'
 
+export type AutoReplyPolicy =
+  | 'disabled'
+  | 'all'
+  | 'needs_reply'
+  | 'task_only'
+  | 'mention_dm'
+  | 'draft_only'
+
+export type AutoReplyPersona =
+  | 'professional'
+  | 'friendly'
+  | 'concise'
+  | 'empathetic'
+  | 'technical'
+  | 'executive'
+
 export interface ProjectSourceChannel {
   id: string
   name: string
@@ -85,6 +101,10 @@ export interface ProjectSourceChannel {
   agentWrite?: boolean
   /** Real-time autonomous auto-reply authorization (defaults to false) */
   autoReply?: boolean
+  /** Configurable auto-reply policy for this channel/contact. Defaults to 'disabled'. */
+  autoReplyPolicy?: AutoReplyPolicy
+  /** Configurable AI response persona/tone for this channel/contact. Defaults to 'professional'. */
+  autoReplyPersona?: AutoReplyPersona
   created?: number
   memberCount?: number
   topic?: string

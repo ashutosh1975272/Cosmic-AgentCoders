@@ -366,9 +366,42 @@ export class DashboardChatService {
     const workspace = await this.workspaceFor(project, source)
     if (!workspace) return { messages: [], nextBeforeTs: null, hasMore: false }
 
-    const monitors = payload.channelId
-      ? workspace.monitors.filter((m) => m.channelId === payload.channelId)
+    const targetQuery = (payload.channelId || '').trim()
+    const cleanTarget = targetQuery.replace(/^[#@]+/, '').toLowerCase()
+
+    let monitors = targetQuery
+      ? workspace.monitors.filter((m) => {
+          if (m.channelId === targetQuery) return true
+          if (m.channelName === targetQuery) return true
+          const cleanMName = m.channelName.replace(/^[#@]+/, '').toLowerCase()
+          const cleanMId = m.channelId.replace(/^[#@]+/, '').toLowerCase()
+          return (
+            cleanMName === cleanTarget ||
+            cleanMId === cleanTarget ||
+            cleanMName.replace(/\s*\(?you\)?$/i, '') === cleanTarget ||
+            cleanTarget.replace(/\s*\(?you\)?$/i, '') === cleanMName
+          )
+        })
       : workspace.monitors
+
+    if (targetQuery && monitors.length === 0) {
+      const directDelta = await this.deltaStore.load(
+        workspace.profileId,
+        workspace.teamId,
+        targetQuery
+      )
+      if (directDelta) {
+        monitors = [{ channelId: targetQuery, channelName: directDelta.channel.name || targetQuery }]
+      } else {
+        const fuzzyMatch = workspace.monitors.find((m) => {
+          const cName = m.channelName.replace(/^[#@]+/, '').toLowerCase()
+          return cName.includes(cleanTarget) || cleanTarget.includes(cName)
+        })
+        if (fuzzyMatch) {
+          monitors = [fuzzyMatch]
+        }
+      }
+    }
 
     const rows: ChatRow[] = []
     for (const monitor of monitors) {
