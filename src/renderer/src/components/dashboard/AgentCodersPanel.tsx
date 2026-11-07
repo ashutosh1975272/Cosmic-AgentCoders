@@ -6,6 +6,11 @@ import {
 } from '../../hooks/useAgentCodersStore'
 import ComposerAutocompletePopover, { AutocompleteItem } from './ComposerAutocompletePopover'
 
+export const INNER_SIDEBAR_DEFAULT = 280
+export const INNER_SIDEBAR_MIN = 180
+export const INNER_SIDEBAR_MAX = 500
+export const INNER_SIDEBAR_COLLAPSED_W = 64
+
 interface AgentCodersPanelProps {
   projectId: string
   projectName: string
@@ -26,6 +31,28 @@ export default function AgentCodersPanel({
   const postMessage = useAgentCodersStore((s) => s.postMessage)
   const resetSwarm = useAgentCodersStore((s) => s.resetSwarm)
 
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('agentcoders_sidebar_width')
+      if (saved) {
+        const parsed = parseInt(saved, 10)
+        if (!isNaN(parsed) && parsed >= INNER_SIDEBAR_MIN && parsed <= INNER_SIDEBAR_MAX) {
+          return parsed
+        }
+      }
+    }
+    return INNER_SIDEBAR_DEFAULT
+  })
+
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('agentcoders_sidebar_collapsed') === 'true'
+    }
+    return false
+  })
+
+  const [isDragging, setIsDragging] = useState(false)
+
   const [draft, setDraft] = useState('')
   const [autocompleteTrigger, setAutocompleteTrigger] = useState<'@' | '#' | '/' | '$' | null>(null)
   const [autocompleteQuery, setAutocompleteQuery] = useState('')
@@ -44,6 +71,85 @@ export default function AgentCodersPanel({
       chatEndRef.current.scrollIntoView({ behavior: 'smooth' })
     }
   }, [currentMessages.length, activeAgentId])
+
+  const handleToggleCollapse = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('agentcoders_sidebar_collapsed', String(next))
+      }
+      return next
+    })
+  }, [])
+
+  const handleWidthChange = useCallback((w: number) => {
+    const clamped = Math.max(INNER_SIDEBAR_MIN, Math.min(INNER_SIDEBAR_MAX, w))
+    setSidebarWidth(clamped)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('agentcoders_sidebar_width', String(clamped))
+    }
+  }, [])
+
+  const resetWidth = useCallback(() => {
+    handleWidthChange(INNER_SIDEBAR_DEFAULT)
+  }, [handleWidthChange])
+
+  const startResize = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      e.preventDefault()
+      const handle = e.currentTarget
+      const startX = e.clientX
+      const startW = sidebarWidth
+      setIsDragging(true)
+      handle.setPointerCapture(e.pointerId)
+
+      const onPointerMove = (ev: PointerEvent) => {
+        const delta = ev.clientX - startX
+        const nextW = Math.max(INNER_SIDEBAR_MIN, Math.min(INNER_SIDEBAR_MAX, startW + delta))
+        setSidebarWidth(nextW)
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('agentcoders_sidebar_width', String(nextW))
+        }
+      }
+
+      const onPointerUp = (ev: PointerEvent) => {
+        setIsDragging(false)
+        try {
+          handle.releasePointerCapture(ev.pointerId)
+        } catch {
+          // ignore
+        }
+        window.removeEventListener('pointermove', onPointerMove)
+        window.removeEventListener('pointerup', onPointerUp)
+      }
+
+      window.addEventListener('pointermove', onPointerMove)
+      window.addEventListener('pointerup', onPointerUp)
+    },
+    [sidebarWidth]
+  )
+
+  const onResizeKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        handleWidthChange(sidebarWidth - 16)
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        handleWidthChange(sidebarWidth + 16)
+      } else if (e.key === 'Home') {
+        e.preventDefault()
+        handleWidthChange(INNER_SIDEBAR_MIN)
+      } else if (e.key === 'End') {
+        e.preventDefault()
+        handleWidthChange(INNER_SIDEBAR_MAX)
+      } else if (e.key === 'Enter') {
+        e.preventDefault()
+        resetWidth()
+      }
+    },
+    [handleWidthChange, resetWidth, sidebarWidth]
+  )
 
   const handleDraftChange = useCallback((text: string) => {
     setDraft(text)
@@ -146,174 +252,425 @@ export default function AgentCodersPanel({
     >
       {/* 1. Inner Sub-Agent Sidebar */}
       <aside
+        data-testid="agentcoders-inner-sidebar"
         style={{
-          width: 280,
+          width: sidebarCollapsed ? INNER_SIDEBAR_COLLAPSED_W : sidebarWidth,
+          minWidth: sidebarCollapsed ? INNER_SIDEBAR_COLLAPSED_W : INNER_SIDEBAR_MIN,
+          maxWidth: sidebarCollapsed ? INNER_SIDEBAR_COLLAPSED_W : INNER_SIDEBAR_MAX,
           background: 'rgba(15, 23, 42, 0.95)',
           borderRight: '1px solid rgba(255, 255, 255, 0.08)',
           display: 'flex',
           flexDirection: 'column',
-          flexShrink: 0
+          flexShrink: 0,
+          position: 'relative',
+          transition: isDragging ? 'none' : 'width 0.18s cubic-bezier(0.4, 0, 0.2, 1)',
+          userSelect: isDragging ? 'none' : 'auto'
         }}
       >
-        <div
-          style={{
-            padding: '16px 14px 12px',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: '#f8fafc', letterSpacing: '0.02em' }}>
-              🤖 AgentCoders Swarm
-            </span>
-            <span
+        {sidebarCollapsed ? (
+          /* Collapsed Icon Rail Mode */
+          <>
+            <div
               style={{
-                fontSize: 9,
-                fontWeight: 700,
-                padding: '2px 6px',
-                borderRadius: 4,
-                background: isOrchestrating ? 'rgba(34, 197, 94, 0.25)' : 'rgba(168, 85, 247, 0.2)',
-                color: isOrchestrating ? '#4ade80' : '#c084fc',
-                border: isOrchestrating
-                  ? '1px solid rgba(34, 197, 94, 0.5)'
-                  : '1px solid rgba(168, 85, 247, 0.4)'
+                padding: '12px 8px',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 8
               }}
             >
-              {isOrchestrating ? '⚡ A2A RUNNING' : 'A2A ACTIVE'}
-            </span>
-          </div>
-          <p style={{ margin: '4px 0 0', fontSize: 11, color: '#94a3b8' }}>
-            {projectName} · Matt Pocock (1st) & Ruflo A2A
-          </p>
-        </div>
-
-        {/* Agent List */}
-        <nav style={{ flex: 1, overflowY: 'auto', padding: '8px 6px' }}>
-          {SWARM_AGENTS.map((agent) => {
-            const isSelected = agent.id === activeAgentId
-            const activeTasks = activeTaskCountFor(agent.id)
-            return (
               <button
-                key={agent.id}
                 type="button"
-                onClick={() => setActiveAgent(agent.id)}
+                onClick={handleToggleCollapse}
+                aria-label="Expand sidebar"
+                title="Expand AgentCoders Sidebar (»)"
                 style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: 6,
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  color: '#94a3b8',
+                  fontSize: 14,
                   display: 'flex',
                   alignItems: 'center',
-                  width: '100%',
-                  gap: 10,
-                  padding: '9px 10px',
-                  borderRadius: 6,
-                  background: isSelected ? 'rgba(168, 85, 247, 0.2)' : 'transparent',
-                  border: isSelected ? '1px solid rgba(168, 85, 247, 0.4)' : '1px solid transparent',
-                  color: isSelected ? '#f8fafc' : '#cbd5e1',
+                  justifyContent: 'center',
                   cursor: 'pointer',
-                  textAlign: 'left',
-                  marginBottom: 3,
-                  transition: 'background 0.12s ease'
+                  transition: 'all 0.15s ease'
                 }}
               >
-                <span
-                  style={{
-                    fontSize: 16,
-                    width: 28,
-                    height: 28,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    borderRadius: 6,
-                    background: `${agent.accentColor}22`,
-                    border: `1px solid ${agent.accentColor}44`,
-                    flexShrink: 0
-                  }}
-                >
-                  {agent.icon}
-                </span>
+                »
+              </button>
+              <span
+                title={isOrchestrating ? 'A2A Orchestration Running' : 'A2A Active'}
+                style={{
+                  fontSize: 12,
+                  display: 'inline-block'
+                }}
+              >
+                {isOrchestrating ? '⚡' : '●'}
+              </span>
+            </div>
 
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: 12, fontWeight: 650 }}>{agent.name}</span>
+            {/* Collapsed Agent Icons */}
+            <nav
+              style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: '10px 6px',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 8
+              }}
+            >
+              {SWARM_AGENTS.map((agent) => {
+                const isSelected = agent.id === activeAgentId
+                const activeTasks = activeTaskCountFor(agent.id)
+                return (
+                  <button
+                    key={agent.id}
+                    type="button"
+                    onClick={() => setActiveAgent(agent.id)}
+                    aria-label={agent.name}
+                    title={`${agent.name} (${agent.handle})\n${agent.role}`}
+                    style={{
+                      position: 'relative',
+                      width: 42,
+                      height: 42,
+                      borderRadius: 8,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: isSelected ? 'rgba(168, 85, 247, 0.25)' : 'rgba(255, 255, 255, 0.03)',
+                      border: isSelected
+                        ? '1px solid rgba(168, 85, 247, 0.5)'
+                        : '1px solid rgba(255, 255, 255, 0.06)',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <span style={{ fontSize: 18 }}>{agent.icon}</span>
                     {activeTasks > 0 && (
                       <span
                         style={{
-                          fontSize: 9,
-                          fontWeight: 700,
-                          padding: '1px 5px',
-                          borderRadius: 3,
-                          background: 'rgba(234, 179, 8, 0.25)',
-                          color: '#fef08a'
+                          position: 'absolute',
+                          top: 2,
+                          right: 2,
+                          minWidth: 14,
+                          height: 14,
+                          borderRadius: 7,
+                          background: '#eab308',
+                          color: '#000',
+                          fontSize: 8.5,
+                          fontWeight: 800,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: '0 2px'
                         }}
                       >
-                        {activeTasks} active
+                        {activeTasks}
                       </span>
                     )}
-                  </div>
-                  <div
+                  </button>
+                )
+              })}
+            </nav>
+
+            {/* Collapsed Progress Footer */}
+            <div
+              style={{
+                padding: '10px 4px',
+                borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 4
+              }}
+              title={`Swarm Progress: ${swarmProgress}%`}
+            >
+              <span style={{ fontSize: 9, fontWeight: 700, color: '#38bdf8' }}>{swarmProgress}%</span>
+              <div
+                style={{
+                  width: 36,
+                  height: 4,
+                  borderRadius: 2,
+                  background: 'rgba(255, 255, 255, 0.1)',
+                  overflow: 'hidden'
+                }}
+              >
+                <div
+                  style={{
+                    width: `${swarmProgress}%`,
+                    height: '100%',
+                    background:
+                      swarmProgress === 100
+                        ? '#22c55e'
+                        : 'linear-gradient(90deg, #3b82f6, #a855f7)'
+                  }}
+                />
+              </div>
+            </div>
+          </>
+        ) : (
+          /* Expanded Sidebar Mode */
+          <>
+            <div
+              style={{
+                padding: '16px 14px 12px',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                  <span
                     style={{
-                      fontSize: 10.5,
-                      color: isSelected ? '#cbd5e1' : '#64748b',
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: '#f8fafc',
+                      letterSpacing: '0.02em',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap'
                     }}
                   >
-                    {agent.handle} · {agent.role.split('&')[0]}
-                  </div>
+                    🤖 AgentCoders Swarm
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 9,
+                      fontWeight: 700,
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      background: isOrchestrating
+                        ? 'rgba(34, 197, 94, 0.25)'
+                        : 'rgba(168, 85, 247, 0.2)',
+                      color: isOrchestrating ? '#4ade80' : '#c084fc',
+                      border: isOrchestrating
+                        ? '1px solid rgba(34, 197, 94, 0.5)'
+                        : '1px solid rgba(168, 85, 247, 0.4)',
+                      flexShrink: 0
+                    }}
+                  >
+                    {isOrchestrating ? '⚡ A2A RUNNING' : 'A2A ACTIVE'}
+                  </span>
                 </div>
-              </button>
-            )
-          })}
-        </nav>
 
-        {/* Swarm Status Footer */}
-        <div
-          style={{
-            padding: '12px 14px',
-            borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-            background: 'rgba(10, 15, 30, 0.6)'
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
-            <span style={{ color: '#94a3b8' }}>Swarm Progress:</span>
-            <span style={{ fontWeight: 700, color: '#38bdf8' }}>{swarmProgress}%</span>
-          </div>
-          <div
-            style={{
-              width: '100%',
-              height: 5,
-              borderRadius: 3,
-              background: 'rgba(255, 255, 255, 0.1)',
-              overflow: 'hidden'
-            }}
-          >
+                <button
+                  type="button"
+                  onClick={handleToggleCollapse}
+                  aria-label="Collapse sidebar"
+                  title="Minimize sidebar to icon rail («)"
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    borderRadius: 4,
+                    color: '#94a3b8',
+                    cursor: 'pointer',
+                    width: 24,
+                    height: 24,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 12,
+                    padding: 0,
+                    flexShrink: 0,
+                    marginLeft: 6
+                  }}
+                >
+                  «
+                </button>
+              </div>
+              <p
+                style={{
+                  margin: '4px 0 0',
+                  fontSize: 11,
+                  color: '#94a3b8',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {projectName} · Matt Pocock (1st) & Ruflo A2A
+              </p>
+            </div>
+
+            {/* Agent List */}
+            <nav style={{ flex: 1, overflowY: 'auto', padding: '8px 6px' }}>
+              {SWARM_AGENTS.map((agent) => {
+                const isSelected = agent.id === activeAgentId
+                const activeTasks = activeTaskCountFor(agent.id)
+                return (
+                  <button
+                    key={agent.id}
+                    type="button"
+                    onClick={() => setActiveAgent(agent.id)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      width: '100%',
+                      gap: 10,
+                      padding: '9px 10px',
+                      borderRadius: 6,
+                      background: isSelected ? 'rgba(168, 85, 247, 0.2)' : 'transparent',
+                      border: isSelected
+                        ? '1px solid rgba(168, 85, 247, 0.4)'
+                        : '1px solid transparent',
+                      color: isSelected ? '#f8fafc' : '#cbd5e1',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      marginBottom: 3,
+                      transition: 'background 0.12s ease'
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 16,
+                        width: 28,
+                        height: 28,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: 6,
+                        background: `${agent.accentColor}22`,
+                        border: `1px solid ${agent.accentColor}44`,
+                        flexShrink: 0
+                      }}
+                    >
+                      {agent.icon}
+                    </span>
+
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between'
+                        }}
+                      >
+                        <span style={{ fontSize: 12, fontWeight: 650 }}>{agent.name}</span>
+                        {activeTasks > 0 && (
+                          <span
+                            style={{
+                              fontSize: 9,
+                              fontWeight: 700,
+                              padding: '1px 5px',
+                              borderRadius: 3,
+                              background: 'rgba(234, 179, 8, 0.25)',
+                              color: '#fef08a'
+                            }}
+                          >
+                            {activeTasks} active
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 10.5,
+                          color: isSelected ? '#cbd5e1' : '#64748b',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        {agent.handle} · {agent.role.split('&')[0]}
+                      </div>
+                    </div>
+                  </button>
+                )
+              })}
+            </nav>
+
+            {/* Swarm Status Footer */}
             <div
               style={{
-                width: `${swarmProgress}%`,
-                height: '100%',
-                background: swarmProgress === 100 ? '#22c55e' : 'linear-gradient(90deg, #3b82f6, #a855f7)',
-                transition: 'width 0.4s ease'
-              }}
-            />
-          </div>
-          {tasks.length > 0 && (
-            <button
-              type="button"
-              onClick={resetSwarm}
-              style={{
-                marginTop: 8,
-                width: '100%',
-                padding: '4px 8px',
-                fontSize: 10,
-                color: '#94a3b8',
-                background: 'transparent',
-                border: '1px solid rgba(255, 255, 255, 0.12)',
-                borderRadius: 4,
-                cursor: 'pointer'
+                padding: '12px 14px',
+                borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+                background: 'rgba(10, 15, 30, 0.6)'
               }}
             >
-              Reset Swarm State
-            </button>
-          )}
-        </div>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  fontSize: 11,
+                  marginBottom: 4
+                }}
+              >
+                <span style={{ color: '#94a3b8' }}>Swarm Progress:</span>
+                <span style={{ fontWeight: 700, color: '#38bdf8' }}>{swarmProgress}%</span>
+              </div>
+              <div
+                style={{
+                  width: '100%',
+                  height: 5,
+                  borderRadius: 3,
+                  background: 'rgba(255, 255, 255, 0.1)',
+                  overflow: 'hidden'
+                }}
+              >
+                <div
+                  style={{
+                    width: `${swarmProgress}%`,
+                    height: '100%',
+                    background:
+                      swarmProgress === 100
+                        ? '#22c55e'
+                        : 'linear-gradient(90deg, #3b82f6, #a855f7)',
+                    transition: 'width 0.4s ease'
+                  }}
+                />
+              </div>
+              {tasks.length > 0 && (
+                <button
+                  type="button"
+                  onClick={resetSwarm}
+                  style={{
+                    marginTop: 8,
+                    width: '100%',
+                    padding: '4px 8px',
+                    fontSize: 10,
+                    color: '#94a3b8',
+                    background: 'transparent',
+                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    borderRadius: 4,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Reset Swarm State
+                </button>
+              )}
+            </div>
+
+            {/* Drag Resize Handle */}
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize inner sidebar"
+              aria-valuenow={sidebarWidth}
+              aria-valuemin={INNER_SIDEBAR_MIN}
+              aria-valuemax={INNER_SIDEBAR_MAX}
+              tabIndex={0}
+              title="Drag to resize · double-click to reset (280px)"
+              onPointerDown={startResize}
+              onDoubleClick={resetWidth}
+              onKeyDown={onResizeKeyDown}
+              style={{
+                position: 'absolute',
+                top: 0,
+                right: 0,
+                width: 6,
+                height: '100%',
+                cursor: 'col-resize',
+                zIndex: 10,
+                background: isDragging ? 'rgba(168, 85, 247, 0.6)' : 'transparent',
+                transition: 'background 0.15s ease'
+              }}
+            />
+          </>
+        )}
       </aside>
 
       {/* 2. Main Agent Content Area */}

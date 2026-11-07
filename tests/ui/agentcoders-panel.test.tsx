@@ -61,4 +61,47 @@ describe('AgentCodersPanel UI tests', () => {
     expect(screen.getByText('Feature Implementation & Synthesis')).toBeDefined()
     expect(screen.getByText('Two-Axis Code Review (Spec + Standards)')).toBeDefined()
   })
+
+  it('minimizes sidebar to collapsed icon rail and restores it on expand click', () => {
+    localStorage.clear()
+    render(<AgentCodersPanel projectId="p1" projectName="Acme Swarm" />)
+
+    const sidebar = screen.getByTestId('agentcoders-inner-sidebar')
+    expect(sidebar.style.width).toBe('280px')
+
+    // Find collapse button and click it
+    const collapseBtn = screen.getByRole('button', { name: /Collapse sidebar/i })
+    fireEvent.click(collapseBtn)
+
+    // Now collapsed: width is 64px, expand button is rendered
+    expect(sidebar.style.width).toBe('64px')
+    const expandBtn = screen.getByRole('button', { name: /Expand sidebar/i })
+    expect(expandBtn).toBeDefined()
+
+    // Agent icon buttons are rendered in collapsed rail
+    const architectIconBtn = screen.getByRole('button', { name: 'Architect' })
+    expect(architectIconBtn).toBeDefined()
+
+    // Clicking an agent in collapsed rail switches active agent
+    fireEvent.click(architectIconBtn)
+    expect(screen.getByText('Deep Codebase Design & Domain Modeling')).toBeDefined()
+
+    // Click expand button to restore full sidebar
+    fireEvent.click(expandBtn)
+    expect(sidebar.style.width).toBe('280px')
+    expect(screen.getByText('🤖 AgentCoders Swarm')).toBeDefined()
+  })
+
+  it('renders resizer separator and resets width to 280px on double click', () => {
+    localStorage.clear()
+    render(<AgentCodersPanel projectId="p1" projectName="Acme Swarm" />)
+
+    const resizer = screen.getByRole('separator', { name: /Resize inner sidebar/i })
+    expect(resizer).toBeDefined()
+
+    // Double click resizer resets to 280px
+    fireEvent.doubleClick(resizer)
+    const sidebar = screen.getByTestId('agentcoders-inner-sidebar')
+    expect(sidebar.style.width).toBe('280px')
+  })
 })
