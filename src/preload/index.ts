@@ -337,6 +337,15 @@ const api: IpcApi = {
         IpcChannels.DashboardProjectChatHistory,
         query
       ) as Promise<DashboardProjectChatHistoryResult>,
+    appendProjectChatMessage: (payload: {
+      projectId: string
+      channelId?: string
+      sourceId?: string
+      message: import('../shared/dashboard-contract').DashboardProjectChatMessage
+    }) =>
+      ipcRenderer.invoke(IpcChannels.DashboardProjectChatAppend, payload) as Promise<{
+        ok: boolean
+      }>,
     clearProjectChat: (
       query: string | { projectId: string; channelId?: string; sourceId?: string }
     ) =>

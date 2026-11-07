@@ -10,9 +10,18 @@ import type {
   DashboardProjectChatStatus
 } from '../../src/shared/dashboard-contract'
 
-function installApi(options: { history?: DashboardProjectChatMessage[] } = {}): void {
+let snapshotListeners: Array<(snapshot: any) => void> = []
+let persistedHistory: DashboardProjectChatMessage[] = []
+
+function installApi(options: { history?: DashboardProjectChatMessage[] } = {}): {
+  appendMock: ReturnType<typeof vi.fn>
+  fireSnapshot: () => void
+} {
+  snapshotListeners = []
+  persistedHistory = options.history ? [...options.history] : []
+
   const history = vi.fn(async (): Promise<DashboardProjectChatHistoryResult> => ({
-    messages: options.history ?? []
+    messages: [...persistedHistory]
   }))
   const statusMock = vi.fn(async (): Promise<DashboardProjectChatStatus> => ({
     hasKey: true,
@@ -22,15 +31,25 @@ function installApi(options: { history?: DashboardProjectChatMessage[] } = {}): 
   }))
   const projectChat = vi.fn(async () => ({ ok: true as const, runId: 'run-1' }))
   const cancelProjectChat = vi.fn(async () => ({ ok: true }))
-  const clearProjectChat = vi.fn(async () => ({ ok: true }))
+  const clearProjectChat = vi.fn(async () => {
+    persistedHistory = []
+    return { ok: true }
+  })
   const updateSource = vi.fn(async () => ({ ok: true }))
   const sendMessage = vi.fn(async () => ({
     ok: true,
     message: { channelId: 'C1', ts: '123', text: 'hi', atIso: new Date().toISOString() }
   }))
+  const appendProjectChatMessage = vi.fn(
+    async (payload: { message: DashboardProjectChatMessage }) => {
+      persistedHistory.push(payload.message)
+      return { ok: true }
+    }
+  )
 
   const dashboard = {
     getProjectChatHistory: history,
+    appendProjectChatMessage,
     getProjectChatStatus: statusMock,
     projectChat,
     cancelProjectChat,
@@ -40,10 +59,25 @@ function installApi(options: { history?: DashboardProjectChatMessage[] } = {}): 
     onProjectChatChunk: () => () => {},
     onProjectChatDone: () => () => {},
     onProjectChatError: () => () => {},
-    onConfigChanged: () => () => {}
+    onConfigChanged: () => () => {},
+    onSnapshotChanged: (cb: (snapshot: any) => void) => {
+      snapshotListeners.push(cb)
+      return () => {
+        snapshotListeners = snapshotListeners.filter((l) => l !== cb)
+      }
+    }
   }
 
   window.api = { dashboard } as unknown as Window['api']
+
+  return {
+    appendMock: appendProjectChatMessage,
+    fireSnapshot: () => {
+      for (const listener of snapshotListeners) {
+        listener({ projects: [] } as any)
+      }
+    }
+  }
 }
 
 describe('AgentCoders Parallel Query Bridge & Threading', () => {
@@ -312,5 +346,123 @@ describe('AgentCoders Parallel Query Bridge & Threading', () => {
     // Message must STILL render the markdown answer and NOT revert to an infinite working spinner!
     expect(screen.queryByTestId('swarm-working-card')).toBeNull()
     expect(screen.getByText(/Complete Roster & Agent Hierarchy/i)).toBeDefined()
+  })
+
+  it('preserves Swarm Q&A in chat feed when background reload or onSnapshotChanged occurs (never disappears)', async () => {
+    const api = installApi()
+    render(
+      <AgentChatPanel
+        projectId="p-persist"
+        projectName="Orbit Engine"
+        mode="project"
+      />
+    )
+
+    const textarea = (await screen.findByPlaceholderText(
+      /Ask about this project/i
+    )) as HTMLTextAreaElement
+
+    // 1. Send query to Head Agent
+    fireEvent.change(textarea, {
+      target: {
+        value: '$AgentWork @HeadAgent : tell me what are the agents you have currently'
+      }
+    })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
+
+    // Working card shows initially
+    expect(screen.getByTestId('swarm-working-card')).toBeDefined()
+
+    // 2. Wait for completed response
+    await waitFor(
+      () => {
+        expect(screen.getByText(/Complete Roster & Agent Hierarchy/i)).toBeDefined()
+      },
+      { timeout: 3000 }
+    )
+
+    // Verify disk persistence via appendProjectChatMessage occurred for both user and assistant
+    expect(api.appendMock).toHaveBeenCalledTimes(2)
+    const userCall = api.appendMock.mock.calls[0][0]
+    expect(userCall.message.role).toBe('user')
+    expect(userCall.message.swarmQueryId).toBeDefined()
+    const assistantCall = api.appendMock.mock.calls[1][0]
+    expect(assistantCall.message.role).toBe('assistant')
+    expect(assistantCall.message.swarmQueryId).toBeDefined()
+
+    // 3. Trigger snapshot change (which calls loadChannelAndChatHistory, just like 5s background poll)
+    api.fireSnapshot()
+
+    // 4. Wait and assert the Swarm answer is STILL present in the chat feed (did NOT disappear)
+    await waitFor(() => {
+      expect(screen.getByText(/Complete Roster & Agent Hierarchy/i)).toBeDefined()
+      expect(screen.getByTestId('swarm-execution-time-badge')).toBeDefined()
+      expect(screen.getByTestId('swarm-tokens-badge')).toBeDefined()
+    })
+
+    // User question must also still be visible
+    expect(screen.getByText(/tell me what are the agents you have currently/i)).toBeDefined()
+  })
+
+  it('reconciles in-flight active swarm queries so the live working card does not disappear during polling', async () => {
+    const api = installApi()
+    render(
+      <AgentChatPanel
+        projectId="p-inflight"
+        projectName="Orbit Engine"
+        mode="project"
+      />
+    )
+
+    const textarea = (await screen.findByPlaceholderText(
+      /Ask about this project/i
+    )) as HTMLTextAreaElement
+
+    fireEvent.change(textarea, {
+      target: { value: '@HeadAgent : who are you' }
+    })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
+
+    // Live working card is visible immediately
+    expect(screen.getByTestId('swarm-working-card')).toBeDefined()
+
+    // Trigger snapshot sync immediately while still analyzing
+    api.fireSnapshot()
+
+    // Live working card MUST NOT disappear!
+    expect(screen.getByTestId('swarm-working-card')).toBeDefined()
+
+    // Wait for resolution
+    await waitFor(
+      () => {
+        expect(screen.getByText(/Complete Roster & Agent Hierarchy/i)).toBeDefined()
+      },
+      { timeout: 3000 }
+    )
+  })
+
+  it('hydrates previous Swarm queries from store and disk when mounting panel', async () => {
+    installApi()
+    // Pre-populate a completed project_chat query in store
+    await useAgentCodersStore.getState().dispatchSwarmQuery({
+      prompt: 'Summarize system architecture seams',
+      targetAgentId: 'head',
+      source: 'project_chat',
+      projectId: 'p-hydrate'
+    })
+
+    render(
+      <AgentChatPanel
+        projectId="p-hydrate"
+        projectName="Orbit Engine"
+        mode="project"
+      />
+    )
+
+    // Query and answer should be hydrated into the chat feed automatically
+    await waitFor(() => {
+      expect(screen.getAllByText(/Summarize system architecture seams/i).length).toBeGreaterThanOrEqual(1)
+      expect(screen.getByText(/Specialist Assessment/i)).toBeDefined()
+    })
   })
 })

@@ -893,19 +893,124 @@ export default function AgentChatPanel({
           unified.push({
             id: `pchat-${i}-${c.atIso}`,
             role: c.role,
-            authorName: c.role === 'user' ? 'You' : 'Cosmic',
+            authorName: c.authorName || (c.role === 'user' ? 'You' : 'Cosmic'),
             atIso: c.atIso,
             content: c.content,
             sources: c.sources,
-            stopped: c.stopped
+            stopped: c.stopped,
+            swarmQueryId: c.swarmQueryId
           })
         }
       }
 
-      // 3. Sort chronologically
+      // 3. Hydrate active and completed Swarm queries from useAgentCodersStore
+      const activeQueries = useAgentCodersStore.getState().activeQueries
+      const projectChatQueries = Object.values(activeQueries).filter(
+        (q) => q.source === 'project_chat' && (!q.projectId || q.projectId === projectId)
+      )
+
+      for (const q of projectChatQueries) {
+        const targetAgentName =
+          q.targetAgentId === 'head'
+            ? 'Head Agent'
+            : q.targetAgentId === 'architect'
+              ? 'Architect'
+              : q.targetAgentId === 'coder'
+                ? 'Coder'
+                : q.targetAgentId === 'tester'
+                  ? 'Tester'
+                  : q.targetAgentId === 'reviewer'
+                    ? 'Reviewer'
+                    : 'AgentWork Executor'
+        const swarmAuthor =
+          q.delegatedAgentId && q.delegatedAgentId !== 'head'
+            ? `Cosmic (Head Agent ➔ @${q.delegatedAgentId})`
+            : `Cosmic (${targetAgentName})`
+
+        // Match user message
+        const userMsg = unified.find(
+          (u) =>
+            (u.swarmQueryId && u.swarmQueryId === q.id && u.role === 'user') ||
+            (u.role === 'user' &&
+              (u.content.trim() === q.prompt.trim() ||
+                u.content.toLowerCase().includes(q.prompt.toLowerCase().trim()) ||
+                q.prompt.toLowerCase().includes(u.content.toLowerCase().trim())))
+        )
+        if (!userMsg) {
+          unified.push({
+            id: `swarm-user-${q.id}`,
+            role: 'user',
+            authorName: 'You',
+            content: q.prompt,
+            atIso: new Date(q.startedAt).toISOString(),
+            swarmQueryId: q.id
+          })
+        } else if (!userMsg.swarmQueryId) {
+          userMsg.swarmQueryId = q.id
+        }
+
+        // Match assistant message
+        const assistantMsg = unified.find(
+          (u) =>
+            (u.swarmQueryId && u.swarmQueryId === q.id && u.role === 'assistant') ||
+            (u.role === 'assistant' &&
+              Boolean(q.answerText) &&
+              u.content.trim() === q.answerText?.trim())
+        )
+        if (!assistantMsg) {
+          unified.push({
+            id: `swarm-msg-${q.id}`,
+            role: 'assistant',
+            authorName: swarmAuthor,
+            content: q.answerText || '',
+            atIso: new Date(q.completedAt || q.startedAt).toISOString(),
+            swarmQueryId: q.id
+          })
+        } else {
+          if (!assistantMsg.swarmQueryId) assistantMsg.swarmQueryId = q.id
+          if (assistantMsg.authorName === 'Cosmic') assistantMsg.authorName = swarmAuthor
+          if (!assistantMsg.content && q.answerText) assistantMsg.content = q.answerText
+        }
+      }
+
+      // 4. Sort chronologically
       unified.sort((a, b) => new Date(a.atIso).getTime() - new Date(b.atIso).getTime())
 
-      setMessages(unified)
+      // 5. Reconcile with prev state non-destructively
+      setMessages((prev) => {
+        const toPreserve: DisplayChatMessage[] = []
+        for (const m of prev) {
+          if (m.pending) {
+            toPreserve.push(m)
+            continue
+          }
+          if (m.swarmQueryId) {
+            const match = unified.find(
+              (u) =>
+                u.id === m.id ||
+                (u.swarmQueryId === m.swarmQueryId && u.role === m.role)
+            )
+            if (!match) {
+              toPreserve.push(m)
+            } else {
+              if (!match.content && m.content) {
+                match.content = m.content
+              }
+              if (m.authorName && match.authorName === 'Cosmic') {
+                match.authorName = m.authorName
+              }
+            }
+          }
+        }
+
+        if (toPreserve.length === 0) {
+          return unified
+        }
+
+        const merged = [...unified, ...toPreserve]
+        merged.sort((a, b) => new Date(a.atIso).getTime() - new Date(b.atIso).getTime())
+        return merged
+      })
     } catch {
       // ignore
     }
@@ -1143,14 +1248,16 @@ export default function AgentChatPanel({
       setStopping(false)
       setStreaming(true)
       stickRef.current = true
+      const nowIso = new Date().toISOString()
+      const userMsgId = `user-${Date.now()}`
       setMessages((previous) => [
         ...previous,
         {
-          id: `user-${Date.now()}`,
+          id: userMsgId,
           role: 'user',
           authorName: 'You',
           content: text,
-          atIso: new Date().toISOString()
+          atIso: nowIso
         }
       ])
 
@@ -1242,6 +1349,25 @@ export default function AgentChatPanel({
                     ? 'Reviewer'
                     : 'AgentWork Executor'
 
+        // Tag user message with swarmQueryId in state
+        setMessages((previous) =>
+          previous.map((m) => (m.id === userMsgId ? { ...m, swarmQueryId: queryId } : m))
+        )
+
+        // Persist Swarm user prompt to disk project chat storage
+        void window.api.dashboard?.appendProjectChatMessage?.({
+          projectId,
+          channelId: activeChannelId ?? undefined,
+          sourceId: socialSource?.id,
+          message: {
+            role: 'user',
+            content: text,
+            atIso: nowIso,
+            swarmQueryId: queryId,
+            authorName: 'You'
+          }
+        }).catch(() => undefined)
+
         // Add assistant message with swarmQueryId in active in-flight status
         setMessages((previous) => [
           ...previous,
@@ -1250,7 +1376,7 @@ export default function AgentChatPanel({
             role: 'assistant',
             authorName: `Cosmic (${targetAgentName})`,
             content: '',
-            atIso: new Date().toISOString(),
+            atIso: nowIso,
             swarmQueryId: queryId
           }
         ])
@@ -1260,22 +1386,52 @@ export default function AgentChatPanel({
           .getState()
           .dispatchSwarmQuery({
             queryId,
+            projectId,
             prompt: cleanPrompt,
             targetAgentId,
             parentQueryId,
             source: 'project_chat'
           })
           .then((completedQuery) => {
+            const delegatedAuthor =
+              completedQuery.delegatedAgentId && completedQuery.delegatedAgentId !== 'head'
+                ? `Cosmic (Head Agent ➔ @${completedQuery.delegatedAgentId})`
+                : `Cosmic (${targetAgentName})`
+
             setMessages((previous) =>
               previous.map((m) =>
-                m.id === assistantMsgId
+                m.id === assistantMsgId || (m.swarmQueryId === queryId && m.role === 'assistant')
                   ? {
                       ...m,
                       content: completedQuery.answerText || '',
-                      authorName:
-                        completedQuery.delegatedAgentId && completedQuery.delegatedAgentId !== 'head'
-                          ? `Cosmic (Head Agent ➔ @${completedQuery.delegatedAgentId})`
-                          : m.authorName
+                      authorName: delegatedAuthor
+                    }
+                  : m
+              )
+            )
+
+            // Persist Swarm assistant response to disk project chat storage
+            void window.api.dashboard?.appendProjectChatMessage?.({
+              projectId,
+              channelId: activeChannelId ?? undefined,
+              sourceId: socialSource?.id,
+              message: {
+                role: 'assistant',
+                content: completedQuery.answerText || '',
+                atIso: new Date().toISOString(),
+                swarmQueryId: queryId,
+                authorName: delegatedAuthor
+              }
+            }).catch(() => undefined)
+          })
+          .catch((err) => {
+            setMessages((previous) =>
+              previous.map((m) =>
+                m.id === assistantMsgId || (m.swarmQueryId === queryId && m.role === 'assistant')
+                  ? {
+                      ...m,
+                      content: `⚠️ Error processing swarm query: ${err instanceof Error ? err.message : 'Unknown error'}`,
+                      failed: true
                     }
                   : m
               )
@@ -1886,7 +2042,7 @@ export default function AgentChatPanel({
                   {message.stopped ? <span>stopped</span> : null}
                 </div>
                 <div className="chat-bubble">
-                  {message.swarmQueryId ? (
+                  {message.role === 'assistant' && message.swarmQueryId ? (
                     (() => {
                       const q = activeQueries[message.swarmQueryId]
                       const isWorking = q ? q.status !== 'completed' && q.status !== 'error' : !message.content

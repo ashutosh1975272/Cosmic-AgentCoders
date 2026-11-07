@@ -85,6 +85,7 @@ export interface SwarmQueryTelemetry {
 
 export interface SwarmQuery {
   id: string
+  projectId?: string
   threadId: string
   parentQueryId?: string
   source: 'project_chat' | 'agentcoders_inner'
@@ -153,6 +154,7 @@ interface AgentCodersStoreState {
   resetSwarm: () => void
   dispatchSwarmQuery: (params: {
     queryId?: string
+    projectId?: string
     prompt: string
     targetAgentId?: SwarmAgentId
     parentQueryId?: string
@@ -487,6 +489,7 @@ export const useAgentCodersStore = create<AgentCodersStoreState>((set, get) => (
 
   dispatchSwarmQuery: async ({
     queryId: customQueryId,
+    projectId,
     prompt,
     targetAgentId = 'head',
     parentQueryId,
@@ -509,6 +512,7 @@ export const useAgentCodersStore = create<AgentCodersStoreState>((set, get) => (
     // 1. Initial State: Analyzing
     const initialQuery: SwarmQuery = {
       id: queryId,
+      projectId,
       threadId,
       parentQueryId,
       source,

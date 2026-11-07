@@ -101,6 +101,8 @@ function normalizeMessage(value: unknown): DashboardProjectChatMessage | null {
     message.sources = row.sources.filter(isSourceRef)
   }
   if (row.stopped === true) message.stopped = true
+  if (typeof row.swarmQueryId === 'string') message.swarmQueryId = row.swarmQueryId
+  if (typeof row.authorName === 'string') message.authorName = row.authorName
   return message
 }
 
@@ -240,7 +242,7 @@ export class ProjectChatService {
     await rename(tmp, target)
   }
 
-  private async appendMessage(
+  async appendMessage(
     projectId: string,
     message: DashboardProjectChatMessage,
     channelId?: string,
@@ -248,8 +250,19 @@ export class ProjectChatService {
   ): Promise<void> {
     await this.assertProjectKnown(projectId)
     const history = await this.loadHistory(projectId, channelId, sourceId)
-    history.push(message)
-    await this.saveHistory(projectId, history, channelId, sourceId)
+    const isDup = history.some(
+      (m) =>
+        (message.swarmQueryId &&
+          m.swarmQueryId === message.swarmQueryId &&
+          m.role === message.role) ||
+        (m.role === message.role &&
+          m.content.trim() === message.content.trim() &&
+          Math.abs(new Date(m.atIso).getTime() - new Date(message.atIso).getTime()) < 3000)
+    )
+    if (!isDup) {
+      history.push(message)
+      await this.saveHistory(projectId, history, channelId, sourceId)
+    }
   }
 
   isRunning(projectId: string, channelId?: string, sourceId?: string): boolean {

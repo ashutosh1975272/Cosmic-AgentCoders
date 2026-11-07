@@ -200,6 +200,7 @@ export const IpcChannels = {
   DashboardProjectChatClear: 'dashboard:project-chat-clear',
   DashboardProjectChatCancel: 'dashboard:project-chat-cancel',
   DashboardProjectChatHistory: 'dashboard:project-chat-history',
+  DashboardProjectChatAppend: 'dashboard:project-chat-append',
   DashboardProjectChatStatus: 'dashboard:project-chat-status',
   DashboardProjectChatChunk: 'dashboard:project-chat-chunk',
   DashboardProjectChatDone: 'dashboard:project-chat-done',
@@ -503,6 +504,12 @@ export interface IpcApi {
     getProjectChatHistory: (
       query: string | { projectId: string; channelId?: string; sourceId?: string }
     ) => Promise<DashboardProjectChatHistoryResult>
+    appendProjectChatMessage: (payload: {
+      projectId: string
+      channelId?: string
+      sourceId?: string
+      message: import('./dashboard-contract').DashboardProjectChatMessage
+    }) => Promise<{ ok: boolean }>
     clearProjectChat: (
       query: string | { projectId: string; channelId?: string; sourceId?: string }
     ) => Promise<{ ok: boolean }>

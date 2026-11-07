@@ -483,6 +483,54 @@ describe('ProjectChatService', () => {
   it('refuses to cancel a run id that does not match', async () => {
     expect(buildService({ rootDir }).cancel('p1', 'nope')).toBe(false)
   })
+
+  it('appends messages, preserves swarmQueryId and authorName, and deduplicates', async () => {
+    const service = buildService({ rootDir })
+    const now = new Date().toISOString()
+
+    await service.appendMessage('p1', {
+      role: 'user',
+      content: '$AgentWork @HeadAgent : list agents',
+      atIso: now,
+      swarmQueryId: 'query-123',
+      authorName: 'You'
+    })
+
+    await service.appendMessage('p1', {
+      role: 'assistant',
+      content: 'Here is the complete roster: HeadAgent, Architect, Coder, Tester, Reviewer, Executor',
+      atIso: now,
+      swarmQueryId: 'query-123',
+      authorName: 'Cosmic (Head Agent)'
+    })
+
+    const history = await service.loadHistory('p1')
+    expect(history.length).toBe(2)
+    expect(history[0]).toMatchObject({
+      role: 'user',
+      content: '$AgentWork @HeadAgent : list agents',
+      swarmQueryId: 'query-123',
+      authorName: 'You'
+    })
+    expect(history[1]).toMatchObject({
+      role: 'assistant',
+      content: 'Here is the complete roster: HeadAgent, Architect, Coder, Tester, Reviewer, Executor',
+      swarmQueryId: 'query-123',
+      authorName: 'Cosmic (Head Agent)'
+    })
+
+    // Attempting to append the duplicate swarm assistant message must not duplicate
+    await service.appendMessage('p1', {
+      role: 'assistant',
+      content: 'Here is the complete roster: HeadAgent, Architect, Coder, Tester, Reviewer, Executor',
+      atIso: now,
+      swarmQueryId: 'query-123',
+      authorName: 'Cosmic (Head Agent)'
+    })
+
+    const historyAfterDup = await service.loadHistory('p1')
+    expect(historyAfterDup.length).toBe(2)
+  })
 })
 
 describe('mapChatError', () => {

@@ -911,6 +911,26 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
       service.status(String(projectId ?? ''))
     )
     handleInvoke(
+      IpcChannels.DashboardProjectChatAppend,
+      async (payload: {
+        projectId: string
+        channelId?: string
+        sourceId?: string
+        message: import('../../shared/dashboard-contract').DashboardProjectChatMessage
+      }) => {
+        const pId = payload?.projectId ?? ''
+        const chId = payload?.channelId
+        const sId = payload?.sourceId
+        if (!payload?.message || !pId) return { ok: false }
+        try {
+          await service.appendMessage(String(pId), payload.message, chId, sId)
+          return { ok: true }
+        } catch {
+          return { ok: false }
+        }
+      }
+    )
+    handleInvoke(
       IpcChannels.DashboardProjectChatClear,
       async (query: string | { projectId: string; channelId?: string; sourceId?: string }) => {
         const pId = typeof query === 'string' ? query : query?.projectId ?? ''

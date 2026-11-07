@@ -1021,6 +1021,8 @@ export interface DashboardProjectChatMessage {
   sources?: DashboardProjectChatSourceRef[]
   /** Assistant answer was cut short by Stop. Partial text, no sources. */
   stopped?: boolean
+  swarmQueryId?: string
+  authorName?: string
 }
 
 export interface DashboardProjectChatPayload {
