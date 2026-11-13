@@ -112,6 +112,13 @@ describe('Platform Discovery & Scrape Log Isolation', () => {
         status: 'success',
         trigger: 'manual',
         channels: [{ channelId: 'WA_CHAT', channelName: 'Product Group', kind: 'group-dm', messagesRead: 8, newMessages: 4, status: 'read' }]
+      },
+      {
+        runId: 'run-legacy-slack-untagged',
+        projectId: 'proj-123',
+        status: 'success',
+        trigger: 'scheduled',
+        channels: [{ channelId: 'C_UNT', channelName: 'old-slack-chan', kind: 'public', messagesRead: 1, newMessages: 0, status: 'read' }]
       }
     ]
 
@@ -120,7 +127,7 @@ describe('Platform Discovery & Scrape Log Isolation', () => {
       return rows.filter((row) => {
         if (query.status && query.status !== 'all' && row.status !== query.status) return false
         if (query.trigger && query.trigger !== 'all' && row.trigger !== query.trigger) return false
-        if (query.sourceId && row.sourceId && row.sourceId !== query.sourceId) return false
+        if (query.sourceId && row.sourceId !== query.sourceId) return false
         if (query.platform && query.platform !== 'all') {
           const rowPlatform = row.platform || (row.sourceId?.includes('teams') ? 'teams' : row.sourceId?.includes('whatsapp') ? 'whatsapp' : 'slack')
           if (rowPlatform !== query.platform) return false
@@ -146,5 +153,11 @@ describe('Platform Discovery & Scrape Log Isolation', () => {
     expect(slackLogs).toHaveLength(1)
     expect(slackLogs[0].runId).toBe('run-slack-1')
     expect(slackLogs[0].channels[0].channelName).toBe('general')
+
+    // Untagged legacy Slack runs never leak into Teams or WhatsApp even if no sourceId filter is given
+    const waAllLogs = filterFn(mockRuns, { projectId: 'proj-123', platform: 'whatsapp' })
+    expect(waAllLogs.map((l: any) => l.runId)).not.toContain('run-legacy-slack-untagged')
+    const teamsAllLogs = filterFn(mockRuns, { projectId: 'proj-123', platform: 'teams' })
+    expect(teamsAllLogs.map((l: any) => l.runId)).not.toContain('run-legacy-slack-untagged')
   })
 })
