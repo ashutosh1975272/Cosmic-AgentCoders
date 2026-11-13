@@ -137,6 +137,34 @@ export function normalizeAppSettings(parsed: Partial<AppSettings>): AppSettings 
       typeof parsed.showNewProjectLinkedAccounts === 'boolean'
         ? parsed.showNewProjectLinkedAccounts
         : DEFAULT_APP_SETTINGS.showNewProjectLinkedAccounts ?? false,
+    showDashboardAgentControl:
+      typeof parsed.showDashboardAgentControl === 'boolean'
+        ? parsed.showDashboardAgentControl
+        : DEFAULT_APP_SETTINGS.showDashboardAgentControl ?? false,
+    showDashboardSlack:
+      typeof parsed.showDashboardSlack === 'boolean'
+        ? parsed.showDashboardSlack
+        : DEFAULT_APP_SETTINGS.showDashboardSlack ?? true,
+    showDashboardTeams:
+      typeof parsed.showDashboardTeams === 'boolean'
+        ? parsed.showDashboardTeams
+        : DEFAULT_APP_SETTINGS.showDashboardTeams ?? true,
+    showDashboardWhatsApp:
+      typeof parsed.showDashboardWhatsApp === 'boolean'
+        ? parsed.showDashboardWhatsApp
+        : DEFAULT_APP_SETTINGS.showDashboardWhatsApp ?? true,
+    showDashboardActivityFeed:
+      typeof parsed.showDashboardActivityFeed === 'boolean'
+        ? parsed.showDashboardActivityFeed
+        : DEFAULT_APP_SETTINGS.showDashboardActivityFeed ?? true,
+    showDashboardAttention:
+      typeof parsed.showDashboardAttention === 'boolean'
+        ? parsed.showDashboardAttention
+        : DEFAULT_APP_SETTINGS.showDashboardAttention ?? true,
+    showDashboardDecisionVault:
+      typeof parsed.showDashboardDecisionVault === 'boolean'
+        ? parsed.showDashboardDecisionVault
+        : DEFAULT_APP_SETTINGS.showDashboardDecisionVault ?? true,
     sidebarButtons:
       parsed.sidebarButtons && typeof parsed.sidebarButtons === 'object'
         ? {

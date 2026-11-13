@@ -9,6 +9,7 @@ import type {
 /** One displayable stored message handed to the selector. */
 export interface ActivityInputRow {
   source: DashboardSource
+  platform?: 'slack' | 'teams' | 'whatsapp'
   channelId: string
   channelName: string
   /** Slack ts (seconds, optionally with a fractional part). */
@@ -50,6 +51,7 @@ function displayable(row: ActivityInputRow): boolean {
 function toMessage(row: ActivityInputRow): DashboardActivityMessage {
   return {
     source: row.source,
+    platform: row.platform ?? 'slack',
     channelId: row.channelId,
     channelName: row.channelName,
     ts: row.ts,

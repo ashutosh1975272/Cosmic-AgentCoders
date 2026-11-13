@@ -443,6 +443,7 @@ if (!gotSingleInstanceLock) {
         const links = await tokenStore.listWorkspaces(profileId)
         return links.find((link) => link.teamId === teamId)?.scopes ?? null
       },
+      getAppSettings: () => settingsStore.get(),
       log: (msg) => log.info(msg)
     })
 
@@ -857,6 +858,9 @@ if (!gotSingleInstanceLock) {
         if (win && !win.isDestroyed()) {
           browserViewManager.setEmbedVisible(win, authenticated && !lock.isLocked())
         }
+      },
+      onSettingsChanged: () => {
+        dashboardChatService.invalidateActivityCache()
       }
     })
 

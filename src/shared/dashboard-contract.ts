@@ -357,7 +357,26 @@ export interface DashboardProject {
   personRoles?: Record<string, PersonRole>
   /** Uploaded client requirements documents and project specifications */
   documents?: ProjectDocument[]
+  /** Project dashboard rules & overrides (inherit from global, force on, or force off) */
+  dashboardRules?: ProjectDashboardRules
   createdAt: string
+}
+
+export type DashboardRuleSetting = 'inherit' | 'on' | 'off'
+
+export interface ProjectDashboardRules {
+  platforms?: {
+    slack?: DashboardRuleSetting
+    teams?: DashboardRuleSetting
+    whatsapp?: DashboardRuleSetting
+  }
+  cards?: {
+    agentControl?: DashboardRuleSetting
+    activityFeed?: DashboardRuleSetting
+    attention?: DashboardRuleSetting
+    decisionVault?: DashboardRuleSetting
+    clientAsk?: DashboardRuleSetting
+  }
 }
 
 export interface ProjectDocument {
@@ -1221,6 +1240,7 @@ export interface DashboardAiTestResult {
 /** One stored Slack message, ready to render. Names are resolved or the id. */
 export interface DashboardActivityMessage {
   source: DashboardSource
+  platform?: 'slack' | 'teams' | 'whatsapp'
   channelId: string
   channelName: string
   ts: string
