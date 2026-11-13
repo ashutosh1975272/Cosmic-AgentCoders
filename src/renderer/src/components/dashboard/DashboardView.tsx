@@ -97,6 +97,11 @@ export default function DashboardView(): React.ReactElement | null {
   const [showLinkedAccounts, setShowLinkedAccounts] = useState(false)
 
   useEffect(() => {
+    void window.api?.profiles?.setEmbedVisible?.(false)
+    void window.api?.profiles?.clearCardSlackEmbed?.()
+  }, [])
+
+  useEffect(() => {
     void window.api?.app?.getSettings?.().then((s) => {
       if (typeof s?.showNewProjectLinkedAccounts === 'boolean') {
         setShowLinkedAccounts(s.showNewProjectLinkedAccounts)
@@ -354,7 +359,7 @@ export default function DashboardView(): React.ReactElement | null {
   }
 
   const setupPending = Boolean(
-    globalConfig && (!globalConfig.ourSlack.connected || !globalConfig.nvidia.configured)
+    globalConfig && (!globalConfig.ourSlack?.connected || !globalConfig.nvidia?.configured)
   )
 
   const cardEntries: ProjectEntry[] = projects.map((projectSnapshot, index) => ({
@@ -695,9 +700,9 @@ export default function DashboardView(): React.ReactElement | null {
           >
             <span>
               <b>Global setup pending</b> —{' '}
-              {!globalConfig?.ourSlack.connected && !globalConfig?.nvidia.configured
+              {!globalConfig?.ourSlack?.connected && !globalConfig?.nvidia?.configured
                 ? 'connect Our Slack and NVIDIA'
-                : !globalConfig?.ourSlack.connected
+                : !globalConfig?.ourSlack?.connected
                   ? 'connect Our Slack'
                   : 'add an NVIDIA key'}{' '}
               in Settings. Cards keep their client data; AI and Our Slack stay off until then.

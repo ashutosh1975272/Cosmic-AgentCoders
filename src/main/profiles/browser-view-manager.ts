@@ -1077,9 +1077,18 @@ export class BrowserViewManager {
     const key = viewKey(profileId, appId)
     this.lastBounds = bounds
 
+    if (this.cardEmbedKey) {
+      const cardView = this.views.get(this.cardEmbedKey)
+      if (cardView && mainWindow.contentView.children.includes(cardView)) {
+        mainWindow.contentView.removeChildView(cardView)
+      }
+      this.cardEmbedKey = null
+      this.cardEmbedBounds = null
+    }
+
     if (this.activeKey && this.activeKey !== key) {
       const prev = this.views.get(this.activeKey)
-      if (prev) {
+      if (prev && mainWindow.contentView.children.includes(prev)) {
         mainWindow.contentView.removeChildView(prev)
       }
       this.lastEmittedThemeKey = null
@@ -1132,9 +1141,18 @@ export class BrowserViewManager {
 
     this.lastBounds = bounds
 
+    if (this.cardEmbedKey) {
+      const cardView = this.views.get(this.cardEmbedKey)
+      if (cardView && mainWindow.contentView.children.includes(cardView)) {
+        mainWindow.contentView.removeChildView(cardView)
+      }
+      this.cardEmbedKey = null
+      this.cardEmbedBounds = null
+    }
+
     if (this.activeKey && this.activeKey !== key) {
       const prev = this.views.get(this.activeKey)
-      if (prev) {
+      if (prev && mainWindow.contentView.children.includes(prev)) {
         mainWindow.contentView.removeChildView(prev)
       }
       this.lastEmittedThemeKey = null
@@ -1213,6 +1231,14 @@ export class BrowserViewManager {
     // profile's Google identity.  Slack / Teams / WhatsApp cookies are never copied.
     if (projectId && profileId) {
       void syncGoogleSessionFromProfileToCard(profileId, projectId, appId).catch(() => undefined)
+    }
+
+    // Detach any profile-level active view if attached
+    if (this.activeKey) {
+      const activeView = this.views.get(this.activeKey)
+      if (activeView && mainWindow.contentView.children.includes(activeView)) {
+        mainWindow.contentView.removeChildView(activeView)
+      }
     }
 
     // If switching card views, detach the previously embedded view first
@@ -1316,6 +1342,14 @@ export class BrowserViewManager {
       const currentUrl = view.webContents.getURL()
       if (!currentUrl || currentUrl === 'about:blank') {
         void view.webContents.loadURL(url)
+      }
+    }
+
+    // Detach any profile-level active view if attached
+    if (this.activeKey) {
+      const activeView = this.views.get(this.activeKey)
+      if (activeView && mainWindow.contentView.children.includes(activeView)) {
+        mainWindow.contentView.removeChildView(activeView)
       }
     }
 

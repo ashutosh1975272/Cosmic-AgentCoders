@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
-import { render, cleanup } from '@testing-library/react'
+import { render, cleanup, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import WorkspaceContent from '../../src/renderer/src/components/dashboard/WorkspaceContent'
 import CardLiveSlackEmbed from '../../src/renderer/src/components/dashboard/CardLiveSlackEmbed'
 import CosmicSidebarNav from '../../src/renderer/src/components/dashboard/CosmicSidebarNav'
+import DashboardRail from '../../src/renderer/src/components/dashboard/DashboardRail'
+import DashboardView from '../../src/renderer/src/components/dashboard/DashboardView'
 import { useProfileStore } from '../../src/renderer/src/hooks/useProfiles'
 import { useDashboardStore } from '../../src/renderer/src/hooks/useDashboard'
 import type { DashboardProject, DashboardProjectSnapshot } from '../../src/shared/dashboard-contract'
@@ -40,6 +42,8 @@ describe('WorkspaceContent & Embed De-Occlusion Lifecycle', () => {
         listProjectActivity: vi.fn().mockResolvedValue([]),
         onActivityChanged: vi.fn().mockReturnValue(() => undefined),
         onConfigChanged: vi.fn().mockReturnValue(() => undefined),
+        onSnapshotChanged: vi.fn().mockReturnValue(() => undefined),
+        onSyncProgress: vi.fn().mockReturnValue(() => undefined),
         getGlobalConfig: vi.fn().mockResolvedValue({}),
         getTeamWorkspace: vi.fn().mockResolvedValue(null)
       },
@@ -207,5 +211,39 @@ describe('WorkspaceContent & Embed De-Occlusion Lifecycle', () => {
     expect(container.textContent).toContain('Projects (1)')
     expect(container.textContent).toContain('Test Project')
     expect(container.textContent).not.toContain('No active project cards found.')
+  })
+
+  it('DashboardRail button click opens dashboard and dispatches setEmbedVisible(false)', () => {
+    useDashboardStore.setState({ dashboardOpen: false, dashRailExpanded: false })
+    clearCardSlackEmbedMock.mockClear()
+    setEmbedVisibleMock.mockClear()
+
+    const { getByTestId } = render(<DashboardRail />)
+    const toggleBtn = getByTestId('dashboard-toggle')
+    fireEvent.click(toggleBtn)
+
+    expect(useDashboardStore.getState().dashboardOpen).toBe(true)
+    expect(useDashboardStore.getState().dashRailExpanded).toBe(true)
+    expect(setEmbedVisibleMock).toHaveBeenCalledWith(false)
+    expect(clearCardSlackEmbedMock).toHaveBeenCalled()
+  })
+
+  it('DashboardView mount unconditionally dispatches setEmbedVisible(false) and clearCardSlackEmbed()', () => {
+    useDashboardStore.setState({
+      snapshot: {
+        projects: [],
+        updatedAt: new Date().toISOString()
+      } as any,
+      loading: false,
+      wizardOpenFor: null
+    })
+
+    clearCardSlackEmbedMock.mockClear()
+    setEmbedVisibleMock.mockClear()
+
+    render(<DashboardView />)
+
+    expect(setEmbedVisibleMock).toHaveBeenCalledWith(false)
+    expect(clearCardSlackEmbedMock).toHaveBeenCalled()
   })
 })
