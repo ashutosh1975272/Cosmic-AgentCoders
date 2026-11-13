@@ -81,7 +81,10 @@ describe('UnifiedSettingsModal Advance Control and Modal Dimensions', () => {
     expect(main?.textContent).toContain('Agent Control & Slack Dispatcher')
     expect(main?.textContent).toContain('Show Agent Control & Slack Dispatcher Card')
 
-    const agentCheckbox = main?.querySelector('input[type="checkbox"]') as HTMLInputElement
+    const agentLabel = Array.from(main?.querySelectorAll('label') ?? []).find((l) =>
+      l.textContent?.includes('Show Agent Control & Slack Dispatcher Card')
+    )
+    const agentCheckbox = agentLabel?.querySelector('input[type="checkbox"]') as HTMLInputElement
     expect(agentCheckbox).toBeDefined()
     expect(agentCheckbox.checked).toBe(false)
 

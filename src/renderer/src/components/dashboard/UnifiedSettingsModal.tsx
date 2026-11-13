@@ -747,14 +747,133 @@ export function UnifiedSettingsModal({
               <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                 <header>
                   <h3 style={{ margin: 0, fontSize: '16px', color: '#f8fafc' }}>
-                    Dashboard Preferences
+                    📊 Dashboard Preferences
                   </h3>
                   <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#94a3b8' }}>
-                    Configure which modular cards, dispatchers, and intelligence panels appear on project dashboards.
+                    Configure global platform ingestion, modular cards, dispatchers, and intelligence panels for project dashboards.
                   </p>
                 </header>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {/* Platform Ingestion for Dashboard */}
+                  <div
+                    style={{
+                      background: 'rgba(15, 23, 42, 0.4)',
+                      padding: '18px 20px',
+                      borderRadius: '10px',
+                      border: '1px solid rgba(255, 255, 255, 0.07)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '14px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <h4 style={{ margin: 0, fontSize: '14px', color: '#e2e8f0', fontWeight: 600 }}>
+                          🌐 Multiplatform Feed &amp; Scraping Sources
+                        </h4>
+                        <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginTop: '2px' }}>
+                          Select which platform message streams and activity update the project dashboards by default
+                        </span>
+                      </div>
+                      <span
+                        style={{
+                          fontSize: '10.5px',
+                          fontWeight: 650,
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          background: 'rgba(56, 189, 248, 0.15)',
+                          color: '#7dd3fc',
+                          border: '1px solid rgba(56, 189, 248, 0.3)'
+                        }}
+                      >
+                        Global Platform Rules
+                      </span>
+                    </div>
+
+                    {/* Slack */}
+                    <label
+                      className="settings-row"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        cursor: 'pointer',
+                        padding: '6px 0'
+                      }}
+                    >
+                      <div>
+                        <span style={{ fontSize: '13px', color: '#cbd5e1', fontWeight: 500 }}>
+                          💬 Include Slack Messages &amp; Activity
+                        </span>
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Client and our Slack workspace channels feed into Dashboard
+                        </span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={settings.showDashboardSlack !== false}
+                        onChange={(e) => onChangeSettings({ showDashboardSlack: e.target.checked })}
+                        style={{ width: '18px', height: '18px', accentColor: '#3b82f6', cursor: 'pointer' }}
+                      />
+                    </label>
+
+                    {/* Teams */}
+                    <label
+                      className="settings-row"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        cursor: 'pointer',
+                        padding: '6px 0'
+                      }}
+                    >
+                      <div>
+                        <span style={{ fontSize: '13px', color: '#cbd5e1', fontWeight: 500 }}>
+                          👥 Include Microsoft Teams Messages &amp; Activity
+                        </span>
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Teams channels and personal chats feed into Dashboard
+                        </span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={settings.showDashboardTeams !== false}
+                        onChange={(e) => onChangeSettings({ showDashboardTeams: e.target.checked })}
+                        style={{ width: '18px', height: '18px', accentColor: '#3b82f6', cursor: 'pointer' }}
+                      />
+                    </label>
+
+                    {/* WhatsApp */}
+                    <label
+                      className="settings-row"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        cursor: 'pointer',
+                        padding: '6px 0'
+                      }}
+                    >
+                      <div>
+                        <span style={{ fontSize: '13px', color: '#cbd5e1', fontWeight: 500 }}>
+                          🟢 Include WhatsApp Messages &amp; Activity
+                        </span>
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          WhatsApp Web active chats feed into Dashboard
+                        </span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={settings.showDashboardWhatsApp !== false}
+                        onChange={(e) => onChangeSettings({ showDashboardWhatsApp: e.target.checked })}
+                        style={{ width: '18px', height: '18px', accentColor: '#3b82f6', cursor: 'pointer' }}
+                      />
+                    </label>
+                  </div>
+
+                  {/* Agent Control & Dispatcher */}
                   <div
                     style={{
                       background: 'rgba(15, 23, 42, 0.4)',
@@ -807,6 +926,96 @@ export function UnifiedSettingsModal({
                         type="checkbox"
                         checked={Boolean(settings.showDashboardAgentControl)}
                         onChange={(e) => onChangeSettings({ showDashboardAgentControl: e.target.checked })}
+                        style={{ width: '18px', height: '18px', accentColor: '#3b82f6', cursor: 'pointer' }}
+                      />
+                    </label>
+                  </div>
+
+                  {/* Card Section Visibility */}
+                  <div
+                    style={{
+                      background: 'rgba(15, 23, 42, 0.4)',
+                      padding: '18px 20px',
+                      borderRadius: '10px',
+                      border: '1px solid rgba(255, 255, 255, 0.07)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '14px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <h4 style={{ margin: 0, fontSize: '14px', color: '#e2e8f0', fontWeight: 600 }}>
+                          📑 Dashboard Sections Visibility
+                        </h4>
+                        <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginTop: '2px' }}>
+                          Toggle intelligence and activity sections across project cards
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Latest Messages & Feed */}
+                    <label
+                      className="settings-row"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        cursor: 'pointer',
+                        padding: '6px 0'
+                      }}
+                    >
+                      <span style={{ fontSize: '13px', color: '#cbd5e1' }}>
+                        Show Latest Messages &amp; Activity Feed
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={settings.showDashboardActivityFeed !== false}
+                        onChange={(e) => onChangeSettings({ showDashboardActivityFeed: e.target.checked })}
+                        style={{ width: '18px', height: '18px', accentColor: '#3b82f6', cursor: 'pointer' }}
+                      />
+                    </label>
+
+                    {/* Needs Attention */}
+                    <label
+                      className="settings-row"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        cursor: 'pointer',
+                        padding: '6px 0'
+                      }}
+                    >
+                      <span style={{ fontSize: '13px', color: '#cbd5e1' }}>
+                        Show Needs Your Attention Section
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={settings.showDashboardAttention !== false}
+                        onChange={(e) => onChangeSettings({ showDashboardAttention: e.target.checked })}
+                        style={{ width: '18px', height: '18px', accentColor: '#3b82f6', cursor: 'pointer' }}
+                      />
+                    </label>
+
+                    {/* Decision Vault */}
+                    <label
+                      className="settings-row"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        cursor: 'pointer',
+                        padding: '6px 0'
+                      }}
+                    >
+                      <span style={{ fontSize: '13px', color: '#cbd5e1' }}>
+                        Show Decision Vault Card
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={settings.showDashboardDecisionVault !== false}
+                        onChange={(e) => onChangeSettings({ showDashboardDecisionVault: e.target.checked })}
                         style={{ width: '18px', height: '18px', accentColor: '#3b82f6', cursor: 'pointer' }}
                       />
                     </label>

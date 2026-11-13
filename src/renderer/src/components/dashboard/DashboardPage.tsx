@@ -17,6 +17,7 @@ import type { SelectionId } from './workspace-nav'
 import { DecisionVaultCard } from './DecisionVaultCard'
 import { AgentCockpitCard } from './AgentCockpitCard'
 import { classifyMessageIntent } from './message-reasoning'
+import type { AppSettings } from '../../../../shared/ipc-contract'
 
 interface DashboardPageProps {
   view: CardView
@@ -352,23 +353,53 @@ export default function DashboardPage({
   const hasInsight = Boolean(insight)
   const metrics = snapshot.metrics
   const busy = syncing || snapshot.syncState === 'syncing'
-  const [showAgentControl, setShowAgentControl] = useState<boolean>(false)
+
+  // App settings subscription for global defaults
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null)
 
   useEffect(() => {
     void window.api?.app?.getSettings?.().then((settings) => {
-      if (typeof settings?.showDashboardAgentControl === 'boolean') {
-        setShowAgentControl(settings.showDashboardAgentControl)
-      }
+      if (settings) setAppSettings(settings)
     })
     const unsub = window.api?.app?.onSettingsChanged?.((settings) => {
-      if (typeof settings?.showDashboardAgentControl === 'boolean') {
-        setShowAgentControl(settings.showDashboardAgentControl)
-      }
+      if (settings) setAppSettings(settings)
     })
     return () => {
       unsub?.()
     }
   }, [])
+
+  // Effective card & section visibility (card override wins, otherwise global setting)
+  const showAgentControl = (() => {
+    const cardRule = project.dashboardRules?.cards?.agentControl ?? 'inherit'
+    if (cardRule === 'on') return true
+    if (cardRule === 'off') return false
+    return Boolean(appSettings?.showDashboardAgentControl)
+  })()
+
+  const showActivityFeed = (() => {
+    const cardRule = project.dashboardRules?.cards?.activityFeed ?? 'inherit'
+    if (cardRule === 'on') return true
+    if (cardRule === 'off') return false
+    return appSettings?.showDashboardActivityFeed !== false
+  })()
+
+  const showAttention = (() => {
+    const cardRule = project.dashboardRules?.cards?.attention ?? 'inherit'
+    if (cardRule === 'on') return true
+    if (cardRule === 'off') return false
+    return appSettings?.showDashboardAttention !== false
+  })()
+
+  const showDecisionVault = (() => {
+    const cardRule = project.dashboardRules?.cards?.decisionVault ?? 'inherit'
+    if (cardRule === 'on') return true
+    if (cardRule === 'off') return false
+    return appSettings?.showDashboardDecisionVault !== false
+  })()
+
+  // Platform filtering state for Latest Messages feed
+  const [platformFilter, setPlatformFilter] = useState<'all' | 'slack' | 'teams' | 'whatsapp'>('all')
 
   // Live 5-second ticker ensures relative timestamps ("just now", "15s ago", "30s ago")
   // and latest messages re-query automatically without clicking any button
@@ -481,7 +512,31 @@ export default function DashboardPage({
     (sum, day) => ({ client: sum.client + day.client, ours: sum.ours + day.ours }),
     { client: 0, ours: 0 }
   )
-  const recentMessages = activity?.recent ?? []
+  const rawRecentMessages = activity?.recent ?? []
+  const recentMessages = rawRecentMessages.filter((m) => {
+    const p = m.platform ?? 'slack'
+    const cardRule = project.dashboardRules?.platforms?.[p] ?? 'inherit'
+    if (cardRule === 'off') return false
+    if (cardRule === 'on') return true
+    if (appSettings) {
+      if (p === 'slack') return appSettings.showDashboardSlack !== false
+      if (p === 'teams') return appSettings.showDashboardTeams !== false
+      if (p === 'whatsapp') return appSettings.showDashboardWhatsApp !== false
+    }
+    return true
+  })
+
+  const platformCounts = {
+    all: recentMessages.length,
+    slack: recentMessages.filter((m) => (m.platform ?? 'slack') === 'slack').length,
+    teams: recentMessages.filter((m) => m.platform === 'teams').length,
+    whatsapp: recentMessages.filter((m) => m.platform === 'whatsapp').length
+  }
+
+  const displayMessages =
+    platformFilter === 'all'
+      ? recentMessages
+      : recentMessages.filter((m) => (m.platform ?? 'slack') === platformFilter)
   const ballInCourt = activity?.ballInCourt ?? null
   const showPace = time.hasDates
   const showMood = trend.length >= 3
@@ -835,14 +890,100 @@ export default function DashboardPage({
                 </section>
               ) : null}
 
-              {recentMessages.length > 0 ? (
+              {showActivityFeed && recentMessages.length > 0 ? (
                 <section className="dash-panel" aria-label="Latest messages">
-                  <div className="dash-panel-head">
-                    <h5>Latest messages</h5>
-                    <span className="dash-muted">Client + our Slack</span>
+                  <div className="dash-panel-head" style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'stretch' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <h5 style={{ margin: 0 }}>Latest messages · Multiplatform</h5>
+                      <span className="dash-muted">Slack, Teams &amp; WhatsApp</span>
+                    </div>
+
+                    {/* Platform Filter Pills */}
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '2px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setPlatformFilter('all')}
+                        style={{
+                          background: platformFilter === 'all' ? '#3b82f6' : 'rgba(255, 255, 255, 0.08)',
+                          color: platformFilter === 'all' ? '#ffffff' : '#94a3b8',
+                          border: 'none',
+                          borderRadius: '12px',
+                          padding: '3px 10px',
+                          fontSize: '11.5px',
+                          fontWeight: platformFilter === 'all' ? 600 : 400,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        All ({platformCounts.all})
+                      </button>
+                      {platformCounts.slack > 0 || (platformCounts.teams === 0 && platformCounts.whatsapp === 0) ? (
+                        <button
+                          type="button"
+                          onClick={() => setPlatformFilter('slack')}
+                          style={{
+                            background: platformFilter === 'slack' ? '#6366f1' : 'rgba(255, 255, 255, 0.08)',
+                            color: platformFilter === 'slack' ? '#ffffff' : '#94a3b8',
+                            border: 'none',
+                            borderRadius: '12px',
+                            padding: '3px 10px',
+                            fontSize: '11.5px',
+                            fontWeight: platformFilter === 'slack' ? 600 : 400,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                        >
+                          💬 Slack ({platformCounts.slack})
+                        </button>
+                      ) : null}
+                      {platformCounts.teams > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => setPlatformFilter('teams')}
+                          style={{
+                            background: platformFilter === 'teams' ? '#4f46e5' : 'rgba(255, 255, 255, 0.08)',
+                            color: platformFilter === 'teams' ? '#ffffff' : '#94a3b8',
+                            border: 'none',
+                            borderRadius: '12px',
+                            padding: '3px 10px',
+                            fontSize: '11.5px',
+                            fontWeight: platformFilter === 'teams' ? 600 : 400,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                        >
+                          👥 Teams ({platformCounts.teams})
+                        </button>
+                      ) : null}
+                      {platformCounts.whatsapp > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => setPlatformFilter('whatsapp')}
+                          style={{
+                            background: platformFilter === 'whatsapp' ? '#16a34a' : 'rgba(255, 255, 255, 0.08)',
+                            color: platformFilter === 'whatsapp' ? '#ffffff' : '#94a3b8',
+                            border: 'none',
+                            borderRadius: '12px',
+                            padding: '3px 10px',
+                            fontSize: '11.5px',
+                            fontWeight: platformFilter === 'whatsapp' ? 600 : 400,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                        >
+                          🟢 WhatsApp ({platformCounts.whatsapp})
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
+
                   <ul className="dash-msgs">
-                    {recentMessages.map((message) => (
+                    {displayMessages.map((message) => (
                       <li key={`${message.source}-${message.channelId}-${message.ts}`}>
                         <button
                           type="button"
@@ -857,6 +998,70 @@ export default function DashboardPage({
                             <span className="dash-msg-meta">
                               <span className="dash-msg-name">{message.userName}</span>
                               <span>{age(message.atIso)}</span>
+
+                              {/* Platform Badge */}
+                              {(() => {
+                                const plat = message.platform ?? 'slack'
+                                if (plat === 'whatsapp') {
+                                  return (
+                                    <span
+                                      style={{
+                                        fontSize: '10px',
+                                        fontWeight: 650,
+                                        padding: '1px 6px',
+                                        borderRadius: '4px',
+                                        background: 'rgba(34, 197, 94, 0.15)',
+                                        color: '#4ade80',
+                                        border: '1px solid rgba(34, 197, 94, 0.3)',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '3px'
+                                      }}
+                                    >
+                                      🟢 WhatsApp
+                                    </span>
+                                  )
+                                }
+                                if (plat === 'teams') {
+                                  return (
+                                    <span
+                                      style={{
+                                        fontSize: '10px',
+                                        fontWeight: 650,
+                                        padding: '1px 6px',
+                                        borderRadius: '4px',
+                                        background: 'rgba(99, 102, 241, 0.15)',
+                                        color: '#a5b4fc',
+                                        border: '1px solid rgba(99, 102, 241, 0.3)',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '3px'
+                                      }}
+                                    >
+                                      👥 Teams
+                                    </span>
+                                  )
+                                }
+                                return (
+                                  <span
+                                    style={{
+                                      fontSize: '10px',
+                                      fontWeight: 650,
+                                      padding: '1px 6px',
+                                      borderRadius: '4px',
+                                      background: 'rgba(234, 179, 8, 0.12)',
+                                      color: '#fde047',
+                                      border: '1px solid rgba(234, 179, 8, 0.25)',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '3px'
+                                    }}
+                                  >
+                                    💬 Slack
+                                  </span>
+                                )
+                              })()}
+
                               <span className="dash-msg-channel">
                                 #{message.channelName || message.channelId}
                               </span>
@@ -894,7 +1099,7 @@ export default function DashboardPage({
             </div>
 
             <div className="dash-rail">
-              {metrics ? (
+              {showAttention && metrics ? (
                 <section className="dash-block" aria-label="Needs your attention">
                   <div className="dash-block-head">
                     <h5>Needs your attention</h5>
@@ -941,14 +1146,16 @@ export default function DashboardPage({
                 </section>
               ) : null}
 
-              <DecisionVaultCard
-                decisions={insight?.decisions}
-                situationLine={insight?.situationLine}
-                recentLine={insight?.recentLine}
-                onJump={(ch) =>
-                  jumpToMessage({ source: 'client', channelId: ch || '', ts: '' } as any)
-                }
-              />
+              {showDecisionVault ? (
+                <DecisionVaultCard
+                  decisions={insight?.decisions}
+                  situationLine={insight?.situationLine}
+                  recentLine={insight?.recentLine}
+                  onJump={(ch) =>
+                    jumpToMessage({ source: 'client', channelId: ch || '', ts: '' } as any)
+                  }
+                />
+              ) : null}
 
               {newSince && newTotal > 0 ? (
                 <section className="dash-block" aria-label="New since your last visit">

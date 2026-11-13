@@ -202,7 +202,8 @@ export class DashboardScheduler {
           if (source.kind !== 'browser' || source.enabled === false) continue
           if (source.scheduleEnabled === false) continue
           const isDirectApi = (source.engineMode ?? 'direct_api') === 'direct_api'
-          const isEnabled = source.scheduleEnabled ?? isDirectApi
+          const isMultiplatformBrowser = source.platform === 'teams' || source.platform === 'whatsapp'
+          const isEnabled = source.scheduleEnabled ?? (isDirectApi || isMultiplatformBrowser)
           if (!isEnabled) continue
           const profileId = source.profileId || project.profileId
           const workspaceId = source.workspaceId || project.teamId
@@ -211,10 +212,12 @@ export class DashboardScheduler {
           activeIds.push(source.id)
           if (this.engine.isSourceRunning(source.id)) continue
 
-          const defaultInterval = isDirectApi ? 0.333 : 15
+          const defaultInterval = isDirectApi ? 0.333 : (isMultiplatformBrowser ? 0.5 : 15)
           let intervalMinutes = source.scheduleIntervalMinutes ?? defaultInterval
           if (isDirectApi && intervalMinutes === 15) {
             intervalMinutes = 0.333
+          } else if (isMultiplatformBrowser && intervalMinutes === 15) {
+            intervalMinutes = 0.5
           }
           const intervalMs = Math.round(intervalMinutes * 60_000)
           const last =

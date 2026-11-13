@@ -16,6 +16,7 @@ export function registerAppIpc(deps: {
   getMainWindow?: () => BrowserWindow | null
   onUserActivity?: () => void
   onAdminSessionChange?: (authenticated: boolean) => void
+  onSettingsChanged?: (settings: AppSettings) => void
 }): void {
   const broadcastSettings = (settings: AppSettings): void => {
     try {
@@ -37,6 +38,7 @@ export function registerAppIpc(deps: {
 
   handleInvoke(IpcChannels.AppSettingsSet, async (patch: Partial<AppSettings>) => {
     const next = await deps.settingsStore.set(patch)
+    deps.onSettingsChanged?.(next)
     broadcastSettings(next)
     return next
   })

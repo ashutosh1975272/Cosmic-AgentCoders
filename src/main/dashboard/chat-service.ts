@@ -7,8 +7,10 @@ import type {
   DashboardProjectActivity,
   DashboardSendMessagePayload,
   DashboardSendMessageResult,
-  DashboardSource
+  DashboardSource,
+  ProjectDashboardRules
 } from '../../shared/dashboard-contract'
+import type { AppSettings } from '../../shared/ipc-contract'
 import type { DashboardDeltaStore, DashboardStoredMessage } from './delta-store'
 import { compareTs } from './delta-store'
 import type { MonitorStore } from './monitor-store'
@@ -50,6 +52,7 @@ export interface ChatServiceDeps {
   /** Stored scopes from the OAuth workspace link (best effort). */
   oauthScopesProvider?: (profileId: string, teamId: string) => Promise<string[] | null>
   pollerFactory?: () => ChatPoller
+  getAppSettings?: () => Promise<AppSettings>
   log?: (msg: string) => void
   now?: () => number
 }
@@ -146,6 +149,7 @@ export class DashboardChatService {
   private readonly teamWorkspace: ChatServiceDeps['teamWorkspace']
   private readonly oauthScopesProvider?: ChatServiceDeps['oauthScopesProvider']
   private readonly pollerFactory: () => ChatPoller
+  private readonly getAppSettings?: () => Promise<AppSettings>
   private readonly log: (msg: string) => void
   private readonly now: () => number
   private readonly contextCache = new Map<string, ChatWorkspaceContext>()
@@ -158,6 +162,7 @@ export class DashboardChatService {
     this.teamWorkspace = deps.teamWorkspace
     this.oauthScopesProvider = deps.oauthScopesProvider
     this.pollerFactory = deps.pollerFactory ?? ((): ChatPoller => new SlackPoller())
+    this.getAppSettings = deps.getAppSettings
     this.log = deps.log ?? ((): void => undefined)
     this.now = deps.now ?? ((): number => Date.now())
   }
@@ -444,8 +449,8 @@ export class DashboardChatService {
 
   /**
    * Deterministic 14-day activity for the Dashboard centre. Reads stored deltas
-   * only: bounded to the window, capped per channel, and cached for 60 seconds.
-   * Our-Slack rows are restricted to the channels mapped on this project.
+   * across all active sources (Slack, Teams, WhatsApp), filtered by project dashboard
+   * rules & global preferences. Bounded to the window, capped per channel, and cached for 60s.
    */
   async projectActivity(projectId: string): Promise<DashboardProjectActivity> {
     if (typeof projectId !== 'string' || !projectId.trim()) return emptyActivity()
@@ -460,22 +465,51 @@ export class DashboardChatService {
     const rows: ActivityInputRow[] = []
     const cutoff = now - ACTIVITY_WINDOW_DAYS * 24 * 60 * 60_000
 
-    for (const source of ['client', 'ours'] as const) {
-      const workspace = await this.workspaceFor(project, source)
-      if (!workspace) continue
+    const teamWorkspaceConnection = this.teamWorkspace ? await this.teamWorkspace.getConnection() : null
+    const resolved = resolveProjectMessageSources(project, {
+      ourSlack: teamWorkspaceConnection
+        ? {
+            profileId: teamWorkspaceConnection.profileId,
+            teamId: teamWorkspaceConnection.teamId,
+            channels: teamWorkspaceConnection.channels
+          }
+        : null
+    })
 
-      const monitors =
-        source === 'ours'
-          ? workspace.monitors.filter((monitor) =>
-              project.ourSlackChannels?.some((mapped) => mapped.channelId === monitor.channelId)
-            )
-          : workspace.monitors
-      if (monitors.length === 0) continue
+    const appSettings = this.getAppSettings ? await this.getAppSettings() : null
+
+    for (const workspace of resolved) {
+      let platform: 'slack' | 'teams' | 'whatsapp' = 'slack'
+      if (workspace.projectSourceId) {
+        const matchingSource = (project.sources ?? []).find((s) => s.id === workspace.projectSourceId)
+        if (
+          matchingSource?.platform === 'whatsapp' ||
+          matchingSource?.platform === 'teams' ||
+          matchingSource?.platform === 'slack'
+        ) {
+          platform = matchingSource.platform
+        }
+      } else if (workspace.origin === 'our-slack') {
+        platform = 'slack'
+      } else if (workspace.teamId?.startsWith('wa_') || workspace.profileId?.includes('whatsapp')) {
+        platform = 'whatsapp'
+      } else if (workspace.teamId?.startsWith('teams_') || workspace.profileId?.includes('teams')) {
+        platform = 'teams'
+      }
+
+      // Check whether this platform is allowed on the dashboard by project override or global setting
+      if (!this.isPlatformAllowedOnDashboard(platform, project.dashboardRules, appSettings)) {
+        continue
+      }
 
       let context: ChatWorkspaceContext | null = null
-      if (workspace.token) {
+      const token =
+        workspace.origin === 'our-slack'
+          ? teamWorkspaceConnection?.token
+          : await this.tokenFor(project)
+      if (token && platform === 'slack') {
         try {
-          context = await this.workspaceContext(project, workspace.token, {
+          context = await this.workspaceContext(project, token, {
             profileId: workspace.profileId,
             teamId: workspace.teamId
           })
@@ -483,16 +517,17 @@ export class DashboardChatService {
           // names fall back to Slack ids
         }
       }
+
       const selfUserId =
-        source === 'client'
+        workspace.source === 'client'
           ? (project.selfUserId ?? context?.selfUserId ?? null)
           : (context?.selfUserId ?? null)
 
-      for (const monitor of monitors) {
+      for (const channel of workspace.channels) {
         const delta = await this.deltaStore.load(
           workspace.profileId,
           workspace.teamId,
-          monitor.channelId
+          channel.channelId
         )
         const messages = (delta?.messages ?? [])
           .filter((msg) => {
@@ -504,20 +539,24 @@ export class DashboardChatService {
         for (const msg of messages) {
           const rawUser = msg.user ?? ''
           const isSlackId = /^U[A-Z0-9_]+$/.test(rawUser)
-          const resolved =
+          const resolvedName =
             context?.names.get(rawUser) ||
             slackUserCache.get(rawUser) ||
             (!isSlackId && rawUser ? rawUser : undefined)
-          const isMine = Boolean(selfUserId && (rawUser === selfUserId || rawUser === 'You' || rawUser === 'me'))
-          const fallbackName = project.name?.includes('Ashutosh') ? 'Ashutosh' : (rawUser || 'Unknown')
+          const isMine = Boolean(
+            selfUserId && (rawUser === selfUserId || rawUser === 'You' || rawUser === 'me')
+          )
+          const fallbackName = project.name?.includes('Ashutosh')
+            ? 'Ashutosh'
+            : rawUser || (platform === 'whatsapp' ? 'WhatsApp Contact' : 'Unknown')
           rows.push({
-            source,
-            channelId: monitor.channelId,
-            channelName: monitor.channelName,
+            source: workspace.source,
+            platform,
+            channelId: channel.channelId,
+            channelName: channel.channelName,
             ts: msg.ts,
             userId: rawUser,
-            userName:
-              resolved || (isMine ? 'You' : fallbackName),
+            userName: resolvedName || (isMine ? 'You' : fallbackName),
             isMine,
             text: msg.text ?? '',
             permalink: msg.permalink,
@@ -530,6 +569,22 @@ export class DashboardChatService {
     const value = buildProjectActivity({ rows, now })
     this.activityCache.set(projectId, { at: now, value })
     return value
+  }
+
+  private isPlatformAllowedOnDashboard(
+    platform: 'slack' | 'teams' | 'whatsapp',
+    rules?: ProjectDashboardRules,
+    settings?: AppSettings | null
+  ): boolean {
+    const cardSetting = rules?.platforms?.[platform] ?? 'inherit'
+    if (cardSetting === 'on') return true
+    if (cardSetting === 'off') return false
+    if (settings) {
+      if (platform === 'slack') return settings.showDashboardSlack ?? true
+      if (platform === 'teams') return settings.showDashboardTeams ?? true
+      if (platform === 'whatsapp') return settings.showDashboardWhatsApp ?? true
+    }
+    return true
   }
 
   /**

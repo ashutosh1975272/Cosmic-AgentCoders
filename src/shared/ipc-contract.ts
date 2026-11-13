@@ -307,10 +307,28 @@ export interface AppSettings {
   showNewProjectLinkedAccounts?: boolean
   /** When true, display Agent Control & Slack Dispatcher card on dashboard. Default: false. */
   showDashboardAgentControl?: boolean
+  /** When true, include Slack messages & activity in Dashboard feed. Default: true. */
+  showDashboardSlack?: boolean
+  /** When true, include Microsoft Teams messages & activity in Dashboard feed. Default: true. */
+  showDashboardTeams?: boolean
+  /** When true, include WhatsApp messages & activity in Dashboard feed. Default: true. */
+  showDashboardWhatsApp?: boolean
+  /** When true, display Latest Messages & Activity feed card on dashboard. Default: true. */
+  showDashboardActivityFeed?: boolean
+  /** When true, display Needs Your Attention section on dashboard. Default: true. */
+  showDashboardAttention?: boolean
+  /** When true, display Decision Vault card on dashboard. Default: true. */
+  showDashboardDecisionVault?: boolean
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   showDashboardAgentControl: false,
+  showDashboardSlack: true,
+  showDashboardTeams: true,
+  showDashboardWhatsApp: true,
+  showDashboardActivityFeed: true,
+  showDashboardAttention: true,
+  showDashboardDecisionVault: true,
   showNewProjectLinkedAccounts: false,
   baseAppLayout: 'standard',
   showSidebarItemActions: true,

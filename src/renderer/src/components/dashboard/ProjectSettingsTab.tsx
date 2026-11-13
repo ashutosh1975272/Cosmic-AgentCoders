@@ -3,8 +3,11 @@ import { useEffect, useState } from 'react'
 import type {
   DashboardChatTokenStatus,
   DashboardProject,
-  PersonRole
+  DashboardRuleSetting,
+  PersonRole,
+  ProjectDashboardRules
 } from '../../../../shared/dashboard-contract'
+import type { AppSettings } from '../../../../shared/ipc-contract'
 import { DASHBOARD_SCHEDULE_INTERVALS } from '../../../../shared/dashboard-contract'
 import { useDashboardStore } from '../../hooks/useDashboard'
 import { useProjectActivity } from '../../hooks/useProjectActivity'
@@ -28,7 +31,7 @@ import { WorkspaceControlModal } from './WorkspaceControlModal'
 import { TeamsControlModal } from './TeamsControlModal'
 import { WhatsAppControlModal } from './WhatsAppControlModal'
 
-export type SettingsTabKey = 'general' | 'ai' | 'documents' | 'sources' | 'channels' | 'schedule' | 'sidebar' | 'danger'
+export type SettingsTabKey = 'general' | 'ai' | 'documents' | 'sources' | 'channels' | 'schedule' | 'dashboard' | 'sidebar' | 'danger'
 
 interface ProjectSettingsTabProps {
   project: DashboardProject
@@ -68,6 +71,39 @@ export default function ProjectSettingsTab({
   const activityState = useProjectActivity(project.id)
   const [manualPersonName, setManualPersonName] = useState('')
   const [manualPersonRole, setManualPersonRole] = useState<PersonRole>('client')
+
+  // Global settings for dashboard rule inheritance resolution
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null)
+
+  useEffect(() => {
+    if (window.api?.app?.getSettings) {
+      window.api.app.getSettings().then(setAppSettings).catch(console.error)
+    }
+  }, [])
+
+  const handleUpdateDashboardRule = async (
+    category: 'platforms' | 'cards',
+    key: string,
+    value: DashboardRuleSetting
+  ): Promise<void> => {
+    const currentRules = project.dashboardRules ?? {}
+    const nextCategory = { ...(currentRules[category] ?? {}), [key]: value }
+    const nextRules: ProjectDashboardRules = {
+      ...currentRules,
+      [category]: nextCategory
+    }
+    await useDashboardStore.getState().upsertProject({
+      ...project,
+      dashboardRules: nextRules
+    })
+  }
+
+  const handleResetDashboardRules = async (): Promise<void> => {
+    await useDashboardStore.getState().upsertProject({
+      ...project,
+      dashboardRules: undefined
+    })
+  }
 
   const handleToggleAdvanceControl = async (): Promise<void> => {
     const nextVal = !project.advanceDashboardControl
@@ -278,6 +314,7 @@ export default function ProjectSettingsTab({
     { key: 'sources', label: 'Sources', icon: '🔌' },
     { key: 'channels', label: 'Channels', icon: '#' },
     { key: 'schedule', label: 'Schedule', icon: '📅' },
+    { key: 'dashboard', label: 'Dashboard', icon: '📊' },
     { key: 'sidebar', label: 'Sidebar layout', icon: '◫' },
     { key: 'danger', label: 'Danger zone', icon: '⚠', danger: true }
   ]
@@ -1735,6 +1772,384 @@ export default function ProjectSettingsTab({
                   >
                     {scheduleSaving ? 'Saving…' : 'Save schedule'}
                   </button>
+                </div>
+              </section>
+            </div>
+          )}
+
+          {/* TAB: DASHBOARD RULES & OVERRIDES */}
+          {activeTab === 'dashboard' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <section className="ws-settings-section">
+                <header
+                  className="ws-settings-head"
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-start'
+                  }}
+                >
+                  <div>
+                    <h4>📊 Project Dashboard Rules &amp; Overrides</h4>
+                    <p>
+                      Configure which platforms, dispatchers, and cards appear on this project dashboard.
+                      By default, all options inherit from Global Settings.
+                    </p>
+                  </div>
+                  {project.dashboardRules ? (
+                    <button
+                      type="button"
+                      className="dash-link"
+                      style={{ fontSize: '12px' }}
+                      onClick={() => void handleResetDashboardRules()}
+                    >
+                      Reset All to Global
+                    </button>
+                  ) : null}
+                </header>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '16px' }}>
+                  {/* Sub-card 1: Platforms Included on Dashboard */}
+                  <div
+                    style={{
+                      background: 'rgba(15, 23, 42, 0.4)',
+                      padding: '16px 18px',
+                      borderRadius: '8px',
+                      border: '1px solid rgba(255, 255, 255, 0.07)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <h5 style={{ margin: 0, fontSize: '13px', color: '#e2e8f0', fontWeight: 600 }}>
+                        🌐 Multiplatform Activity Stream Ingestion
+                      </h5>
+                      <span style={{ fontSize: '11px', color: '#64748b' }}>
+                        Card overrides global rules
+                      </span>
+                    </div>
+
+                    {/* Slack */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '6px 0'
+                      }}
+                    >
+                      <div>
+                        <span style={{ fontSize: '13px', color: '#cbd5e1', fontWeight: 500 }}>
+                          💬 Slack
+                        </span>
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Feed Slack channel messages into this card&apos;s dashboard
+                        </span>
+                      </div>
+                      <select
+                        value={project.dashboardRules?.platforms?.slack ?? 'inherit'}
+                        onChange={(e) =>
+                          void handleUpdateDashboardRule(
+                            'platforms',
+                            'slack',
+                            e.target.value as DashboardRuleSetting
+                          )
+                        }
+                        style={{
+                          background: '#1e293b',
+                          color: '#f8fafc',
+                          border: '1px solid rgba(255, 255, 255, 0.15)',
+                          borderRadius: '6px',
+                          padding: '4px 8px',
+                          fontSize: '12px'
+                        }}
+                      >
+                        <option value="inherit">
+                          Inherit ({appSettings?.showDashboardSlack !== false ? 'Global: ON' : 'Global: OFF'})
+                        </option>
+                        <option value="on">Always Show (Force ON)</option>
+                        <option value="off">Always Hide (Force OFF)</option>
+                      </select>
+                    </div>
+
+                    {/* Teams */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '6px 0'
+                      }}
+                    >
+                      <div>
+                        <span style={{ fontSize: '13px', color: '#cbd5e1', fontWeight: 500 }}>
+                          👥 Microsoft Teams
+                        </span>
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Feed Microsoft Teams channel/chat messages into this card&apos;s dashboard
+                        </span>
+                      </div>
+                      <select
+                        value={project.dashboardRules?.platforms?.teams ?? 'inherit'}
+                        onChange={(e) =>
+                          void handleUpdateDashboardRule(
+                            'platforms',
+                            'teams',
+                            e.target.value as DashboardRuleSetting
+                          )
+                        }
+                        style={{
+                          background: '#1e293b',
+                          color: '#f8fafc',
+                          border: '1px solid rgba(255, 255, 255, 0.15)',
+                          borderRadius: '6px',
+                          padding: '4px 8px',
+                          fontSize: '12px'
+                        }}
+                      >
+                        <option value="inherit">
+                          Inherit ({appSettings?.showDashboardTeams !== false ? 'Global: ON' : 'Global: OFF'})
+                        </option>
+                        <option value="on">Always Show (Force ON)</option>
+                        <option value="off">Always Hide (Force OFF)</option>
+                      </select>
+                    </div>
+
+                    {/* WhatsApp */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '6px 0'
+                      }}
+                    >
+                      <div>
+                        <span style={{ fontSize: '13px', color: '#cbd5e1', fontWeight: 500 }}>
+                          🟢 WhatsApp Web
+                        </span>
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Feed WhatsApp Web messages into this card&apos;s dashboard (overriding stops WhatsApp dashboard updates)
+                        </span>
+                      </div>
+                      <select
+                        value={project.dashboardRules?.platforms?.whatsapp ?? 'inherit'}
+                        onChange={(e) =>
+                          void handleUpdateDashboardRule(
+                            'platforms',
+                            'whatsapp',
+                            e.target.value as DashboardRuleSetting
+                          )
+                        }
+                        style={{
+                          background: '#1e293b',
+                          color: '#f8fafc',
+                          border: '1px solid rgba(255, 255, 255, 0.15)',
+                          borderRadius: '6px',
+                          padding: '4px 8px',
+                          fontSize: '12px'
+                        }}
+                      >
+                        <option value="inherit">
+                          Inherit ({appSettings?.showDashboardWhatsApp !== false ? 'Global: ON' : 'Global: OFF'})
+                        </option>
+                        <option value="on">Always Show (Force ON)</option>
+                        <option value="off">Always Hide (Force OFF)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Sub-card 2: Card & Section Visibility */}
+                  <div
+                    style={{
+                      background: 'rgba(15, 23, 42, 0.4)',
+                      padding: '16px 18px',
+                      borderRadius: '8px',
+                      border: '1px solid rgba(255, 255, 255, 0.07)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <h5 style={{ margin: 0, fontSize: '13px', color: '#e2e8f0', fontWeight: 600 }}>
+                        🤖 Dispatchers &amp; Cards Visibility
+                      </h5>
+                    </div>
+
+                    {/* Agent Control */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '6px 0'
+                      }}
+                    >
+                      <div>
+                        <span style={{ fontSize: '13px', color: '#cbd5e1', fontWeight: 500 }}>
+                          Agent Control &amp; Slack Dispatcher Card
+                        </span>
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Display autonomous execution card on this project dashboard
+                        </span>
+                      </div>
+                      <select
+                        value={project.dashboardRules?.cards?.agentControl ?? 'inherit'}
+                        onChange={(e) =>
+                          void handleUpdateDashboardRule(
+                            'cards',
+                            'agentControl',
+                            e.target.value as DashboardRuleSetting
+                          )
+                        }
+                        style={{
+                          background: '#1e293b',
+                          color: '#f8fafc',
+                          border: '1px solid rgba(255, 255, 255, 0.15)',
+                          borderRadius: '6px',
+                          padding: '4px 8px',
+                          fontSize: '12px'
+                        }}
+                      >
+                        <option value="inherit">
+                          Inherit ({appSettings?.showDashboardAgentControl ? 'Global: ON' : 'Global: OFF'})
+                        </option>
+                        <option value="on">Always Show (Force ON)</option>
+                        <option value="off">Always Hide (Force OFF)</option>
+                      </select>
+                    </div>
+
+                    {/* Latest Messages Feed */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '6px 0'
+                      }}
+                    >
+                      <div>
+                        <span style={{ fontSize: '13px', color: '#cbd5e1', fontWeight: 500 }}>
+                          Latest Messages &amp; Activity Feed
+                        </span>
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Display recent message stream on dashboard
+                        </span>
+                      </div>
+                      <select
+                        value={project.dashboardRules?.cards?.activityFeed ?? 'inherit'}
+                        onChange={(e) =>
+                          void handleUpdateDashboardRule(
+                            'cards',
+                            'activityFeed',
+                            e.target.value as DashboardRuleSetting
+                          )
+                        }
+                        style={{
+                          background: '#1e293b',
+                          color: '#f8fafc',
+                          border: '1px solid rgba(255, 255, 255, 0.15)',
+                          borderRadius: '6px',
+                          padding: '4px 8px',
+                          fontSize: '12px'
+                        }}
+                      >
+                        <option value="inherit">
+                          Inherit ({appSettings?.showDashboardActivityFeed !== false ? 'Global: ON' : 'Global: OFF'})
+                        </option>
+                        <option value="on">Always Show (Force ON)</option>
+                        <option value="off">Always Hide (Force OFF)</option>
+                      </select>
+                    </div>
+
+                    {/* Needs Attention */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '6px 0'
+                      }}
+                    >
+                      <div>
+                        <span style={{ fontSize: '13px', color: '#cbd5e1', fontWeight: 500 }}>
+                          Needs Your Attention Section
+                        </span>
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Display pending reply and blocker warnings
+                        </span>
+                      </div>
+                      <select
+                        value={project.dashboardRules?.cards?.attention ?? 'inherit'}
+                        onChange={(e) =>
+                          void handleUpdateDashboardRule(
+                            'cards',
+                            'attention',
+                            e.target.value as DashboardRuleSetting
+                          )
+                        }
+                        style={{
+                          background: '#1e293b',
+                          color: '#f8fafc',
+                          border: '1px solid rgba(255, 255, 255, 0.15)',
+                          borderRadius: '6px',
+                          padding: '4px 8px',
+                          fontSize: '12px'
+                        }}
+                      >
+                        <option value="inherit">
+                          Inherit ({appSettings?.showDashboardAttention !== false ? 'Global: ON' : 'Global: OFF'})
+                        </option>
+                        <option value="on">Always Show (Force ON)</option>
+                        <option value="off">Always Hide (Force OFF)</option>
+                      </select>
+                    </div>
+
+                    {/* Decision Vault */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '6px 0'
+                      }}
+                    >
+                      <div>
+                        <span style={{ fontSize: '13px', color: '#cbd5e1', fontWeight: 500 }}>
+                          Decision Vault Card
+                        </span>
+                        <span style={{ display: 'block', fontSize: '11px', color: '#64748b' }}>
+                          Display extracted decisions and milestone log
+                        </span>
+                      </div>
+                      <select
+                        value={project.dashboardRules?.cards?.decisionVault ?? 'inherit'}
+                        onChange={(e) =>
+                          void handleUpdateDashboardRule(
+                            'cards',
+                            'decisionVault',
+                            e.target.value as DashboardRuleSetting
+                          )
+                        }
+                        style={{
+                          background: '#1e293b',
+                          color: '#f8fafc',
+                          border: '1px solid rgba(255, 255, 255, 0.15)',
+                          borderRadius: '6px',
+                          padding: '4px 8px',
+                          fontSize: '12px'
+                        }}
+                      >
+                        <option value="inherit">
+                          Inherit ({appSettings?.showDashboardDecisionVault !== false ? 'Global: ON' : 'Global: OFF'})
+                        </option>
+                        <option value="on">Always Show (Force ON)</option>
+                        <option value="off">Always Hide (Force OFF)</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
               </section>
             </div>
