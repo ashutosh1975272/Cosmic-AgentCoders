@@ -736,6 +736,7 @@ export class DashboardChatService {
           source: targetSource.role ?? 'client',
           messages: [{ ts: nowTs, user: 'You', text }]
         })
+        this.invalidateActivityCache(project.id)
         return {
           ok: true,
           message: {
@@ -799,6 +800,7 @@ export class DashboardChatService {
           source: targetSource.role ?? 'client',
           messages: [{ ts: nowTs, user: 'You', text }]
         })
+        this.invalidateActivityCache(project.id)
         return {
           ok: true,
           message: {

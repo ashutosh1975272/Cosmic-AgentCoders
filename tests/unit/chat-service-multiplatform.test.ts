@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DashboardDeltaStore } from '../../src/main/dashboard/delta-store'
 import { MonitorStore } from '../../src/main/dashboard/monitor-store'
 import { DashboardChatService } from '../../src/main/dashboard/chat-service'
@@ -383,5 +383,42 @@ describe('DashboardChatService — Multiplatform & Inheritance', () => {
     ])
 
     expect(sentPayload).toBeNull()
+  })
+
+  it('dispatches outbound message to WhatsApp contact and records it in deltaStore', async () => {
+    const mockWebContents = {
+      isDestroyed: vi.fn().mockReturnValue(false),
+      executeJavaScript: vi.fn().mockImplementation(async (script: string) => {
+        if (script.includes('header')) return 'John WhatsApp'
+        if (script.includes('compose-btn-send') || script.includes('insertText')) return true
+        return true
+      })
+    }
+    const mockView = { webContents: mockWebContents } as any
+
+    const service = new DashboardChatService({
+      monitorStore,
+      deltaStore,
+      oauthTokenProvider: { tryGet: async () => null },
+      getAppSettings: async () => appSettings,
+      getExistingCardView: () => mockView
+    })
+
+    const res = await service.sendMessage({
+      projectId: project.id,
+      channelId: 'wa_contact',
+      text: 'Hello Talent Killer, here is the automated response.'
+    })
+
+    expect(res.ok).toBe(true)
+    expect(res.message).toBeDefined()
+    expect(res.message.text).toBe('Hello Talent Killer, here is the automated response.')
+
+    // Verify written to deltaStore
+    const delta = await deltaStore.load('pf3', 'ws-wa', 'wa_contact')
+    expect(delta).not.toBeNull()
+    const lastMsg = delta!.messages[delta!.messages.length - 1]
+    expect(lastMsg.text).toBe('Hello Talent Killer, here is the automated response.')
+    expect(lastMsg.user).toBe('You')
   })
 })
