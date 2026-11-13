@@ -112,8 +112,28 @@ export class WhatsAppPlatformSuite implements IPlatformBackendAdapter {
         })
 
         try {
-          await reader.selectChat(ch.id, name)
-          let messages = await reader.readMessages(ch.id)
+          const selected = await reader.selectChat(ch.id, name)
+          if (!selected) {
+            ctx.onScrapeEvent?.({
+              type: 'step',
+              runId,
+              projectId: project.id,
+              sourceId: source.id,
+              channelName: name,
+              text: `Could not isolate WhatsApp chat ${name}, skipping to avoid cross-chat leakage.`
+            })
+            channels.push({
+              channelId: ch.id,
+              channelName: name,
+              kind: ch.kind || 'dm',
+              messagesRead: 0,
+              newMessages: 0,
+              status: 'empty',
+              engineMode: activeEngineMode
+            })
+            continue
+          }
+          let messages = await reader.readMessages(ch.id, name)
           if (peopleFilter.size > 0) {
             messages = messages.filter((m) =>
               peopleFilter.has((m.user ?? '').trim().toLowerCase())

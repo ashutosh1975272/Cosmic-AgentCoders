@@ -700,8 +700,22 @@ export class DashboardChatService {
         if (!existingView) {
           await reader.initialize()
         }
-        await reader.selectChat(effectiveId, effectiveName)
-        const ok = await reader.postMessage(effectiveId, text)
+        let selected = await reader.selectChat(effectiveId, effectiveName)
+        if (!selected) {
+          await new Promise((r) => setTimeout(r, 400))
+          selected = await reader.selectChat(effectiveId, effectiveName)
+        }
+        if (!selected) {
+          if (!existingView) {
+            reader.dispose()
+          }
+          return {
+            ok: false,
+            code: 'browser_error',
+            error: `Could not open conversation with ${effectiveName} on WhatsApp Web.`
+          }
+        }
+        const ok = await reader.postMessage(effectiveId, text, effectiveName)
         if (!existingView) {
           reader.dispose()
         }

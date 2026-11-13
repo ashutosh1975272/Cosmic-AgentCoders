@@ -165,4 +165,84 @@ describe('WhatsAppReaderView', () => {
     expect(selected).toBe(true)
     expect(executedScripts.some((s) => s.includes('chat-list-search') || s.includes('data-tab="3"'))).toBe(true)
   })
+
+  it('strictly returns empty array when #main header does not match target contact (prevents cross-chat contamination)', async () => {
+    const mockWebContents = {
+      isDestroyed: vi.fn().mockReturnValue(false),
+      executeJavaScript: vi.fn().mockImplementation(async (script: string) => {
+        // When checking active chat title, simulate a different chat open in #main
+        if (script.includes('#main header')) {
+          return 'Someone Else Entirely'
+        }
+        // Even if messages exist in #main
+        return [
+          {
+            id: 'foreign-msg',
+            senderName: 'Someone Else',
+            text: 'Foreign text from another chat',
+            timestamp: 1731456300000,
+            fromMe: false
+          }
+        ]
+      })
+    }
+    const mockView = { webContents: mockWebContents } as any
+
+    const reader = new WhatsAppReaderView({
+      profileId: 'prof-1',
+      existingView: mockView
+    })
+
+    const messages = await reader.readMessages('wa_the_creator', 'The Creator')
+    // Must return empty array so that "Someone Else Entirely" messages are NEVER written into The Creator's delta file!
+    expect(messages).toEqual([])
+  })
+
+  it('reads messages when #main header matches target contact', async () => {
+    const mockWebContents = {
+      isDestroyed: vi.fn().mockReturnValue(false),
+      executeJavaScript: vi.fn().mockImplementation(async (script: string) => {
+        if (script.includes('if (!header) return null')) {
+          return 'The Creator'
+        }
+        if (script.includes('selectable-text') || script.includes('copyable-text')) {
+          return [
+            {
+              id: 'creator-msg-1',
+              senderName: 'The Creator',
+              text: 'Hello, this is authentic Creator message',
+              timestamp: 1731456300000,
+              fromMe: false
+            }
+          ]
+        }
+        return []
+      })
+    }
+    const mockView = { webContents: mockWebContents } as any
+
+    const reader = new WhatsAppReaderView({
+      profileId: 'prof-1',
+      existingView: mockView
+    })
+
+    const messages = await reader.readMessages('wa_the_creator', 'The Creator')
+    expect(messages.length).toBe(1)
+    expect(messages[0].user).toBe('The Creator')
+    expect(messages[0].text).toBe('Hello, this is authentic Creator message')
+  })
+
+  it('matchesTarget correctly handles emojis, case insensitivity, and rejects empty strings', () => {
+    const reader = new WhatsAppReaderView({ profileId: 'prof-1' })
+
+    // Exact and slug matches
+    expect(reader.matchesTarget('The Creator', 'wa_the_creator', 'The Creator')).toBe(true)
+    expect(reader.matchesTarget('Talent Killer 👿', 'wa_talent_killer___', 'Talent Killer 👿')).toBe(true)
+    expect(reader.matchesTarget('Talent Killer', 'wa_talent_killer___', 'Talent Killer 👿')).toBe(true)
+
+    // Mismatches
+    expect(reader.matchesTarget('Completely Different Chat', 'wa_the_creator', 'The Creator')).toBe(false)
+    expect(reader.matchesTarget('BotFather', 'wa_talent_killer___', 'Talent Killer 👿')).toBe(false)
+    expect(reader.matchesTarget('', 'wa_the_creator', 'The Creator')).toBe(false)
+  })
 })
