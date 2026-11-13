@@ -215,6 +215,8 @@ export interface ScrapeRunLog {
   projectName: string
   sourceId: string
   sourceKind: 'token' | 'browser'
+  /** Originating platform: Slack, Microsoft Teams, or WhatsApp Web. */
+  platform?: 'slack' | 'teams' | 'whatsapp'
   /** Ingestion engine used for this scrape run: direct Slack API or browser DOM scraper. */
   engineMode?: 'direct_api' | 'browser'
   workspaceId: string
@@ -236,6 +238,8 @@ export interface ScrapeRunLog {
 
 export interface ScrapeRunQuery {
   projectId?: string
+  sourceId?: string
+  platform?: 'slack' | 'teams' | 'whatsapp' | 'all'
   limit?: number
   status?: ScrapeRunStatus | 'all'
   trigger?: ScrapeTrigger | 'all'
@@ -668,6 +672,8 @@ export interface DashboardDiscoverSourceChannelsPayload {
   projectId?: string
   /** Optional for a new source; omit to discover before the source exists. */
   sourceId?: string
+  /** Target communication platform. When omitted, derived from sourceId or source. */
+  platform?: 'slack' | 'teams' | 'whatsapp'
   /** Optional fallbacks when the source row is being created. */
   profileId?: string
   workspaceId?: string

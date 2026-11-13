@@ -93,6 +93,13 @@ function normalizeEntry(raw: unknown): ScrapeRunLog | null {
     projectName: typeof r.projectName === 'string' ? r.projectName : String(r.projectId ?? ''),
     sourceId: String(r.sourceId ?? ''),
     sourceKind: r.sourceKind === 'token' ? 'token' : 'browser',
+    platform:
+      (r.platform as any) ||
+      (String(r.sourceId ?? '').includes('teams')
+        ? 'teams'
+        : String(r.sourceId ?? '').includes('whatsapp')
+          ? 'whatsapp'
+          : 'slack'),
     engineMode: r.engineMode === 'browser' ? 'browser' : 'direct_api',
     workspaceId: String(r.workspaceId ?? ''),
     workspaceName:

@@ -23,16 +23,22 @@ const TEAMS_DISCOVER_CHANNELS_SCRIPT = `
   try {
     const results = [];
     const seen = new Set();
+    const systemWords = new Set([
+      'chat', 'teams', 'activity', 'calendar', 'calls', 'onedrive', 'apps',
+      'invite to teams', 'sync device contacts', 'all contacts', 'active now',
+      'favorites', 'chats', 'unread', 'meeting chats', 'unmuted', 'settings'
+    ]);
 
     // 1. Query Teams channel list items
     const channelNodes = document.querySelectorAll(
-      '[data-tid="team-channel-item"], [data-tid="channel-list-item"], [role="treeitem"]'
+      '[data-tid="team-channel-item"], [data-tid="channel-list-item"], [data-tid="channel-name"], [role="treeitem"]'
     );
     channelNodes.forEach((node) => {
       const name = (node.textContent || '').trim().split('\\n')[0].trim();
-      const id = node.getAttribute('data-tid') || node.getAttribute('id') || name.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-      if (name && !seen.has(name)) {
-        seen.add(name);
+      const lower = name.toLowerCase();
+      if (name && !seen.has(lower) && !systemWords.has(lower)) {
+        seen.add(lower);
+        const id = node.getAttribute('data-tid') || node.getAttribute('id') || name.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
         results.push({
           id,
           name,
@@ -43,25 +49,46 @@ const TEAMS_DISCOVER_CHANNELS_SCRIPT = `
       }
     });
 
-    // 2. Query Direct Chats and Meeting Chats
+    // 2. Query Direct Chats, Personal Chats, and Meeting Chats
     const chatNodes = document.querySelectorAll(
-      '[data-tid="chat-list-item"], [data-tid="chat-item"], [role="listitem"]'
+      '[data-tid="chat-list-item"], [data-tid="chat-item"], [data-tid="contact-list-item"], [role="listitem"]'
     );
     chatNodes.forEach((node) => {
-      const titleEl = node.querySelector('[data-tid="chat-list-item-title"]') || node.querySelector('h2, span, p');
-      const name = titleEl ? (titleEl.textContent || '').trim() : '';
-      if (name && !seen.has(name) && !['Chat', 'Teams', 'Activity', 'Calendar'].includes(name)) {
-        seen.add(name);
+      const titleEl = node.querySelector('[data-tid="chat-list-item-title"], [data-tid="chat-title"], h2, h3, span[title], span[dir="auto"], p');
+      const rawName = titleEl ? (titleEl.getAttribute('title') || titleEl.textContent || '').trim() : (node.textContent || '').trim().split('\\n')[0].trim();
+      const name = rawName.replace(/\\s*\\(You\\)$/i, '').trim();
+      const lower = name.toLowerCase();
+      if (name && !seen.has(lower) && !systemWords.has(lower)) {
+        seen.add(lower);
         const id = 'teams_chat_' + name.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
         results.push({
           id,
-          name,
+          name: rawName,
           isPrivate: true,
           isDm: true,
           kind: 'dm'
         });
       }
     });
+
+    // 3. If list virtualized or empty, check active conversation header
+    const headerTitleEl = document.querySelector(
+      '[data-tid="chat-header-title"], [data-tid="channel-header-title"], [data-tid="header-title"], header h1, header h2, header [role="heading"]'
+    );
+    if (headerTitleEl) {
+      const activeName = (headerTitleEl.textContent || '').trim().replace(/\\s*\\(You\\)$/i, '').trim();
+      const lower = activeName.toLowerCase();
+      if (activeName && !seen.has(lower) && !systemWords.has(lower)) {
+        seen.add(lower);
+        results.push({
+          id: 'teams_chat_' + activeName.toLowerCase().replace(/[^a-z0-9_-]/g, '_'),
+          name: (headerTitleEl.textContent || '').trim(),
+          isPrivate: true,
+          isDm: true,
+          kind: 'dm'
+        });
+      }
+    }
 
     return results;
   } catch (err) {
@@ -74,16 +101,25 @@ const TEAMS_READ_MESSAGES_SCRIPT = `
 (() => {
   try {
     const messages = [];
+    const headerEl = document.querySelector(
+      '[data-tid="chat-header-title"], [data-tid="channel-header-title"], header h1, header h2'
+    );
+    const activeChatName = headerEl ? (headerEl.textContent || '').trim().replace(/\\s*\\(You\\)$/i, '') : 'Teams Member';
+
     const messageNodes = document.querySelectorAll(
-      '[data-tid="message-pane-list-viewport"] [role="listitem"], [data-tid="chat-pane-item"], .ui-chat__message'
+      '[data-tid="message-pane-list-viewport"] [role="listitem"], [data-tid="chat-pane-item"], div[data-tid*="chat-message"], .ui-chat__message, div[role="listitem"] div[data-tid="message-body"]'
     );
 
     messageNodes.forEach((node, idx) => {
-      const senderEl = node.querySelector('[data-tid="message-author-name"]') || node.querySelector('.ui-chat__message__author');
-      const bodyEl = node.querySelector('[data-tid="message-body"]') || node.querySelector('.ui-chat__message__content');
-      const timeEl = node.querySelector('time') || node.querySelector('[data-tid="message-timestamp"]');
+      const container = node.closest('[role="listitem"]') || node;
+      const senderEl = container.querySelector('[data-tid="message-author-name"], [data-tid="message-author"], .ui-chat__message__author, span[data-tid="author"]');
+      const bodyEl = container.querySelector('[data-tid="message-body"], .ui-chat__message__content, [data-tid="chat-message-text"], p');
+      const timeEl = container.querySelector('time, [data-tid="message-timestamp"]');
 
-      const senderName = senderEl ? (senderEl.textContent || '').trim() : 'Teams Member';
+      let senderName = senderEl ? (senderEl.textContent || '').trim() : '';
+      if (!senderName) {
+        senderName = activeChatName;
+      }
       const text = bodyEl ? (bodyEl.innerHTML || bodyEl.textContent || '').trim() : '';
       const timestamp = timeEl ? (timeEl.getAttribute('datetime') || timeEl.textContent || '') : new Date().toISOString();
 

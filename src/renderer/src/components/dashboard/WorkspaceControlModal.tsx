@@ -93,6 +93,7 @@ export function WorkspaceControlModal({
       .discoverSourceChannels({
         projectId: project.id,
         sourceId: source.id,
+        platform: 'slack',
         profileId: source.profileId,
         workspaceId: source.workspaceId
       })
@@ -1082,7 +1083,7 @@ export function WorkspaceControlModal({
                   </p>
                 </header>
                 <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-                  <ScrapeLogExplorer projectId={project.id} projectName={project.name} />
+                  <ScrapeLogExplorer projectId={project.id} projectName={project.name} sourceId={source.id} platform="slack" />
                 </div>
               </div>
             )}

@@ -87,6 +87,7 @@ export function WhatsAppControlModal({
       .discoverSourceChannels({
         projectId: project.id,
         sourceId: source.id,
+        platform: 'whatsapp',
         profileId: source.profileId,
         workspaceId: source.workspaceId
       })
@@ -218,6 +219,8 @@ export function WhatsAppControlModal({
         projectId: project.id,
         sourceId: source.id,
         patch: {
+          platform: 'whatsapp',
+          workspaceName: source.workspaceName || 'WhatsApp Web',
           channels: updatedChannels,
           selectionMode,
           channelsReviewedAt: new Date().toISOString()
@@ -802,7 +805,7 @@ export function WhatsAppControlModal({
                     Detailed history of automated and manual sync executions for WhatsApp.
                   </p>
                 </div>
-                <ScrapeLogExplorer projectId={project.id} />
+                <ScrapeLogExplorer projectId={project.id} sourceId={source.id} platform="whatsapp" />
               </div>
             )}
           </main>

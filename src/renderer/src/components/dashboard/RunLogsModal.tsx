@@ -38,6 +38,8 @@ export interface ScrapeLogExplorerProps {
   /** undefined = every card (unified logs tab). */
   projectId?: string
   projectName?: string
+  sourceId?: string
+  platform?: 'slack' | 'teams' | 'whatsapp' | 'all'
   showProjectColumn?: boolean
   compact?: boolean
 }
@@ -45,6 +47,8 @@ export interface ScrapeLogExplorerProps {
 export function ScrapeLogExplorer({
   projectId,
   projectName,
+  sourceId,
+  platform,
   showProjectColumn = false,
   compact = false
 }: ScrapeLogExplorerProps): React.JSX.Element {
@@ -61,6 +65,8 @@ export function ScrapeLogExplorer({
     try {
       const data = await window.api.dashboard.getScrapeRuns({
         projectId,
+        sourceId,
+        platform,
         limit: 100,
         status: statusFilter,
         trigger: triggerFilter
@@ -71,7 +77,7 @@ export function ScrapeLogExplorer({
     } catch {
       setRuns([])
     }
-  }, [projectId, statusFilter, triggerFilter])
+  }, [projectId, sourceId, platform, statusFilter, triggerFilter])
 
   useEffect(() => {
     void fetchRuns()

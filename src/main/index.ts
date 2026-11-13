@@ -708,7 +708,9 @@ if (!gotSingleInstanceLock) {
       getExistingCardView: (projectId, appId) =>
         browserViewManager.getExistingCardView(projectId, appId as AppId),
       getExistingProfileView: (profileId, appId) =>
-        browserViewManager.getExistingView(profileId, appId as AppId)
+        browserViewManager.getExistingView(profileId, appId as AppId),
+      findViewForApp: (appId, projectId, profileId) =>
+        browserViewManager.findViewForApp(appId as AppId, projectId, profileId)
     })
 
     void runWorkspaceMigration()

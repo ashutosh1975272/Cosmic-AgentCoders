@@ -76,6 +76,26 @@ const WHATSAPP_DISCOVER_CHATS_SCRIPT = `
       }
     });
 
+    // 3. Also query currently active chat header if present
+    const headerTitleEl = document.querySelector(
+      '#main header [data-testid="conversation-info-header-chat-title"], #main header span[title], #main header [role="heading"]'
+    );
+    if (headerTitleEl) {
+      const name = (headerTitleEl.getAttribute('title') || headerTitleEl.textContent || '').trim();
+      if (name && !seen.has(name)) {
+        seen.add(name);
+        const isGroup = name.toLowerCase().includes('group') || name.includes(',');
+        results.push({
+          id: 'wa_' + name.toLowerCase().replace(/[^a-z0-9_-]/g, '_'),
+          name,
+          isPrivate: true,
+          isDm: !isGroup,
+          kind: isGroup ? 'group-dm' : 'dm',
+          unreadCount: 0
+        });
+      }
+    }
+
     return results;
   } catch (err) {
     return [];
@@ -99,7 +119,7 @@ const WHATSAPP_READ_MESSAGES_SCRIPT = `
               id: m.id?._serialized || String(m.id || Date.now()),
               chatId: m.chat?.id?._serialized || 'active_chat',
               senderId: m.fromMe ? 'me' : (m.sender?.id?._serialized || 'contact'),
-              senderName: m.fromMe ? 'You' : (m.sender?.formattedTitle || 'Contact'),
+              senderName: m.fromMe ? 'You' : (m.sender?.formattedTitle || m.sender?.name || 'Contact'),
               text,
               timestamp: (m.t || Date.now() / 1000) * 1000,
               fromMe: Boolean(m.fromMe)
@@ -112,7 +132,15 @@ const WHATSAPP_READ_MESSAGES_SCRIPT = `
       }
     }
 
-    // 2. DOM extraction
+    // 2. Active chat header contact name
+    const activeHeaderEl = document.querySelector(
+      '#main header [data-testid="conversation-info-header-chat-title"], #main header span[title]'
+    );
+    const activeContactName = activeHeaderEl
+      ? (activeHeaderEl.getAttribute('title') || activeHeaderEl.textContent || '').trim()
+      : 'WhatsApp Contact';
+
+    // 3. DOM extraction
     const msgNodes = document.querySelectorAll(
       '[data-testid="msg-container"], div.message-in, div.message-out, [role="row"]'
     );
@@ -121,17 +149,41 @@ const WHATSAPP_READ_MESSAGES_SCRIPT = `
       const textEl = node.querySelector('.selectable-text, [data-testid="selectable-text"], span.copyable-text');
       const text = textEl ? (textEl.textContent || '').trim() : '';
       const isOut = node.classList.contains('message-out') || node.querySelector('[data-testid="tail-out"]') !== null;
-      const timeEl = node.querySelector('[data-testid="msg-meta"] span, span[dir="auto"]');
-      const timeText = timeEl ? (timeEl.textContent || '').trim() : '';
+      const copyableEl = node.querySelector('div.copyable-text[data-pre-plain-text]');
+      const preText = copyableEl ? (copyableEl.getAttribute('data-pre-plain-text') || '') : '';
+
+      let senderName = isOut ? 'You' : activeContactName;
+      let timestamp = new Date().toISOString();
+
+      if (preText) {
+        // e.g. [12:30 PM, 11/13/2026] Ashutosh: 
+        const authorMatch = preText.match(/\\]\\s*([^:]+):/);
+        if (authorMatch && authorMatch[1]) {
+          senderName = isOut ? 'You' : authorMatch[1].trim();
+        }
+        const timeMatch = preText.match(/\\[([^\\]]+)\\]/);
+        if (timeMatch && timeMatch[1]) {
+          timestamp = timeMatch[1].trim();
+        }
+      } else {
+        const authorEl = node.querySelector('[data-testid="author"], div[data-testid="message-author"], span.color-1, span.color-2');
+        if (authorEl && !isOut) {
+          senderName = (authorEl.textContent || '').trim() || senderName;
+        }
+        const timeEl = node.querySelector('[data-testid="msg-meta"] span, span[dir="auto"]');
+        if (timeEl) {
+          timestamp = (timeEl.textContent || '').trim() || timestamp;
+        }
+      }
 
       if (text) {
         messages.push({
           id: 'wa_msg_' + idx + '_' + Date.now(),
           chatId: 'active_chat',
-          senderId: isOut ? 'me' : 'contact',
-          senderName: isOut ? 'You' : 'Contact',
+          senderId: senderName.toLowerCase().replace(/\\s+/g, '_'),
+          senderName,
           text,
-          timestamp: timeText || new Date().toISOString(),
+          timestamp,
           fromMe: isOut
         });
       }
