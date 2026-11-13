@@ -144,17 +144,18 @@ describe('TeamsReaderView', () => {
   it('selects channel and posts message', async () => {
     const mockWebContents = {
       isDestroyed: vi.fn().mockReturnValue(false),
+      focus: vi.fn(),
       sendInputEvent: vi.fn(),
       executeJavaScript: vi.fn().mockImplementation(async (script: string) => {
+        if (script.includes('cleared') || script.includes('composer_missing')) {
+          return { ok: true, cleared: true }
+        }
         if (script.includes('team-channel-item') || script.includes('chat-header-title')) return true
         if (script.includes('insertText') || script.includes('contenteditable')) {
           return { ok: true, hasText: true }
         }
         if (script.includes('sendMessageButton') || script.includes('candidates')) {
           return true
-        }
-        if (script.includes('cleared')) {
-          return { cleared: true }
         }
         return true
       })
@@ -171,5 +172,62 @@ describe('TeamsReaderView', () => {
 
     const posted = await reader.postMessage('ch-1', 'Hello from Agent!')
     expect(posted).toBe(true)
+  })
+
+  it('fails postMessage when composer is absent and does not report false positive cleared', async () => {
+    const mockWebContents = {
+      isDestroyed: vi.fn().mockReturnValue(false),
+      focus: vi.fn(),
+      sendInputEvent: vi.fn(),
+      executeJavaScript: vi.fn().mockImplementation(async (script: string) => {
+        if (script.includes('cleared') || script.includes('composer_missing')) {
+          return { ok: false, cleared: false, error: 'composer_missing' }
+        }
+        if (script.includes('team-channel-item') || script.includes('chat-header-title')) return true
+        if (script.includes('insertText') || script.includes('contenteditable')) {
+          return { ok: false, error: 'composer_not_found' }
+        }
+        return false
+      })
+    }
+    const mockView = { webContents: mockWebContents } as any
+
+    const reader = new TeamsReaderView({
+      profileId: 'prof-1',
+      existingView: mockView
+    })
+
+    const posted = await reader.postMessage('ch-1', 'Test message')
+    expect(posted).toBe(false)
+  })
+
+  it('rejects postMessage when composer is not cleared or missing during verification', async () => {
+    const mockWebContents = {
+      isDestroyed: vi.fn().mockReturnValue(false),
+      focus: vi.fn(),
+      sendInputEvent: vi.fn(),
+      executeJavaScript: vi.fn().mockImplementation(async (script: string) => {
+        if (script.includes('cleared') || script.includes('composer_missing')) {
+          return { ok: false, cleared: false, error: 'not_cleared' }
+        }
+        if (script.includes('team-channel-item') || script.includes('chat-header-title')) return true
+        if (script.includes('insertText') || script.includes('contenteditable')) {
+          return { ok: true, hasText: true }
+        }
+        if (script.includes('sendMessageButton') || script.includes('candidates')) {
+          return false
+        }
+        return false
+      })
+    }
+    const mockView = { webContents: mockWebContents } as any
+
+    const reader = new TeamsReaderView({
+      profileId: 'prof-1',
+      existingView: mockWebContents ? mockView : null
+    })
+
+    const posted = await reader.postMessage('ch-1', 'Message not sent')
+    expect(posted).toBe(false)
   })
 })

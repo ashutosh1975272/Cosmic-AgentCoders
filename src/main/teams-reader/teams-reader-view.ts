@@ -469,9 +469,11 @@ export class TeamsReaderView {
 
   async initialize(): Promise<void> {
     if (this.view) return
-    const partition = this.projectId
-      ? partitionForCard(this.projectId, 'teams')
-      : partitionForProfile(this.profileId, 'teams')
+    const partition = this.profileId
+      ? partitionForProfile(this.profileId, 'teams')
+      : this.projectId
+        ? partitionForCard(this.projectId, 'teams')
+        : 'persist:default'
     const sess = session.fromPartition(partition)
     this.view = new WebContentsView({
       webPreferences: {
@@ -621,6 +623,10 @@ export class TeamsReaderView {
       return false
     }
     try {
+      try {
+        this.view.webContents.focus()
+      } catch {}
+
       // 1. Ensure target chat is focused/selected first
       if (channelId && channelId !== 'active_channel') {
         await this.selectChannel(channelId)
@@ -677,12 +683,19 @@ export class TeamsReaderView {
         return false
       }
 
+      // Also trigger native text insertion if available to ensure Chromium/Lexical/CKEditor models update
+      try {
+        if (typeof (this.view.webContents as any).insertText === 'function') {
+          await (this.view.webContents as any).insertText(text)
+        }
+      } catch {}
+
       // 3. Poll for up to 1800ms for Teams V2 send button to become enabled and click it
       const clickSendScript = `
         (() => {
           try {
             const candidates = Array.from(document.querySelectorAll(
-              '[data-tid="sendMessageButton"], [data-tid="chat-send-message-button"], button[data-tid="sendButton"], button[aria-label*="Send" i], button[title*="Send" i], button[data-tid*="send" i], [role="button"][aria-label*="Send" i], span[data-tid="sendMessageButton"]'
+              '[data-tid="sendMessageButton"], [data-tid="chat-send-message-button"], button[data-tid="sendButton"], button[aria-label*="Send message" i], button[aria-label*="Send" i], button[title*="Send" i], button[data-tid*="send" i], [role="button"][aria-label*="Send" i], span[data-tid="sendMessageButton"]'
             ));
 
             for (const el of candidates) {
@@ -719,7 +732,9 @@ export class TeamsReaderView {
       // 4. Fallback: Dispatch trusted native Electron Enter key event
       try {
         if (!this.view.webContents.isDestroyed()) {
+          this.view.webContents.focus()
           this.view.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' })
+          this.view.webContents.sendInputEvent({ type: 'char', keyCode: '\r' })
           this.view.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
           await new Promise((r) => setTimeout(r, 400))
         }
@@ -732,21 +747,27 @@ export class TeamsReaderView {
         (() => {
           try {
             let box = document.querySelector(
-              '[contenteditable="true"][role="textbox"], [data-tid="new-message-textarea"] [contenteditable="true"], div[aria-label*="Type a message"] [contenteditable="true"], [data-tid="new-message-textarea"], div[aria-label="Type a message"]'
+              '[contenteditable="true"][role="textbox"], [data-tid="new-message-textarea"] [contenteditable="true"], div[aria-label*="Type a message"] [contenteditable="true"], [data-tid="new-message-textarea"], div[aria-label="Type a message"], div[aria-label*="Type a message"], [data-tid="ckeditor-replyConversation"], [role="textbox"][contenteditable="true"], .ck-editor__editable, textarea'
             );
-            if (box && !box.isContentEditable && box.querySelector) {
-              const inner = box.querySelector('[contenteditable="true"]');
+            if (!box) {
+              return { ok: false, cleared: false, error: 'composer_missing' };
+            }
+            if (!box.isContentEditable && box.querySelector) {
+              const inner = box.querySelector('[contenteditable="true"], textarea, [role="textbox"]');
               if (inner) box = inner;
             }
             const currentText = (box ? (box.textContent || box.value || '') : '').trim();
-            return { cleared: currentText === '' || currentText === '<br>' };
-          } catch {
-            return { cleared: true };
+            if (currentText === '' || currentText === '<br>') {
+              return { ok: true, cleared: true };
+            }
+            return { ok: false, cleared: false, remainingText: currentText };
+          } catch (err) {
+            return { ok: false, cleared: false, error: String(err) };
           }
         })()
       `
       const verifyRes = await this.view.webContents.executeJavaScript(verifyScript, true)
-      return Boolean(verifyRes?.cleared ?? true)
+      return Boolean(verifyRes?.ok && verifyRes?.cleared)
     } catch {
       return false
     }
