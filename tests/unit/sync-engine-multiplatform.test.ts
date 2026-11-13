@@ -216,7 +216,7 @@ describe('SyncEngine Multi-Platform Ingestion (Teams & WhatsApp without Slack)',
   })
 
   it('pools persistent card view via getOrCreateCardView when existing card view is not yet cached', async () => {
-    const { monitors, delta, dir } = await stores()
+    const { monitors, delta } = await stores()
     const now = new Date().toISOString()
 
     const mockWaSource: ProjectSource = {

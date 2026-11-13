@@ -412,7 +412,7 @@ describe('DashboardChatService — Multiplatform & Inheritance', () => {
 
     expect(res.ok).toBe(true)
     expect(res.message).toBeDefined()
-    expect(res.message.text).toBe('Hello Talent Killer, here is the automated response.')
+    expect(res.message!.text).toBe('Hello Talent Killer, here is the automated response.')
 
     // Verify written to deltaStore
     const delta = await deltaStore.load('pf3', 'ws-wa', 'wa_contact')
