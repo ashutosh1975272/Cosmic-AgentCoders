@@ -110,6 +110,52 @@ describe('UnifiedSettingsModal Advance Control and Modal Dimensions', () => {
     expect(aside?.textContent).toContain('System & Maintenance')
   })
 
+  it('displays accurate tab count description in sidebar header', () => {
+    const { container } = render(<UnifiedSettingsModal {...dummyProps} />)
+    const aside = container.querySelector('aside')
+    expect(aside?.textContent).toContain('Basic view (3 tabs)')
+
+    const advanceToggle = container.querySelector('aside input[type="checkbox"]') as HTMLInputElement
+    fireEvent.click(advanceToggle)
+    expect(aside?.textContent).toContain('All 9 tabs visible')
+  })
+
+  it('renders Dashboard Agent Control & Slack Dispatcher card inside Advance Control tab with toggle and switch button', () => {
+    const onChangeSettings = vi.fn()
+    const { container } = render(
+      <UnifiedSettingsModal {...dummyProps} onChangeSettings={onChangeSettings} />
+    )
+    const buttons = Array.from(container.querySelectorAll('aside button'))
+    const advanceBtn = buttons.find((b) => b.textContent?.includes('Advance Control')) as HTMLButtonElement
+    expect(advanceBtn).toBeDefined()
+    fireEvent.click(advanceBtn)
+
+    const main = container.querySelector('main')
+    expect(main?.textContent).toContain('Dashboard Agent Control & Slack Dispatcher')
+    expect(main?.textContent).toContain('Hidden by Default')
+
+    // Find the toggle
+    const agentLabel = Array.from(main?.querySelectorAll('label') ?? []).find((l) =>
+      l.textContent?.includes('Show Agent Control & Slack Dispatcher Card')
+    )
+    const toggle = agentLabel?.querySelector('input[type="checkbox"]') as HTMLInputElement
+    expect(toggle).toBeDefined()
+    expect(toggle.checked).toBe(false)
+
+    fireEvent.click(toggle)
+    expect(onChangeSettings).toHaveBeenCalledWith({ showDashboardAgentControl: true })
+
+    // Find the button to switch to Dashboard tab
+    const switchBtn = Array.from(main?.querySelectorAll('button') ?? []).find((b) =>
+      b.textContent?.includes('Configure Dashboard Rules & Platforms')
+    ) as HTMLButtonElement
+    expect(switchBtn).toBeDefined()
+    fireEvent.click(switchBtn)
+
+    // Now active tab should be Dashboard
+    expect(main?.textContent).toContain('Dashboard Preferences')
+  })
+
   it('renders Appearance Look & Header and Default App Presets inside Advance Control tab', () => {
     const { container } = render(<UnifiedSettingsModal {...dummyProps} />)
     const buttons = Array.from(container.querySelectorAll('aside button'))

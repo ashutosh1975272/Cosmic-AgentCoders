@@ -1523,7 +1523,18 @@ export class BrowserViewManager {
   }
 
   clearCardSlackEmbed(mainWindow: BrowserWindow, targetKey?: string): void {
-    if (!this.cardEmbedKey) return
+    if (!this.cardEmbedKey) {
+      if (targetKey) {
+        const view = this.views.get(targetKey)
+        if (view && mainWindow.contentView.children.includes(view)) {
+          mainWindow.contentView.removeChildView(view)
+        }
+        if (this.activeKey === targetKey) {
+          this.activeKey = null
+        }
+      }
+      return
+    }
     if (targetKey && this.cardEmbedKey !== targetKey) {
       log.info('card live slack embed clear ignored for outdated key', { targetKey, activeKey: this.cardEmbedKey })
       return
@@ -1531,6 +1542,9 @@ export class BrowserViewManager {
     const view = this.views.get(this.cardEmbedKey)
     if (view && mainWindow.contentView.children.includes(view)) {
       mainWindow.contentView.removeChildView(view)
+    }
+    if (this.activeKey === this.cardEmbedKey) {
+      this.activeKey = null
     }
     this.cardEmbedKey = null
     this.cardEmbedBounds = null
@@ -1666,11 +1680,11 @@ export class BrowserViewManager {
     }
 
     this.embedHidden = true
-    for (const key of [this.activeKey, this.secondaryKey, this.cardEmbedKey]) {
-      if (!key) continue
-      const view = this.views.get(key)
-      if (view && mainWindow.contentView.children.includes(view)) {
-        mainWindow.contentView.removeChildView(view)
+    for (const child of [...mainWindow.contentView.children]) {
+      try {
+        mainWindow.contentView.removeChildView(child)
+      } catch {
+        // ignore
       }
     }
   }

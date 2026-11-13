@@ -275,7 +275,7 @@ export function UnifiedSettingsModal({
                   ⚡ Advanced Settings
                 </span>
                 <span style={{ fontSize: '10.5px', color: '#64748b' }}>
-                  {isAdvanceMode ? 'All 7 tabs visible' : 'Basic view (2 tabs)'}
+                  {isAdvanceMode ? 'All 9 tabs visible' : 'Basic view (3 tabs)'}
                 </span>
               </div>
               <label
@@ -1037,6 +1037,87 @@ export function UnifiedSettingsModal({
                 </header>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {/* Card: Dashboard Agent Control & Slack Dispatcher */}
+                  <div
+                    style={{
+                      background: 'rgba(15, 23, 42, 0.4)',
+                      padding: '18px 20px',
+                      borderRadius: '10px',
+                      border: '1px solid rgba(255, 255, 255, 0.07)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <h4 style={{ margin: 0, fontSize: '14px', color: '#e2e8f0', fontWeight: 600 }}>
+                          🤖 Dashboard Agent Control &amp; Slack Dispatcher
+                        </h4>
+                        <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginTop: '2px' }}>
+                          Autonomous message composer and channel permission matrix on the project dashboard
+                        </span>
+                      </div>
+                      <span
+                        style={{
+                          fontSize: '10.5px',
+                          fontWeight: 650,
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          background: settings.showDashboardAgentControl ? 'rgba(74, 222, 128, 0.15)' : 'rgba(148, 163, 184, 0.15)',
+                          color: settings.showDashboardAgentControl ? '#86efac' : '#94a3b8',
+                          border: settings.showDashboardAgentControl ? '1px solid rgba(74, 222, 128, 0.3)' : '1px solid rgba(148, 163, 184, 0.3)'
+                        }}
+                      >
+                        {settings.showDashboardAgentControl ? 'Visible' : 'Hidden by Default'}
+                      </span>
+                    </div>
+
+                    <label
+                      className="settings-row"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        cursor: 'pointer',
+                        padding: '6px 0 0'
+                      }}
+                    >
+                      <span style={{ fontSize: '13px', color: '#cbd5e1' }}>
+                        Show Agent Control &amp; Slack Dispatcher Card
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(settings.showDashboardAgentControl)}
+                        onChange={(e) => onChangeSettings({ showDashboardAgentControl: e.target.checked })}
+                        style={{ width: '18px', height: '18px', accentColor: '#3b82f6', cursor: 'pointer' }}
+                      />
+                    </label>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-start', paddingTop: '4px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('dashboard')}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '6px 12px',
+                          background: 'rgba(59, 130, 246, 0.12)',
+                          border: '1px solid rgba(59, 130, 246, 0.3)',
+                          borderRadius: '6px',
+                          color: '#60a5fa',
+                          fontSize: '12px',
+                          fontWeight: 500,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <span>Configure Dashboard Rules &amp; Platforms</span>
+                        <span>➔</span>
+                      </button>
+                    </div>
+                  </div>
+
                   {/* Card 1: Appearance Look & Header */}
                   <div
                     style={{

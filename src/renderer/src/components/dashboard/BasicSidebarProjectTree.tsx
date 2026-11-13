@@ -124,6 +124,10 @@ export function BasicSidebarProjectTree({
   }
 
   const handleSelectTab = (projectId: string, tab: string): void => {
+    if (tab === 'dashboard') {
+      void window.api?.profiles?.setEmbedVisible?.(false)
+      void window.api?.profiles?.clearCardSlackEmbed?.()
+    }
     setBasicNavigation(projectId, tab)
   }
 

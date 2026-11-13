@@ -201,6 +201,7 @@ export default function CardLiveSlackEmbed({
       document.removeEventListener('animationstart', onResizeOrLayout)
       document.removeEventListener('animationend', onTransitionEnd)
       void window.api.profiles.clearCardSlackEmbed(currentKey)
+      void window.api.profiles.setEmbedVisible(false)
     }
   }, [projectId, profileId, teamId, appId, hidden])
 
