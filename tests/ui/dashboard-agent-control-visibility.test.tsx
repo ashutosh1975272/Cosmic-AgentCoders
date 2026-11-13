@@ -96,7 +96,7 @@ describe('DashboardPage — Agent Control & Dispatcher Visibility', () => {
   })
 
   it('reactively updates visibility when onSettingsChanged triggers', async () => {
-    let settingsCallback: ((settings: any) => void) | null = null
+    let settingsCallback: any = null
     window.api = {
       app: {
         getSettings: vi.fn().mockResolvedValue({ showDashboardAgentControl: false }),
@@ -125,14 +125,18 @@ describe('DashboardPage — Agent Control & Dispatcher Visibility', () => {
     })
 
     // Simulate settings changed to ON
-    settingsCallback?.({ showDashboardAgentControl: true })
+    if (typeof settingsCallback === 'function') {
+      settingsCallback({ showDashboardAgentControl: true })
+    }
 
     await waitFor(() => {
       expect(screen.getByText(/Agent Control & Slack Dispatcher/i)).toBeDefined()
     })
 
     // Simulate settings changed back to OFF
-    settingsCallback?.({ showDashboardAgentControl: false })
+    if (typeof settingsCallback === 'function') {
+      settingsCallback({ showDashboardAgentControl: false })
+    }
 
     await waitFor(() => {
       expect(screen.queryByText(/Agent Control & Slack Dispatcher/i)).toBeNull()
