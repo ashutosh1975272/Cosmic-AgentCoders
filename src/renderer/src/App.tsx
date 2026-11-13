@@ -397,15 +397,18 @@ function App(): React.JSX.Element {
     isCosmicActive && cosmicLevel1 && cosmicLevel1 !== 'all' && cosmicLevel1 !== 'global'
   )
   const showDashboard =
-    !isMinimalActive &&
-    !isBasicActive &&
-    (dashboardOpen ||
-      (isCosmicActive &&
-        (cosmicLevel1 === 'all' ||
-          cosmicLevel1 === 'global' ||
-          (isCosmicProfileActive && !cosmicSelectedCardId)))) &&
-    !browserAuthBusy &&
-    !showCosmicCard
+    Boolean(
+      (dashboardOpen ||
+        (isCosmicOrMinimal &&
+          !cosmicSelectedCardId &&
+          (cosmicLevel1 === 'all' ||
+            cosmicLevel1 === 'global' ||
+            isMinimalActive ||
+            isBasicActive ||
+            isCosmicProfileActive))) &&
+      !browserAuthBusy &&
+      !showCosmicCard
+    )
   const wizardOpen = useDashboardStore((s) => s.wizardOpenFor) != null
   const splitOn =
     settings.splitViewEnabled && Boolean(splitSecondary) && !browserAuthBusy && !locked
@@ -438,6 +441,13 @@ function App(): React.JSX.Element {
   useEffect(() => {
     void window.api.profiles.setEmbedVisible(showEmbed)
   }, [showEmbed])
+
+  useEffect(() => {
+    if (showDashboard) {
+      void window.api?.profiles?.setEmbedVisible?.(false)
+      void window.api?.profiles?.clearCardSlackEmbed?.()
+    }
+  }, [showDashboard])
 
   useEffect(() => {
     if (!splitOn || !activeProfileId || !activeAppId || !splitSecondary) {
@@ -977,6 +987,8 @@ function App(): React.JSX.Element {
               showCosmicProfileNavButtons={settings.showCosmicProfileNavButtons ?? true}
               sidebarButtons={settings.sidebarButtons}
               onLookChange={(look) => {
+                void window.api?.profiles?.setEmbedVisible?.(false)
+                void window.api?.profiles?.clearCardSlackEmbed?.()
                 void window.api.app.setSettings({ sidebarLook: look }).then((next) => {
                   setSettings(next)
                 })

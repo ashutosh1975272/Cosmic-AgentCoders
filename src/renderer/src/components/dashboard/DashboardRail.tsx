@@ -6,12 +6,19 @@ export default function DashboardRail(): React.JSX.Element {
   const expanded = useDashboardStore((s) => s.dashRailExpanded)
   const setExpanded = useDashboardStore((s) => s.setDashRailExpanded)
 
+  const handleDashboardClick = (): void => {
+    openDashboard('slack')
+    setExpanded(true)
+    void window.api?.profiles?.setEmbedVisible?.(false)
+    void window.api?.profiles?.clearCardSlackEmbed?.()
+  }
+
   return (
     <div className="dash-entry" data-testid="dashboard-rail">
       <button
         type="button"
         className={`recent-item dash-entry-row${dashboardOpen ? ' is-active' : ''}`}
-        onClick={() => setExpanded(!expanded)}
+        onClick={handleDashboardClick}
         aria-expanded={expanded}
         data-testid="dashboard-toggle"
         title="Dashboard"
@@ -22,7 +29,14 @@ export default function DashboardRail(): React.JSX.Element {
         <span className="ws-copy">
           <span className="ws-title">Dashboard</span>
         </span>
-        <span className={`dash-entry-chevron${expanded ? ' open' : ''}`} aria-hidden>
+        <span
+          className={`dash-entry-chevron${expanded ? ' open' : ''}`}
+          aria-hidden
+          onClick={(e) => {
+            e.stopPropagation()
+            setExpanded(!expanded)
+          }}
+        >
           ▸
         </span>
       </button>
@@ -33,7 +47,7 @@ export default function DashboardRail(): React.JSX.Element {
             type="button"
             role="menuitem"
             className={`recent-item dash-entry-app${dashboardOpen ? ' is-active' : ''}`}
-            onClick={() => openDashboard('slack')}
+            onClick={handleDashboardClick}
             data-testid="dashboard-app-slack"
           >
             <span className="recent-app-chip dash-entry-glyph" aria-hidden>
