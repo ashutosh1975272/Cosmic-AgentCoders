@@ -228,8 +228,8 @@ export function generatePersonaReply(options: {
     }
   }
 
-  // Case 2: 10 points / anime / list requests ("10 anime name", "10 good points")
-  if (lower.includes('10 anime') || (lower.includes('10') && (lower.includes('point') || lower.includes('name')))) {
+  // Case 2: Explicit anime requests ("10 anime", "anime recommendation")
+  if (lower.includes('10 anime') || lower.includes('anime recommendation') || lower.includes('anime list')) {
     switch (pKey) {
       case 'friendly':
         return `Here are 10 amazing anime recommendations for you, ${recipient}! 🍿✨ 1. Attack on Titan, 2. Fullmetal Alchemist: Brotherhood, 3. Death Note, 4. Jujutsu Kaisen, 5. Demon Slayer, 6. Steins;Gate, 7. Hunter x Hunter, 8. My Hero Academia, 9. One Piece, 10. Spirited Away! Enjoy watching! 😊`

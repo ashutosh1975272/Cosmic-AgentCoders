@@ -375,7 +375,25 @@ export class ProjectChatService {
           chatService: this.chatService,
           syncEngine: this.syncEngine,
           scheduleStore: this.scheduleStore,
-          monitorStore: this.monitorStore
+          monitorStore: this.monitorStore,
+          llmGenerate: async (prompt: string, systemPrompt?: string): Promise<string> => {
+            const provider = this.providerFactory({
+              apiKey,
+              model: settings.chatModel
+            })
+            const messages = [
+              ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
+              { role: 'user' as const, content: prompt }
+            ]
+            let full = ''
+            for await (const chunk of provider.streamChat(messages, {
+              signal: controller.signal,
+              temperature: 0.3
+            })) {
+              full += chunk
+            }
+            return full.trim()
+          }
         })
         if (actionRes.handled) {
           sink.chunk({ projectId, runId, chunk: actionRes.replyMarkdown })

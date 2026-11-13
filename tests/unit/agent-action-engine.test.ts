@@ -140,6 +140,18 @@ describe('agent-action-engine', () => {
       })
     })
 
+    it('detects @WhatsAppWeb /ai-ans command and normalizes platform to whatsapp', () => {
+      const project = mockProject()
+      const prompt = '@WhatsAppWeb /ai-ans [professional] : send the 10 best scientest name with proper heading'
+      const action = detectAgentAction(prompt, project, 'wa_talent_killer')
+      expect(action).not.toBeNull()
+      expect(action?.type).toBe('generate_ai_reply')
+      expect(action?.platform).toBe('whatsapp')
+      expect(action?.channelNameOrId).toBe('wa_talent_killer')
+      expect(action?.persona).toBe('professional')
+      expect(action?.text).toBe('send the 10 best scientest name with proper heading')
+    })
+
     it('defaults to activeChannelId when sender is scoped to a specific channel', () => {
       const sendAction = detectAgentAction("send 'hello there'", project, 'C_WORK')
       expect(sendAction?.type).toBe('send_slack')
@@ -316,6 +328,48 @@ describe('agent-action-engine', () => {
       expect(res.cardType).toBe('schedule_set')
       expect(res.replyMarkdown).toContain('20 seconds')
       expect(monitorStore.upsertProject).toHaveBeenCalled()
+    })
+
+    it('executes generate_ai_reply using live llmGenerate context and dispatches reply', async () => {
+      const project = mockProject()
+      const chatService = {
+        loadMessages: vi.fn().mockResolvedValue({ messages: [] }),
+        sendMessage: vi.fn().mockResolvedValue({
+          ok: true,
+          message: { ts: '1234567.89' }
+        })
+      } as any
+      const mockLlm = vi.fn().mockResolvedValue('1. Albert Einstein\n2. Isaac Newton\n3. Marie Curie')
+
+      const res = await executeAgentAction(
+        {
+          type: 'generate_ai_reply',
+          platform: 'whatsapp',
+          channelNameOrId: 'newtestinggrup',
+          persona: 'professional',
+          text: 'send the 10 best scientest name with proper heading'
+        },
+        {
+          projectId: project.id,
+          project,
+          chatService,
+          llmGenerate: mockLlm
+        }
+      )
+
+      expect(res.handled).toBe(true)
+      expect(res.ok).toBe(true)
+      expect(mockLlm).toHaveBeenCalled()
+      expect(chatService.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: project.id,
+          channelId: 'C_GRP',
+          text: '1. Albert Einstein\n2. Isaac Newton\n3. Marie Curie',
+          isAgent: true
+        })
+      )
+      expect(res.replyMarkdown).toContain('Albert Einstein')
+      expect(res.replyMarkdown).not.toContain('Attack on Titan')
     })
 
     it('handles multi-recipient simultaneous dispatch with partial success summary', async () => {

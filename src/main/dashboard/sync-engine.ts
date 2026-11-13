@@ -1430,6 +1430,13 @@ export class DashboardSyncEngine {
                   gapSeconds > 0 ? ` History gap: ${gapSeconds}s.` : ''
                 }`
       })
+      if (newMessages > 0) {
+        void this.buildSnapshot(project.id).then((snaps) => {
+          if (snaps && snaps.length > 0) {
+            this.onSynced?.(snaps)
+          }
+        }).catch(() => undefined)
+      }
     }
 
     return {

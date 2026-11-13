@@ -112,7 +112,7 @@ export class WhatsAppPlatformSuite implements IPlatformBackendAdapter {
         })
 
         try {
-          await reader.selectChat(ch.id)
+          await reader.selectChat(ch.id, name)
           let messages = await reader.readMessages(ch.id)
           if (peopleFilter.size > 0) {
             messages = messages.filter((m) =>

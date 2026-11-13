@@ -1,3 +1,4 @@
+import type { WebContentsView } from 'electron'
 import type {
   DashboardChatMessage,
   DashboardChatPage,
@@ -8,7 +9,8 @@ import type {
   DashboardSendMessagePayload,
   DashboardSendMessageResult,
   DashboardSource,
-  ProjectDashboardRules
+  ProjectDashboardRules,
+  ProjectSource
 } from '../../shared/dashboard-contract'
 import type { AppSettings } from '../../shared/ipc-contract'
 import type { DashboardDeltaStore, DashboardStoredMessage } from './delta-store'
@@ -55,6 +57,8 @@ export interface ChatServiceDeps {
   getAppSettings?: () => Promise<AppSettings>
   log?: (msg: string) => void
   now?: () => number
+  getExistingBrowserView?: (profileId: string, appId: any) => WebContentsView | null
+  getExistingCardView?: (projectId: string, appId: any) => WebContentsView | null
 }
 
 /** One workspace the chat panel can read: the card's own, or ours. */
@@ -152,6 +156,8 @@ export class DashboardChatService {
   private readonly getAppSettings?: () => Promise<AppSettings>
   private readonly log: (msg: string) => void
   private readonly now: () => number
+  private readonly getExistingBrowserView?: (profileId: string, appId: any) => WebContentsView | null
+  private readonly getExistingCardView?: (projectId: string, appId: any) => WebContentsView | null
   private readonly contextCache = new Map<string, ChatWorkspaceContext>()
   private readonly activityCache = new Map<string, { at: number; value: DashboardProjectActivity }>()
 
@@ -165,6 +171,8 @@ export class DashboardChatService {
     this.getAppSettings = deps.getAppSettings
     this.log = deps.log ?? ((): void => undefined)
     this.now = deps.now ?? ((): number => Date.now())
+    this.getExistingBrowserView = deps.getExistingBrowserView
+    this.getExistingCardView = deps.getExistingCardView
   }
 
   private async projectFor(projectId: string): Promise<DashboardProject | null> {
@@ -389,12 +397,43 @@ export class DashboardChatService {
         })
       : workspace.monitors
 
-    if (targetQuery && monitors.length === 0) {
-      const directDelta = await this.deltaStore.load(
-        workspace.profileId,
-        workspace.teamId,
-        targetQuery
+    const findSourceForChannel = (chId: string, chName?: string): ProjectSource | undefined => {
+      const cIdLower = chId.toLowerCase()
+      const cNameLower = (chName || '').toLowerCase()
+      return (project.sources ?? []).find((s) =>
+        (s.channels ?? []).some((c) => {
+          const id = c.id.toLowerCase()
+          const name = c.name.toLowerCase()
+          return (
+            id === cIdLower ||
+            name === cIdLower ||
+            (cNameLower && (id === cNameLower || name === cNameLower))
+          )
+        })
       )
+    }
+
+    const loadDeltaForChannel = async (channelId: string, channelName?: string) => {
+      const src = findSourceForChannel(channelId, channelName)
+      const targetProfileId = src?.profileId || workspace.profileId
+      let targetTeamId = src?.workspaceId || workspace.teamId
+      if (!targetTeamId && src?.platform === 'whatsapp') targetTeamId = 'default'
+      if (!targetTeamId && src?.platform === 'teams') targetTeamId = 'teams-home'
+
+      let delta = await this.deltaStore.load(targetProfileId, targetTeamId, channelId)
+      if (!delta && src?.platform === 'whatsapp') {
+        const alt = targetTeamId === 'default' ? 'whatsapp-web' : 'default'
+        delta = await this.deltaStore.load(targetProfileId, alt, channelId)
+      }
+      if (!delta && src?.platform === 'teams') {
+        const alt = targetTeamId === 'teams-home' ? 'default' : 'teams-home'
+        delta = await this.deltaStore.load(targetProfileId, alt, channelId)
+      }
+      return delta
+    }
+
+    if (targetQuery && monitors.length === 0) {
+      const directDelta = await loadDeltaForChannel(targetQuery)
       if (directDelta) {
         monitors = [{ channelId: targetQuery, channelName: directDelta.channel.name || targetQuery }]
       } else {
@@ -410,11 +449,7 @@ export class DashboardChatService {
 
     const rows: ChatRow[] = []
     for (const monitor of monitors) {
-      const delta = await this.deltaStore.load(
-        workspace.profileId,
-        workspace.teamId,
-        monitor.channelId
-      )
+      const delta = await loadDeltaForChannel(monitor.channelId, monitor.channelName)
       for (const msg of delta?.messages ?? []) {
         if (!isDisplayable(msg)) continue
         rows.push({
@@ -615,6 +650,153 @@ export class DashboardChatService {
     if (!project) {
       return { ok: false, code: 'not_connected', error: 'This project no longer exists.' }
     }
+
+    // Check if target channel belongs to a multiplatform source (WhatsApp or Teams)
+    const allSources = project.sources ?? []
+    const targetSource = allSources.find((s) =>
+      (s.channels ?? []).some(
+        (c) =>
+          c.id === payload.channelId ||
+          c.name === payload.channelId ||
+          c.id.replace(/^[#@]+/, '').toLowerCase() === payload.channelId.replace(/^[#@]+/, '').toLowerCase() ||
+          c.name.replace(/^[#@]+/, '').toLowerCase() === payload.channelId.replace(/^[#@]+/, '').toLowerCase()
+      )
+    )
+    const targetChannel = targetSource?.channels?.find(
+      (c) =>
+        c.id === payload.channelId ||
+        c.name === payload.channelId ||
+        c.id.replace(/^[#@]+/, '').toLowerCase() === payload.channelId.replace(/^[#@]+/, '').toLowerCase() ||
+        c.name.replace(/^[#@]+/, '').toLowerCase() === payload.channelId.replace(/^[#@]+/, '').toLowerCase()
+    )
+
+    if (targetSource?.platform === 'whatsapp') {
+      const effectiveId = targetChannel?.id || payload.channelId
+      const effectiveName = targetChannel?.name || payload.channelId
+      if (payload.isAgent) {
+        if (targetChannel && !targetChannel.agentWrite && !targetChannel.autoReply) {
+          return {
+            ok: false,
+            code: 'permission_denied',
+            error: `Agent write permission is disabled for #${effectiveName}. Enable it in Workspace Control.`
+          }
+        }
+      }
+      try {
+        const profileId = targetSource.profileId || project.profileId
+        const existingView =
+          this.getExistingCardView?.(project.id, 'whatsapp') ??
+          this.getExistingBrowserView?.(profileId, 'whatsapp') ??
+          null
+
+        const { WhatsAppReaderView } = await import('../whatsapp-reader/whatsapp-reader-view')
+        const reader = new WhatsAppReaderView({
+          profileId,
+          existingView
+        })
+        if (!existingView) {
+          await reader.initialize()
+        }
+        await reader.selectChat(effectiveId, effectiveName)
+        const ok = await reader.postMessage(effectiveId, text)
+        if (!existingView) {
+          reader.dispose()
+        }
+        if (!ok) {
+          return { ok: false, code: 'browser_error', error: 'Failed to post message to WhatsApp Web.' }
+        }
+        const nowTs = `${(Date.now() / 1000).toFixed(6)}`
+        const teamId = targetSource.workspaceId || 'default'
+        await this.deltaStore.appendMessages({
+          profileId,
+          teamId,
+          channelId: effectiveId,
+          channelName: effectiveName,
+          source: targetSource.role ?? 'client',
+          messages: [{ ts: nowTs, user: 'You', text }]
+        })
+        return {
+          ok: true,
+          message: {
+            channelId: effectiveId,
+            channelName: effectiveName,
+            source: targetSource.role ?? 'client',
+            ts: nowTs,
+            userId: 'me',
+            userName: 'You',
+            text,
+            atIso: new Date().toISOString(),
+            isMine: true
+          }
+        }
+      } catch (err) {
+        return { ok: false, code: 'browser_error', error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+
+    if (targetSource?.platform === 'teams') {
+      const effectiveId = targetChannel?.id || payload.channelId
+      const effectiveName = targetChannel?.name || payload.channelId
+      if (payload.isAgent) {
+        if (targetChannel && !targetChannel.agentWrite && !targetChannel.autoReply) {
+          return {
+            ok: false,
+            code: 'permission_denied',
+            error: `Agent write permission is disabled for #${effectiveName}. Enable it in Workspace Control.`
+          }
+        }
+      }
+      try {
+        const profileId = targetSource.profileId || project.profileId
+        const existingView =
+          this.getExistingCardView?.(project.id, 'teams') ??
+          this.getExistingBrowserView?.(profileId, 'teams') ??
+          null
+
+        const { TeamsReaderView } = await import('../teams-reader/teams-reader-view')
+        const reader = new TeamsReaderView({
+          profileId,
+          existingView
+        })
+        if (!existingView) {
+          await reader.initialize()
+        }
+        const ok = await reader.postMessage(effectiveId, text)
+        if (!existingView) {
+          reader.dispose()
+        }
+        if (!ok) {
+          return { ok: false, code: 'browser_error', error: 'Failed to post message to Microsoft Teams.' }
+        }
+        const nowTs = `${(Date.now() / 1000).toFixed(6)}`
+        const teamId = targetSource.workspaceId || 'teams-home'
+        await this.deltaStore.appendMessages({
+          profileId,
+          teamId,
+          channelId: effectiveId,
+          channelName: effectiveName,
+          source: targetSource.role ?? 'client',
+          messages: [{ ts: nowTs, user: 'You', text }]
+        })
+        return {
+          ok: true,
+          message: {
+            channelId: effectiveId,
+            channelName: effectiveName,
+            source: targetSource.role ?? 'client',
+            ts: nowTs,
+            userId: 'me',
+            userName: 'You',
+            text,
+            atIso: new Date().toISOString(),
+            isMine: true
+          }
+        }
+      } catch (err) {
+        return { ok: false, code: 'browser_error', error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+
     const source = payload.source ?? 'client'
     const workspace = await this.workspaceFor(project, source)
     if (!workspace) {

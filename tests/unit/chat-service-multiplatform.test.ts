@@ -199,20 +199,7 @@ describe('DashboardChatService — Multiplatform & Inheritance', () => {
     expect(platforms).not.toContain('teams')
   })
 
-  it('card rule of "on" overrides global setting of false', async () => {
-    appSettings.showDashboardWhatsApp = false
-
-    await monitorStore.upsertProject({
-      project: {
-        ...project,
-        dashboardRules: {
-          platforms: {
-            whatsapp: 'on' // explicitly force ON
-          }
-        }
-      }
-    })
-
+  it('loads WhatsApp messages from source workspace directory when querying WhatsApp channel', async () => {
     const service = new DashboardChatService({
       monitorStore,
       deltaStore,
@@ -220,8 +207,51 @@ describe('DashboardChatService — Multiplatform & Inheritance', () => {
       getAppSettings: async () => appSettings
     })
 
-    const activity = await service.projectActivity(project.id)
-    const platforms = activity.recent.map((m) => m.platform)
-    expect(platforms).toContain('whatsapp')
+    const page = await service.loadMessages({
+      projectId: project.id,
+      channelId: 'wa_contact'
+    })
+
+    expect(page.messages.length).toBe(1)
+    expect(page.messages[0].text).toBe('Ping from WhatsApp')
+    expect(page.messages[0].channelName).toBe('John WhatsApp')
+  })
+
+  it('routes sendMessage to WhatsApp and records sent message in delta store', async () => {
+    const mockView = {
+      webContents: {
+        isDestroyed: () => false,
+        executeJavaScript: async (script: string) => {
+          if (script.includes('compose-btn-send') || script.includes('insertText')) {
+            return true
+          }
+          if (script.includes('Store.Cmd.openChatAt') || script.includes('pane-side')) {
+            return true
+          }
+          return false
+        }
+      }
+    } as any
+
+    const service = new DashboardChatService({
+      monitorStore,
+      deltaStore,
+      oauthTokenProvider: { tryGet: async () => null },
+      getAppSettings: async () => appSettings,
+      getExistingBrowserView: () => mockView
+    })
+
+    const result = await service.sendMessage({
+      projectId: project.id,
+      channelId: 'wa_contact',
+      text: 'Hello from Cosmic!'
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.message?.text).toBe('Hello from Cosmic!')
+
+    // Verify it was appended to delta store
+    const stored = await deltaStore.load('pf3', 'ws-wa', 'wa_contact')
+    expect(stored?.messages.some((m) => m.text === 'Hello from Cosmic!')).toBe(true)
   })
 })

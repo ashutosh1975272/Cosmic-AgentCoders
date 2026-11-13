@@ -10,6 +10,8 @@ import type { DashboardSyncEngine } from './sync-engine'
 import type { DashboardScheduleStore } from './schedule-store'
 import type { MonitorStore } from './monitor-store'
 import {
+  AI_PERSONAS,
+  type AIPersonaKey,
   detectMessageIsTaskRelated,
   detectMessageNeedsReply,
   generatePersonaReply
@@ -57,6 +59,16 @@ export interface AgentActionContext {
   syncEngine?: DashboardSyncEngine
   scheduleStore?: DashboardScheduleStore
   monitorStore?: Pick<MonitorStore, 'listProjects'> & Partial<Pick<MonitorStore, 'upsertProject'>>
+  llmGenerate?: (prompt: string, systemPrompt?: string) => Promise<string>
+}
+
+export function normalizePlatformName(name?: string): string | undefined {
+  if (!name) return undefined
+  const l = name.toLowerCase().trim()
+  if (l === 'slack') return 'slack'
+  if (l === 'teams' || l === 'msteams' || l === 'microsoftteams') return 'teams'
+  if (l === 'whatsapp' || l === 'whatsappweb' || l === 'wa') return 'whatsapp'
+  return undefined
 }
 
 /**
@@ -339,7 +351,7 @@ export function detectAgentAction(
       // If no hashMatch, check if target was specified with "to/in <target>" in header
       if (!rawTarget) {
         const targetInHeader = header.match(/(?:to|in|for|into)\s+(?:the\s+)?(?:#|@)?([a-zA-Z0-9_-]+)/i)
-        if (targetInHeader && !['slack', 'teams', 'whatsapp'].includes(targetInHeader[1].toLowerCase())) {
+        if (targetInHeader && !normalizePlatformName(targetInHeader[1])) {
           rawTarget = targetInHeader[1].trim()
         }
       }
@@ -347,8 +359,9 @@ export function detectAgentAction(
       // If atMatch is present but no hashMatch, check if atMatch was a target channel/person instead of platform
       if (!rawTarget && atMatch) {
         const candidate = atMatch[1].trim()
-        if (candidate.toLowerCase() === 'slack' || candidate.toLowerCase() === 'teams') {
-          rawPlatform = candidate.toLowerCase()
+        const detectedPlat = normalizePlatformName(candidate)
+        if (detectedPlat) {
+          rawPlatform = detectedPlat
         } else {
           let isChannel = false
           if (project?.sources) {
@@ -366,8 +379,9 @@ export function detectAgentAction(
         }
       }
 
-      if (rawTarget?.toLowerCase() === 'slack' || rawTarget?.toLowerCase() === 'teams') {
-        rawPlatform = rawTarget.toLowerCase()
+      const detectedFromTarget = normalizePlatformName(rawTarget)
+      if (detectedFromTarget) {
+        rawPlatform = detectedFromTarget
         rawTarget = undefined
       }
 
@@ -405,7 +419,7 @@ export function detectAgentAction(
     /^(?:\/ai-ans|\/ai-answer|ai-ans)\s*(?:@([a-zA-Z0-9_-]+)\s+)?(?:#([a-zA-Z0-9_-]+)\s*)?(?:\[([a-zA-Z0-9_-]+)\]\s*)?(?::\s*|\s+)?([\s\S]+)$/i
   )
   if (aiAnsMatch) {
-    const rawPlatform = aiAnsMatch[1]?.trim()
+    const rawPlatform = normalizePlatformName(aiAnsMatch[1]?.trim()) || aiAnsMatch[1]?.trim()
     const rawTarget = aiAnsMatch[2]?.trim() || activeChannelId
     const persona = aiAnsMatch[3]?.toLowerCase().trim() || 'professional'
     const instruction = aiAnsMatch[4]?.trim() || 'Please answer the last message professionally.'
@@ -1052,12 +1066,39 @@ export async function executeAgentAction(
       const persona = action.persona || channel.autoReplyPersona || 'professional'
       const promptInstruction = action.text || 'Please provide an appropriate response to the latest conversation.'
 
-      const synthesizedText = generatePersonaReply({
-        personaKey: persona,
-        channelName: channel.name,
-        instruction: promptInstruction,
-        history: historyRows
-      })
+      let synthesizedText: string
+      if (ctx.llmGenerate) {
+        try {
+          const personaDef = persona in AI_PERSONAS ? AI_PERSONAS[persona as AIPersonaKey] : AI_PERSONAS.professional
+          const groundedSystem = [
+            `[ROLE & TONE: ${personaDef.label.toUpperCase()}]`,
+            personaDef.instruction,
+            `Channel or Contact: #${channel.name}`,
+            historyRows.length > 0
+              ? `Recent Messages:\n${historyRows.slice(-10).map((m) => `${m.userName || m.userId}: ${m.text}`).join('\n')}`
+              : ''
+          ].filter(Boolean).join('\n\n')
+
+          synthesizedText = await ctx.llmGenerate(promptInstruction, groundedSystem)
+          if (!synthesizedText || !synthesizedText.trim()) {
+            throw new Error('Empty LLM response')
+          }
+        } catch {
+          synthesizedText = generatePersonaReply({
+            personaKey: persona,
+            channelName: channel.name,
+            instruction: promptInstruction,
+            history: historyRows
+          })
+        }
+      } else {
+        synthesizedText = generatePersonaReply({
+          personaKey: persona,
+          channelName: channel.name,
+          instruction: promptInstruction,
+          history: historyRows
+        })
+      }
 
       if (!chatService) {
         return wrapCardReply({
@@ -1075,23 +1116,37 @@ export async function executeAgentAction(
         isAgent: true
       })
 
+      const targetPlatform = resolved.source?.platform || normalizePlatformName(action.platform) || 'slack'
       const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
+      if (!res.ok) {
+        return wrapCardReply({
+          handled: true,
+          action,
+          ok: false,
+          cardType: 'permission_denied',
+          cardData: { channelId: channel.id, channelName: channel.name, error: res.error },
+          replyMarkdown: `❌ **Failed to Dispatch AI Response to #${channel.name}**: ${res.error || 'Unknown error'}`
+        })
+      }
+
       return wrapCardReply({
         handled: true,
         action,
-        ok: Boolean(res.ok),
+        ok: true,
         cardType: 'slack_dispatch',
         cardData: {
           channelId: channel.id,
           channelName: channel.name,
           persona,
+          platform: targetPlatform,
           ts: res.message?.ts
         },
         replyMarkdown: [
-          `⚡ **AI Response Dispatched with [${persona.toUpperCase()}] Persona**`,
+          `⚡ **AI Response Dispatched with [${persona.toUpperCase()}] Persona to ${targetPlatform.toUpperCase()}**`,
           `> Destination: **#${channel.name}**`,
           `> Grounded Context: Injected ${historyRows.length} recent messages (RAG)`,
-          `Delivered via Direct API in ~150ms at ${now}.`
+          `Delivered via ${targetPlatform === 'slack' ? 'Direct API' : 'Direct Web Session'} at ${now}.\n\n*Response Dispatched:*\n${synthesizedText}`
         ].join('\n')
       })
     }

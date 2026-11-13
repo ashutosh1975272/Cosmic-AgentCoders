@@ -259,6 +259,11 @@ export class WhatsAppReaderView {
       }
     })
     this.ownsView = true
+    try {
+      await this.view.webContents.loadURL('https://web.whatsapp.com')
+    } catch {
+      // Ignore initial load interruption if already navigated
+    }
   }
 
   getView(): WebContentsView | null {
@@ -317,21 +322,42 @@ export class WhatsAppReaderView {
     }
   }
 
-  async selectChat(chatId: string): Promise<boolean> {
+  async selectChat(chatId: string, chatName?: string): Promise<boolean> {
     if (!this.view || this.view.webContents.isDestroyed()) {
       return false
     }
     try {
+      const cleanSlug = chatId.replace(/^wa_/, '').replace(/_+/g, ' ').toLowerCase().trim()
+      const cleanName = (chatName || '').replace(/^[#@]+/, '').toLowerCase().trim()
       const script = `
         (() => {
           try {
-            const target = ${JSON.stringify(chatId)}.toLowerCase().trim();
+            const targetId = ${JSON.stringify(chatId)}.toLowerCase().trim();
+            const cleanSlug = ${JSON.stringify(cleanSlug)};
+            const targetName = ${JSON.stringify(cleanName)};
+
+            const matches = (candidate) => {
+              if (!candidate) return false;
+              const cand = candidate.toLowerCase().trim();
+              const candAlpha = cand.replace(/[^\\p{L}\\p{N}]/gu, '');
+              const slugAlpha = cleanSlug.replace(/[^\\p{L}\\p{N}]/gu, '');
+              const nameAlpha = targetName.replace(/[^\\p{L}\\p{N}]/gu, '');
+              const idAlpha = targetId.replace(/[^\\p{L}\\p{N}]/gu, '');
+
+              if (cand === targetId || cand === cleanSlug || (targetName && cand === targetName)) return true;
+              if (slugAlpha && candAlpha.includes(slugAlpha)) return true;
+              if (nameAlpha && candAlpha.includes(nameAlpha)) return true;
+              if (slugAlpha && slugAlpha.includes(candAlpha)) return true;
+              if (idAlpha && candAlpha.includes(idAlpha)) return true;
+              return false;
+            };
+
             // 1. Try Store.Cmd.openChatAt
             if (window.Store && window.Store.Cmd && window.Store.Chat && typeof window.Store.Chat.models === 'object') {
               for (const c of window.Store.Chat.models) {
                 const sId = (c.id?._serialized || '').toLowerCase();
-                const name = (c.formattedTitle || c.name || '').toLowerCase();
-                if (sId === target || name === target || target.includes(name) || name.includes(target)) {
+                const title = (c.formattedTitle || c.name || '').toLowerCase();
+                if (sId === targetId || matches(sId) || matches(title)) {
                   window.Store.Cmd.openChatAt(c);
                   return true;
                 }
@@ -345,7 +371,7 @@ export class WhatsAppReaderView {
             for (const node of chatItems) {
               const titleSpan = node.querySelector('span[title], div[title], [data-testid="cell-frame-title"] span');
               const name = (titleSpan ? (titleSpan.getAttribute('title') || titleSpan.textContent || '') : '').toLowerCase().trim();
-              if (name && (name === target || target.includes(name) || name.includes(target))) {
+              if (name && (name === targetId || matches(name))) {
                 node.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
                 node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
                 node.click();

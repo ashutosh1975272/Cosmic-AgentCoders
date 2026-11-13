@@ -444,7 +444,11 @@ if (!gotSingleInstanceLock) {
         return links.find((link) => link.teamId === teamId)?.scopes ?? null
       },
       getAppSettings: () => settingsStore.get(),
-      log: (msg) => log.info(msg)
+      log: (msg) => log.info(msg),
+      getExistingBrowserView: (profileId, appId) =>
+        browserViewManager.getExistingView(profileId, appId),
+      getExistingCardView: (projectId, appId) =>
+        browserViewManager.getExistingCardView(projectId, appId)
     })
 
     const dashboardEngine = new DashboardInsightSyncEngine({
