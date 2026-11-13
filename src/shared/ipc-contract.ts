@@ -404,7 +404,7 @@ export interface IpcApi {
     syncCardGoogleSessions: (payload: { profileId: string; projectId: string }) => Promise<{ slack: number; agentwork: number }>
     startCardAppLogin: (payload: { projectId: string; profileId: string; appId: AppId | 'agentwork'; bounds?: ViewportBounds }) => Promise<Profile>
     updateCardSlackEmbedBounds: (bounds: ViewportBounds) => Promise<void>
-    clearCardSlackEmbed: () => Promise<void>
+    clearCardSlackEmbed: (targetKey?: string) => Promise<void>
     startGoogleAuth: (profileId: string, bounds?: ViewportBounds) => Promise<Profile>
     startAppLogin: (profileId: string, appId: AppId, bounds?: ViewportBounds) => Promise<Profile>
     startFirstLogin: (profileId: string, bounds?: ViewportBounds) => Promise<Profile>

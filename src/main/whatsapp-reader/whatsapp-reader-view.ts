@@ -11,6 +11,8 @@ export interface WhatsAppDiscoveredChat {
   kind: 'dm' | 'group-dm'
   unreadCount?: number
   lastActivity?: string
+  messageCount?: number
+  hasMessages?: boolean
 }
 
 export interface WhatsAppReaderOptions {
@@ -32,6 +34,16 @@ const WHATSAPP_DISCOVER_CHATS_SCRIPT = `
           const name = c.formattedTitle || c.name || c.__x_formattedTitle || '';
           const id = c.id?._serialized || c.id || name;
           const isGroup = Boolean(c.isGroup || c.__x_isGroup);
+          const unreadCount = Number(c.unreadCount || 0);
+          const msgCount = Number(
+            c.msgs?.length ||
+              (c.lastReceivedKey ? 1 : 0) ||
+              (c.lastMessage ? 1 : 0) ||
+              (c.t ? 1 : 0) ||
+              (unreadCount > 0 ? unreadCount : 0)
+          );
+          // Strictly suppress chats with 0 messages
+          if (msgCount === 0) continue;
           if (name && !seen.has(name)) {
             seen.add(name);
             results.push({
@@ -40,7 +52,9 @@ const WHATSAPP_DISCOVER_CHATS_SCRIPT = `
               isPrivate: true,
               isDm: !isGroup,
               kind: isGroup ? 'group-dm' : 'dm',
-              unreadCount: Number(c.unreadCount || 0)
+              unreadCount,
+              messageCount: msgCount,
+              hasMessages: true
             });
           }
         }
@@ -58,22 +72,38 @@ const WHATSAPP_DISCOVER_CHATS_SCRIPT = `
     chatItems.forEach((node) => {
       const titleSpan = node.querySelector('span[title], div[title], [data-testid="cell-frame-title"] span');
       const name = titleSpan ? (titleSpan.getAttribute('title') || titleSpan.textContent || '').trim() : '';
-      if (name && !seen.has(name)) {
-        seen.add(name);
-        const unreadBadge = node.querySelector('[data-testid="unread-count"], [aria-label*="unread"]');
-        const unreadCount = unreadBadge ? parseInt(unreadBadge.textContent || '0', 10) || 0 : 0;
-        const id = 'wa_' + name.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-        // If name has words like Group, Team, or has comma, flag as group
-        const isGroup = name.toLowerCase().includes('group') || name.includes(',');
-        results.push({
-          id,
-          name,
-          isPrivate: true,
-          isDm: !isGroup,
-          kind: isGroup ? 'group-dm' : 'dm',
-          unreadCount
-        });
+      if (!name || seen.has(name)) return;
+
+      const unreadBadge = node.querySelector('[data-testid="unread-count"], [aria-label*="unread"]');
+      const unreadCount = unreadBadge ? parseInt(unreadBadge.textContent || '0', 10) || 0 : 0;
+
+      const snippetEl = node.querySelector(
+        '[data-testid="last-msg-status"], [data-testid="cell-frame-secondary"], span._ao3e, span[dir="ltr"]'
+      );
+      const timeEl = node.querySelector(
+        'div[data-testid="cell-frame-title"] + div, span[data-testid="cell-frame-meta"], span._ao3e'
+      );
+      const snippetText = (snippetEl?.textContent || '').trim();
+      const hasSnippetOrTime = Boolean(snippetText || timeEl);
+
+      // Skip empty contacts/drafts with 0 messages and no activity
+      if (!hasSnippetOrTime && unreadCount === 0) {
+        return;
       }
+
+      seen.add(name);
+      const id = 'wa_' + name.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+      const isGroup = name.toLowerCase().includes('group') || name.includes(',');
+      results.push({
+        id,
+        name,
+        isPrivate: true,
+        isDm: !isGroup,
+        kind: isGroup ? 'group-dm' : 'dm',
+        unreadCount,
+        messageCount: unreadCount > 0 ? unreadCount : 1,
+        hasMessages: true
+      });
     });
 
     // 3. Also query currently active chat header if present
@@ -83,16 +113,24 @@ const WHATSAPP_DISCOVER_CHATS_SCRIPT = `
     if (headerTitleEl) {
       const name = (headerTitleEl.getAttribute('title') || headerTitleEl.textContent || '').trim();
       if (name && !seen.has(name)) {
-        seen.add(name);
-        const isGroup = name.toLowerCase().includes('group') || name.includes(',');
-        results.push({
-          id: 'wa_' + name.toLowerCase().replace(/[^a-z0-9_-]/g, '_'),
-          name,
-          isPrivate: true,
-          isDm: !isGroup,
-          kind: isGroup ? 'group-dm' : 'dm',
-          unreadCount: 0
-        });
+        // Verify chat container has actual messages
+        const msgNodes = document.querySelectorAll(
+          '#main [data-testid="msg-container"], #main div.message-in, #main div.message-out'
+        );
+        if (msgNodes.length > 0) {
+          seen.add(name);
+          const isGroup = name.toLowerCase().includes('group') || name.includes(',');
+          results.push({
+            id: 'wa_' + name.toLowerCase().replace(/[^a-z0-9_-]/g, '_'),
+            name,
+            isPrivate: true,
+            isDm: !isGroup,
+            kind: isGroup ? 'group-dm' : 'dm',
+            unreadCount: 0,
+            messageCount: msgNodes.length,
+            hasMessages: true
+          });
+        }
       }
     }
 
@@ -237,14 +275,23 @@ export class WhatsAppReaderView {
         true
       )
       if (Array.isArray(raw)) {
-        return raw.map((item) => ({
-          id: String(item.id || item.name),
-          name: String(item.name),
-          isPrivate: true,
-          isDm: item.kind === 'dm',
-          kind: item.kind === 'group-dm' || item.kind === 'group' ? 'group-dm' : 'dm',
-          unreadCount: item.unreadCount || 0
-        }))
+        return raw
+          .filter(
+            (item) =>
+              item &&
+              item.hasMessages !== false &&
+              (item.messageCount === undefined || item.messageCount >= 1)
+          )
+          .map((item) => ({
+            id: String(item.id || item.name),
+            name: String(item.name),
+            isPrivate: true,
+            isDm: item.kind === 'dm',
+            kind: item.kind === 'group-dm' || item.kind === 'group' ? 'group-dm' : 'dm',
+            unreadCount: item.unreadCount || 0,
+            messageCount: item.messageCount ?? (item.hasMessages ? 1 : undefined),
+            hasMessages: item.hasMessages ?? true
+          }))
       }
       return []
     } catch {

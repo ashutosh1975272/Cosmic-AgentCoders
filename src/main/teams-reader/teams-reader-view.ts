@@ -11,6 +11,8 @@ export interface TeamsDiscoveredChannel {
   kind: 'public' | 'private' | 'dm'
   memberCount?: number
   lastActivity?: string
+  messageCount?: number
+  hasMessages?: boolean
 }
 
 export interface TeamsReaderOptions {
@@ -54,21 +56,47 @@ const TEAMS_DISCOVER_CHANNELS_SCRIPT = `
       '[data-tid="chat-list-item"], [data-tid="chat-item"], [data-tid="contact-list-item"], [role="listitem"]'
     );
     chatNodes.forEach((node) => {
-      const titleEl = node.querySelector('[data-tid="chat-list-item-title"], [data-tid="chat-title"], h2, h3, span[title], span[dir="auto"], p');
-      const rawName = titleEl ? (titleEl.getAttribute('title') || titleEl.textContent || '').trim() : (node.textContent || '').trim().split('\\n')[0].trim();
+      const titleEl = node.querySelector(
+        '[data-tid="chat-list-item-title"], [data-tid="chat-title"], h2, h3, span[title], span[dir="auto"], p'
+      );
+      const rawName = titleEl
+        ? (titleEl.getAttribute('title') || titleEl.textContent || '').trim()
+        : (node.textContent || '').trim().split('\\n')[0].trim();
       const name = rawName.replace(/\\s*\\(You\\)$/i, '').trim();
       const lower = name.toLowerCase();
-      if (name && !seen.has(lower) && !systemWords.has(lower)) {
-        seen.add(lower);
-        const id = 'teams_chat_' + name.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-        results.push({
-          id,
-          name: rawName,
-          isPrivate: true,
-          isDm: true,
-          kind: 'dm'
-        });
+      if (!name || seen.has(lower) || systemWords.has(lower)) return;
+
+      const previewEl = node.querySelector(
+        '[data-tid="chat-list-item-preview"], [data-tid="chat-preview"], [data-tid="last-message"], [data-tid="chat-list-item-body"], .ui-chat__message__body'
+      );
+      const timeEl = node.querySelector(
+        '[data-tid="chat-list-item-timestamp"], [data-tid="timestamp"], time, [data-tid="chat-list-item-time"]'
+      );
+      const previewText = (previewEl?.textContent || '').trim().toLowerCase();
+      const isDraftOrEmpty =
+        previewText.includes('this is your space') ||
+        previewText.includes('draft messages, list your to-dos') ||
+        previewText.includes('draft:');
+
+      const unreadBadge = node.querySelector('[data-tid="chat-list-item-unread"], [aria-label*="unread"]');
+      const unreadCount = unreadBadge ? parseInt(unreadBadge.textContent || '0', 10) || 0 : 0;
+
+      // Exclude empty personal spaces and chats with 0 messages
+      if ((!previewEl && !timeEl && unreadCount === 0) || (isDraftOrEmpty && unreadCount === 0)) {
+        return;
       }
+
+      seen.add(lower);
+      const id = 'teams_chat_' + name.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+      results.push({
+        id,
+        name: rawName,
+        isPrivate: true,
+        isDm: true,
+        kind: 'dm',
+        messageCount: unreadCount > 0 ? unreadCount : 1,
+        hasMessages: true
+      });
     });
 
     // 3. If list virtualized or empty, check active conversation header
@@ -79,14 +107,21 @@ const TEAMS_DISCOVER_CHANNELS_SCRIPT = `
       const activeName = (headerTitleEl.textContent || '').trim().replace(/\\s*\\(You\\)$/i, '').trim();
       const lower = activeName.toLowerCase();
       if (activeName && !seen.has(lower) && !systemWords.has(lower)) {
-        seen.add(lower);
-        results.push({
-          id: 'teams_chat_' + activeName.toLowerCase().replace(/[^a-z0-9_-]/g, '_'),
-          name: (headerTitleEl.textContent || '').trim(),
-          isPrivate: true,
-          isDm: true,
-          kind: 'dm'
-        });
+        const msgNodes = document.querySelectorAll(
+          '[data-tid="message-pane-list-viewport"] [role="listitem"], [data-tid="chat-pane-item"], div[data-tid*="chat-message"], .ui-chat__message'
+        );
+        if (msgNodes.length > 0) {
+          seen.add(lower);
+          results.push({
+            id: 'teams_chat_' + activeName.toLowerCase().replace(/[^a-z0-9_-]/g, '_'),
+            name: (headerTitleEl.textContent || '').trim(),
+            isPrivate: true,
+            isDm: true,
+            kind: 'dm',
+            messageCount: msgNodes.length,
+            hasMessages: true
+          });
+        }
       }
     }
 
@@ -183,13 +218,23 @@ export class TeamsReaderView {
         true
       )
       if (Array.isArray(raw)) {
-        return raw.map((item) => ({
-          id: String(item.id || item.name),
-          name: String(item.name),
-          isPrivate: Boolean(item.isPrivate),
-          isDm: Boolean(item.isDm),
-          kind: item.isDm ? 'dm' : item.isPrivate ? 'private' : 'public'
-        }))
+        return raw
+          .filter(
+            (item) =>
+              item &&
+              item.hasMessages !== false &&
+              (item.messageCount === undefined || item.messageCount >= 1)
+          )
+          .map((item) => ({
+            id: String(item.id || item.name),
+            name: String(item.name),
+            isPrivate: Boolean(item.isPrivate),
+            isDm: Boolean(item.isDm),
+            kind: item.isDm ? 'dm' : item.isPrivate ? 'private' : 'public',
+            memberCount: item.memberCount,
+            messageCount: item.messageCount ?? (item.hasMessages ? 1 : undefined),
+            hasMessages: item.hasMessages ?? true
+          }))
       }
       return []
     } catch {

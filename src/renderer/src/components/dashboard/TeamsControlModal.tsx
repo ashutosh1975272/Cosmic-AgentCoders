@@ -67,12 +67,20 @@ export function TeamsControlModal({
     setIntervalMinutes(source.scheduleIntervalMinutes ?? 0.333)
     setEngineMode(source.engineMode ?? 'direct_api')
 
-    const existing = new Map((source.channels ?? []).map((c) => [c.id, c]))
+    const isTeams = (c: any) =>
+      !String(c.id || '').startsWith('C') &&
+      !String(c.id || '').startsWith('U') &&
+      !String(c.name || '').startsWith('#') &&
+      c.messageCount !== 0 &&
+      c.hasMessages !== false
+
+    const initialSourceChannels = (source.channels ?? []).filter(isTeams)
+    const existing = new Map(initialSourceChannels.map((c) => [c.id, c]))
     const dashSet = new Set<string>()
     const agentReadSet = new Set<string>()
     const agentWriteSet = new Set<string>()
     const autoReplySet = new Set<string>()
-    for (const c of source.channels ?? []) {
+    for (const c of initialSourceChannels) {
       if (c.enabled === true) dashSet.add(c.id)
       if (c.agentRead === true) agentReadSet.add(c.id)
       if (c.agentWrite === true) agentWriteSet.add(c.id)
@@ -94,12 +102,13 @@ export function TeamsControlModal({
       .then((result) => {
         if (!alive) return
         if (result.error) setChannelsError(result.error)
-        if (result.channels.length === 0) {
-          setChannels(source.channels ?? [])
+        const validDiscovered = (result.channels || []).filter(isTeams)
+        if (validDiscovered.length === 0) {
+          setChannels(initialSourceChannels)
           return
         }
         setChannels(
-          result.channels.map((channel) => {
+          validDiscovered.map((channel) => {
             const previous = existing.get(channel.id)
             return {
               ...channel,
@@ -114,7 +123,7 @@ export function TeamsControlModal({
       .catch((err) => {
         if (!alive) return
         setChannelsError(err instanceof Error ? err.message : 'Teams discovery failed')
-        setChannels(source.channels ?? [])
+        setChannels(initialSourceChannels)
       })
       .finally(() => {
         if (alive) setChannelsLoading(false)
@@ -733,6 +742,15 @@ export function TeamsControlModal({
                 {channelsLoading ? (
                   <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>
                     Discovering Teams channels &amp; chats…
+                  </div>
+                ) : filteredChannels.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '48px 16px', color: '#94a3b8' }}>
+                    <p style={{ fontWeight: 600, fontSize: 14, color: '#e2e8f0', marginBottom: 6 }}>
+                      No active conversations found
+                    </p>
+                    <p style={{ fontSize: 12 }}>
+                      Only conversations with a minimum of 1 message are displayed. New conversations will appear automatically as soon as messages are received or sent.
+                    </p>
                   </div>
                 ) : (
                   <>

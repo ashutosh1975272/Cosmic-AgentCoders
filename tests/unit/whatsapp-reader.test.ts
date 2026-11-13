@@ -62,6 +62,27 @@ describe('WhatsAppReaderView', () => {
     expect(chats[1].unreadCount).toBe(3)
   })
 
+  it('filters out 0-message chats and empty contacts', async () => {
+    const mockWebContents = {
+      isDestroyed: vi.fn().mockReturnValue(false),
+      executeJavaScript: vi.fn().mockResolvedValue([
+        { id: 'chat-active', name: 'Active Client', isPrivate: true, kind: 'dm', messageCount: 5, hasMessages: true },
+        { id: 'chat-empty', name: 'Empty Contact', isPrivate: true, kind: 'dm', messageCount: 0, hasMessages: false }
+      ])
+    }
+    const mockView = { webContents: mockWebContents } as any
+
+    const reader = new WhatsAppReaderView({
+      profileId: 'prof-1',
+      existingView: mockView
+    })
+
+    const chats = await reader.listChats()
+    expect(chats.length).toBe(1)
+    expect(chats[0].name).toBe('Active Client')
+    expect(chats[0].messageCount).toBe(5)
+  })
+
   it('reads messages using evaluated script in WebContentsView', async () => {
     const mockWebContents = {
       isDestroyed: vi.fn().mockReturnValue(false),

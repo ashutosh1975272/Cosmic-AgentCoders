@@ -74,11 +74,14 @@ export default function CardLiveSlackEmbed({
   }, [])
 
   useEffect(() => {
+    const currentKey = projectId ? `card:${projectId}:${appId}` : `${profileId}:${appId}`
     if (hidden) {
-      void window.api.profiles.clearCardSlackEmbed()
+      void window.api.profiles.clearCardSlackEmbed(currentKey)
       void window.api.profiles.setEmbedVisible(false)
       return undefined
     }
+
+    void window.api.profiles.setEmbedVisible(true)
 
     const el = embedRef.current ?? containerRef.current
     if (!el) return
@@ -197,7 +200,7 @@ export default function CardLiveSlackEmbed({
       document.removeEventListener('transitionend', onTransitionEnd)
       document.removeEventListener('animationstart', onResizeOrLayout)
       document.removeEventListener('animationend', onTransitionEnd)
-      void window.api.profiles.clearCardSlackEmbed()
+      void window.api.profiles.clearCardSlackEmbed(currentKey)
     }
   }, [projectId, profileId, teamId, appId, hidden])
 

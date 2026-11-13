@@ -182,7 +182,14 @@ export default function WorkspaceContent({
   )
 
   const effectiveTeamsSource: ProjectSource = useMemo(() => {
-    if (teamsSource) return teamsSource
+    if (teamsSource) {
+      return {
+        ...teamsSource,
+        channels: (teamsSource.channels ?? []).filter(
+          (c) => !c.id.startsWith('C') && !c.id.startsWith('U') && !c.name.startsWith('#')
+        )
+      }
+    }
     const prof = targetProfile ?? profiles.find((p) => p.id === project.profileId)
     const nowIso = new Date().toISOString()
     return {
@@ -210,7 +217,14 @@ export default function WorkspaceContent({
   )
 
   const effectiveWhatsAppSource: ProjectSource = useMemo(() => {
-    if (whatsappSource) return whatsappSource
+    if (whatsappSource) {
+      return {
+        ...whatsappSource,
+        channels: (whatsappSource.channels ?? []).filter(
+          (c) => !c.id.startsWith('C') && !c.id.startsWith('U') && !c.name.startsWith('#')
+        )
+      }
+    }
     const prof = targetProfile ?? profiles.find((p) => p.id === project.profileId)
     const nowIso = new Date().toISOString()
     return {
@@ -635,7 +649,13 @@ export default function WorkspaceContent({
               onReauthenticate={() => void handleStartAppLogin(targetProfile?.id, 'teams')}
             />
             <div style={{ flex: '1 1 0%', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
-              <CardLiveSlackEmbed appId="teams" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)} />
+              <CardLiveSlackEmbed
+                key={`live-embed-teams-${project.id}`}
+                appId="teams"
+                projectId={project.id}
+                profileId={targetProfile?.id}
+                hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)}
+              />
             </div>
           </div>
         )
@@ -674,7 +694,13 @@ export default function WorkspaceContent({
               </button>
             </div>
             <div style={{ flex: '1 1 0%', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
-              <CardLiveSlackEmbed appId="teams" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)} />
+              <CardLiveSlackEmbed
+                key={`live-embed-teams-${project.id}`}
+                appId="teams"
+                projectId={project.id}
+                profileId={targetProfile?.id}
+                hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)}
+              />
             </div>
           </div>
         )
@@ -742,7 +768,13 @@ export default function WorkspaceContent({
               onReauthenticate={() => void handleStartAppLogin(targetProfile?.id, 'whatsapp')}
             />
             <div style={{ flex: '1 1 0%', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
-              <CardLiveSlackEmbed appId="whatsapp" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)} />
+              <CardLiveSlackEmbed
+                key={`live-embed-whatsapp-${project.id}`}
+                appId="whatsapp"
+                projectId={project.id}
+                profileId={targetProfile?.id}
+                hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)}
+              />
             </div>
           </div>
         )
@@ -784,7 +816,13 @@ export default function WorkspaceContent({
               </button>
             </div>
             <div style={{ flex: '1 1 0%', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
-              <CardLiveSlackEmbed appId="whatsapp" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)} />
+              <CardLiveSlackEmbed
+                key={`live-embed-whatsapp-${project.id}`}
+                appId="whatsapp"
+                projectId={project.id}
+                profileId={targetProfile?.id}
+                hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)}
+              />
             </div>
           </div>
         )

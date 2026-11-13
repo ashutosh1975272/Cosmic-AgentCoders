@@ -194,4 +194,51 @@ describe('TeamsControlModal UI & Permissions Matrix', () => {
       expect(window.api.dashboard.getScrapeRuns).toHaveBeenCalled()
     })
   })
+
+  it('suppresses 0-message channels/drafts and strips leaked Slack channels', async () => {
+    window.api.dashboard.discoverSourceChannels = vi.fn().mockResolvedValue({
+      channels: [
+        { id: 'ch-general', name: 'General', isPrivate: false, isDm: false, messageCount: 15 },
+        { id: 'C_LEAKED_SLACK', name: '#agentworkprojecttesting', isPrivate: false, isDm: false, messageCount: 10 },
+        { id: 'teams-empty-space', name: 'unknown knp (You)', isPrivate: true, isDm: true, messageCount: 0 }
+      ]
+    })
+
+    render(
+      <TeamsControlModal
+        open={true}
+        onClose={vi.fn()}
+        project={mockProject}
+        source={mockSource}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('General')).toBeDefined()
+    })
+
+    expect(screen.queryByText('#agentworkprojecttesting')).toBeNull()
+    expect(screen.queryByText('unknown knp (You)')).toBeNull()
+  })
+
+  it('renders clean empty state when no channels have >= 1 message', async () => {
+    window.api.dashboard.discoverSourceChannels = vi.fn().mockResolvedValue({
+      channels: []
+    })
+
+    const emptySource = { ...mockSource, channels: [] }
+    render(
+      <TeamsControlModal
+        open={true}
+        onClose={vi.fn()}
+        project={mockProject}
+        source={emptySource}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('No active conversations found')).toBeDefined()
+    })
+    expect(screen.getByText(/Only conversations with a minimum of 1 message are displayed/)).toBeDefined()
+  })
 })

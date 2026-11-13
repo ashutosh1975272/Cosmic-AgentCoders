@@ -822,12 +822,12 @@ export function registerProfileIpc(deps: ProfileIpcDeps): void {
     }
   )
 
-  handleInvoke(IpcChannels.ProfileClearCardSlackEmbed, async () => {
+  handleInvoke(IpcChannels.ProfileClearCardSlackEmbed, async (payload?: { targetKey?: string }) => {
     const mainWindow = deps.getMainWindow()
     if (!mainWindow) {
       return
     }
-    deps.browserViewManager.clearCardSlackEmbed(mainWindow)
+    deps.browserViewManager.clearCardSlackEmbed(mainWindow, payload?.targetKey)
   })
 
   handleInvoke(IpcChannels.ProfileSyncWorkspaces, async (payload: SyncWorkspacesPayload) => {
