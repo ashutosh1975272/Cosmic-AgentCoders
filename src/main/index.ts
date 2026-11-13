@@ -448,7 +448,9 @@ if (!gotSingleInstanceLock) {
       getExistingBrowserView: (profileId, appId) =>
         browserViewManager.getExistingView(profileId, appId),
       getExistingCardView: (projectId, appId) =>
-        browserViewManager.getExistingCardView(projectId, appId)
+        browserViewManager.getExistingCardView(projectId, appId),
+      getOrCreateCardView: (projectId, appId) =>
+        browserViewManager.getOrCreateCardView(projectId, appId as AppId)
     })
 
     const dashboardEngine = new DashboardInsightSyncEngine({
@@ -473,6 +475,8 @@ if (!gotSingleInstanceLock) {
         browserViewManager.getExistingView(profileId, appId),
       getExistingCardView: (projectId, appId) =>
         browserViewManager.getExistingCardView(projectId, appId),
+      getOrCreateCardView: (projectId, appId) =>
+        browserViewManager.getOrCreateCardView(projectId, appId as AppId),
       getScrapePersonalDms: async () => (await settingsStore.get()).scrapePersonalDms === true,
       onSourceRun: (sourceId, atIso) => {
         void dashboardScheduleStore.recordSourceRun(sourceId, atIso)

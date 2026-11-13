@@ -122,6 +122,7 @@ export interface DashboardSyncEngineDeps {
   onSynced?: (snapshots: DashboardProjectSnapshot[]) => void
   getExistingBrowserView?: (profileId: string, appId: AppId) => any
   getExistingCardView?: (projectId: string, appId: AppId) => any
+  getOrCreateCardView?: (projectId: string, appId: AppId) => any
   /** Global DM gate (AppSettings.scrapePersonalDms); cards may override. */
   getScrapePersonalDms?: () => boolean | Promise<boolean>
   /** Persist a source's last run so the scheduler survives restarts. */
@@ -169,6 +170,7 @@ export class DashboardSyncEngine {
   private readonly onSourceRun?: (sourceId: string, atIso: string) => void
   private readonly getExistingBrowserView?: (profileId: string, appId: AppId) => any
   private readonly getExistingCardView?: (projectId: string, appId: AppId) => any
+  private readonly getOrCreateCardView?: (projectId: string, appId: AppId) => any
   private scrapeEventListener: ((event: ScrapeStepEvent) => void) | null = null
   private activeWatchReader: SlackReaderView | null = null
   private scrapeQueuePromise: Promise<any> = Promise.resolve()
@@ -206,6 +208,7 @@ export class DashboardSyncEngine {
     this.onSourceRun = deps.onSourceRun
     this.getExistingBrowserView = deps.getExistingBrowserView
     this.getExistingCardView = deps.getExistingCardView
+    this.getOrCreateCardView = deps.getOrCreateCardView
     if (deps.onProgress) this.progressCallbacks.push(deps.onProgress)
   }
 
@@ -893,6 +896,7 @@ export class DashboardSyncEngine {
         activeEngineMode = source.engineMode ?? 'browser'
         const existingPlatformView =
           this.getExistingCardView?.(project.id, source.platform as any) ??
+          this.getOrCreateCardView?.(project.id, source.platform as any) ??
           this.getExistingBrowserView?.(source.profileId, source.platform as any) ??
           null
 

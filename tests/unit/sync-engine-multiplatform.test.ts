@@ -214,4 +214,86 @@ describe('SyncEngine Multi-Platform Ingestion (Teams & WhatsApp without Slack)',
     expect(runs.length).toBe(1)
     expect(runs[0].sourceId).toBe('src-wa-1')
   })
+
+  it('pools persistent card view via getOrCreateCardView when existing card view is not yet cached', async () => {
+    const { monitors, delta, dir } = await stores()
+    const now = new Date().toISOString()
+
+    const mockWaSource: ProjectSource = {
+      id: 'src-wa-pool',
+      kind: 'browser',
+      platform: 'whatsapp',
+      profileId: 'prof-wa-pool',
+      workspaceId: 'default',
+      workspaceName: 'WhatsApp Web',
+      channelsReviewedAt: now,
+      channels: [
+        { id: 'wa_talent_killer___', name: 'Talent Killer 👿', enabled: true, kind: 'dm' }
+      ],
+      role: 'client',
+      enabled: true,
+      backfillDays: 7,
+      createdAt: now,
+      updatedAt: now
+    }
+
+    const mockProject: DashboardProject = {
+      id: 'proj-wa-pool',
+      name: 'Ashutush',
+      clientName: 'Ashutush',
+      profileId: 'prof-wa-pool',
+      teamId: 'default',
+      appId: 'slack',
+      tokenSource: 'oauth',
+      monitors: [],
+      sources: [mockWaSource],
+      createdAt: now
+    }
+
+    await monitors.upsertProject({ project: mockProject })
+
+    const mockCreatedView = {
+      webContents: {
+        isDestroyed: vi.fn().mockReturnValue(false),
+        executeJavaScript: vi.fn().mockImplementation(async (script: string) => {
+          if (script.includes('indexedDB') || script.includes('model-storage')) {
+            return [
+              {
+                id: 'm-tk-1',
+                senderName: 'Talent Killer 👿',
+                text: 'Hey are you reviewing the proposal?',
+                timestamp: 1731518400000,
+                fromMe: false
+              }
+            ]
+          }
+          return []
+        })
+      }
+    }
+
+    const getOrCreateCardViewSpy = vi.fn().mockReturnValue(mockCreatedView)
+
+    const engine = new DashboardSyncEngine({
+      monitorStore: monitors,
+      deltaStore: delta,
+      oauthTokenProvider: { tryGet: async () => null },
+      pollerFactory: () => ({ fetchHistory: async () => ({ messages: [], hasMore: false }) }),
+      getExistingCardView: () => null,
+      getOrCreateCardView: getOrCreateCardViewSpy
+    })
+
+    const result = await (engine as any).scrapeSource(mockProject, mockWaSource, { trigger: 'manual' })
+
+    expect(getOrCreateCardViewSpy).toHaveBeenCalledWith('proj-wa-pool', 'whatsapp')
+    expect(result.status).toBe('success')
+    expect(result.channelsRead).toBe(1)
+    expect(result.newMessages).toBe(1)
+
+    const storedDelta = await delta.load('prof-wa-pool', 'default', 'wa_talent_killer___')
+    expect(storedDelta).not.toBeNull()
+    expect(storedDelta!.messages.length).toBe(1)
+    expect(storedDelta!.messages[0].user).toBe('Talent Killer 👿')
+    expect(storedDelta!.messages[0].text).toBe('Hey are you reviewing the proposal?')
+  })
 })

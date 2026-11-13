@@ -473,9 +473,11 @@ export class BrowserViewManager {
     const view = new WebContentsView({
       webPreferences: {
         ...webPrefs,
+        backgroundThrottling: false,
         preload: join(__dirname, '../preload/index.js')
       }
     })
+    view.setBounds({ x: -10000, y: -10000, width: 1280, height: 900 })
     view.setBackgroundColor(appId === 'whatsapp' ? '#111B21' : '#0C0D11')
 
     if (appId === 'teams') {

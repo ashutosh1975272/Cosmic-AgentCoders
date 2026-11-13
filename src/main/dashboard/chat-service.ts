@@ -59,6 +59,7 @@ export interface ChatServiceDeps {
   now?: () => number
   getExistingBrowserView?: (profileId: string, appId: any) => WebContentsView | null
   getExistingCardView?: (projectId: string, appId: any) => WebContentsView | null
+  getOrCreateCardView?: (projectId: string, appId: any) => WebContentsView | null
 }
 
 /** One workspace the chat panel can read: the card's own, or ours. */
@@ -158,6 +159,7 @@ export class DashboardChatService {
   private readonly now: () => number
   private readonly getExistingBrowserView?: (profileId: string, appId: any) => WebContentsView | null
   private readonly getExistingCardView?: (projectId: string, appId: any) => WebContentsView | null
+  private readonly getOrCreateCardView?: (projectId: string, appId: any) => WebContentsView | null
   private readonly contextCache = new Map<string, ChatWorkspaceContext>()
   private readonly activityCache = new Map<string, { at: number; value: DashboardProjectActivity }>()
 
@@ -173,6 +175,7 @@ export class DashboardChatService {
     this.now = deps.now ?? ((): number => Date.now())
     this.getExistingBrowserView = deps.getExistingBrowserView
     this.getExistingCardView = deps.getExistingCardView
+    this.getOrCreateCardView = deps.getOrCreateCardView
   }
 
   private async projectFor(projectId: string): Promise<DashboardProject | null> {
@@ -688,6 +691,7 @@ export class DashboardChatService {
         const profileId = targetSource.profileId || project.profileId
         const existingView =
           this.getExistingCardView?.(project.id, 'whatsapp') ??
+          this.getOrCreateCardView?.(project.id, 'whatsapp') ??
           this.getExistingBrowserView?.(profileId, 'whatsapp') ??
           null
 
