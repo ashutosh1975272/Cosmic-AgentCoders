@@ -1275,11 +1275,15 @@ export class BrowserViewManager {
         void view.webContents.loadURL(WHATSAPP_WEB_URL)
       }
     } else if (appId === 'teams') {
-      const currentUrl = view.webContents.getURL()
-      if (
-        !currentUrl ||
-        (!currentUrl.includes('teams.microsoft.com') && !currentUrl.includes('login.microsoftonline.com'))
-      ) {
+      const currentUrl = view.webContents.getURL() || ''
+      const isKnownTeamsHost =
+        currentUrl.includes('teams.microsoft.com') ||
+        currentUrl.includes('teams.live.com') ||
+        currentUrl.includes('login.microsoftonline.com') ||
+        currentUrl.includes('login.live.com') ||
+        currentUrl.includes('account.live.com') ||
+        currentUrl.includes('login.microsoft.com')
+      if (!currentUrl || currentUrl === 'about:blank' || !isKnownTeamsHost) {
         void view.webContents.loadURL(TEAMS_HOME_URL)
       }
     }

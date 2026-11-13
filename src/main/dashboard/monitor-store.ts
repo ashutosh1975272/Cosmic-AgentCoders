@@ -119,19 +119,55 @@ export class MonitorStore {
       const project = data.projects[projectIndex]!
       const sources = project.sources ?? []
       const sourceIndex = sources.findIndex((source) => source.id === sourceId)
-      if (sourceIndex < 0) throw new Error('Source not found')
       const defaults = { ...DEFAULT_PROJECT_DEFAULTS, ...data.dashboardDefaults }
-      const updated: ProjectSource = normalizeSource(
-        {
-          ...sources[sourceIndex]!,
-          ...patch,
-          id: sources[sourceIndex]!.id,
-          updatedAt: new Date().toISOString()
-        },
-        defaults
-      )
+      let updated: ProjectSource
       const nextSources = [...sources]
-      nextSources[sourceIndex] = updated
+
+      if (sourceIndex < 0) {
+        const isPlatformAutoUpsert =
+          sourceId.startsWith('src_teams_') ||
+          sourceId.startsWith('src_whatsapp_') ||
+          patch.platform === 'teams' ||
+          patch.platform === 'whatsapp'
+
+        if (!isPlatformAutoUpsert) {
+          throw new Error('Source not found')
+        }
+
+        const platform =
+          (patch.platform as any) ||
+          (sourceId.includes('teams') ? 'teams' : 'whatsapp')
+        const newSource: ProjectSource = {
+          id: sourceId,
+          workspaceName:
+            patch.workspaceName ||
+            (platform === 'teams' ? 'Microsoft Teams' : 'WhatsApp Web'),
+          kind: 'browser',
+          platform,
+          profileId: patch.profileId || project.profileId,
+          workspaceId: patch.workspaceId || (platform === 'teams' ? 'teams-home' : 'default'),
+          channels: patch.channels ?? [],
+          role: patch.role || 'client',
+          backfillDays: patch.backfillDays || 30,
+          enabled: true,
+          ...patch,
+          createdAt: patch.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+        updated = normalizeSource(newSource, defaults)
+        nextSources.push(updated)
+      } else {
+        updated = normalizeSource(
+          {
+            ...sources[sourceIndex]!,
+            ...patch,
+            id: sources[sourceIndex]!.id,
+            updatedAt: new Date().toISOString()
+          },
+          defaults
+        )
+        nextSources[sourceIndex] = updated
+      }
       const nextProject = { ...project, sources: nextSources }
       if (
         nextProject.sourcePreference === 'browser_only' &&

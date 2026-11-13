@@ -25,12 +25,20 @@ export const WHATSAPP_WEB_URL = 'https://web.whatsapp.com/'
 const CHROME_MAJOR = (process.versions.chrome ?? '142.0.0.0').split('.')[0] ?? '142'
 const CHROME_FULL = process.versions.chrome ?? `${CHROME_MAJOR}.0.0.0`
 
+export function getPlatformUaToken(): string {
+  if (process.platform === 'linux') return 'X11; Linux x86_64'
+  if (process.platform === 'win32') return 'Windows NT 10.0; Win64; x64'
+  return 'Macintosh; Intel Mac OS X 10_15_7'
+}
+
 /**
  * Electron’s default UA contains “Electron”, so Slack shows an unsupported-browser
  * banner and Microsoft may serve Classic Teams. Spoof stock Chrome matching this
  * Electron build’s Chromium (see `process.versions.chrome`).
+ * Dynamically uses the host platform so Microsoft Identity does not mistakenly expect
+ * Apple Touch ID / iCloud Keychain passkeys on Linux or Windows.
  */
-export const CHROME_USER_AGENT = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME_FULL} Safari/537.36`
+export const CHROME_USER_AGENT = `Mozilla/5.0 (${getPlatformUaToken()}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME_FULL} Safari/537.36`
 
 /**
  * Brave-compatible Chromium UA for Slack embed / Google SSO.
@@ -301,9 +309,51 @@ const CLASSIC_TEAMS_GATE_SCRIPT = `(() => {
   } catch (_) {}
 })()`
 
+const MICROSOFT_PASSKEY_BYPASS_SCRIPT = `(() => {
+  try {
+    const href = location.href || '';
+    if (!/login\\.(microsoftonline|live|microsoft)\\.com|account\\.live\\.com/i.test(href)) {
+      return;
+    }
+
+    // 1. Fast-fail WebAuthn passkey registration on desktop Linux/Electron
+    if (window.navigator && window.navigator.credentials) {
+      const origCreate = window.navigator.credentials.create;
+      if (origCreate && !origCreate.__hooked) {
+        window.navigator.credentials.create = async function(options) {
+          try {
+            if (options && options.publicKey) {
+              const err = new DOMException('Passkey setup aborted for desktop environment', 'NotAllowedError');
+              return Promise.reject(err);
+            }
+          } catch (_) {}
+          return origCreate.apply(this, arguments);
+        };
+        window.navigator.credentials.create.__hooked = true;
+      }
+    }
+
+    // 2. DOM-level auto-dismiss for "Setting up your passkey..." screen if already rendered
+    const dismissPasskeyPrompt = () => {
+      const text = (document.body && document.body.innerText) || '';
+      if (/Setting up your passkey|opening a security window/i.test(text)) {
+        const cancelBtn = document.querySelector('button#idBtn_Back, input#idBtn_Back, button[data-report-event="Signin_Cancel"], button[aria-label="Cancel"]') ||
+          Array.from(document.querySelectorAll('button, input[type="button"]')).find((b) => (b.innerText || b.value || '').trim().toLowerCase() === 'cancel');
+        if (cancelBtn && typeof cancelBtn.click === 'function') {
+          cancelBtn.click();
+        }
+      }
+    };
+
+    dismissPasskeyPrompt();
+    const interval = setInterval(dismissPasskeyPrompt, 400);
+    setTimeout(() => clearInterval(interval), 15000);
+  } catch (_) {}
+})()`
+
 /**
  * Make Teams web work inside Electron: Chrome UA, block classic/msteams deep links,
- * auto-escape classic retirement page without opening the system browser.
+ * auto-escape classic retirement page, and bypass passkey stalls on Linux.
  */
 export function applyTeamsWebContentsTweaks(contents: WebContents): void {
   contents.setUserAgent(CHROME_USER_AGENT)
@@ -321,9 +371,8 @@ export function applyTeamsWebContentsTweaks(contents: WebContents): void {
   })
 
   contents.on('did-finish-load', () => {
-    void contents.executeJavaScript(CLASSIC_TEAMS_GATE_SCRIPT, true).catch(() => {
-      /* ignore */
-    })
+    void contents.executeJavaScript(CLASSIC_TEAMS_GATE_SCRIPT, true).catch(() => undefined)
+    void contents.executeJavaScript(MICROSOFT_PASSKEY_BYPASS_SCRIPT, true).catch(() => undefined)
   })
 }
 

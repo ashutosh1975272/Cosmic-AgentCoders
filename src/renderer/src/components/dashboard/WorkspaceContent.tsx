@@ -182,6 +182,26 @@ export default function WorkspaceContent({
     [project.sources]
   )
 
+  const effectiveTeamsSource: ProjectSource = useMemo(() => {
+    if (teamsSource) return teamsSource
+    const prof = targetProfile ?? profiles.find((p) => p.id === project.profileId)
+    const nowIso = new Date().toISOString()
+    return {
+      id: `src-${project.id}-teams`,
+      workspaceName: 'Microsoft Teams',
+      kind: 'browser',
+      platform: 'teams',
+      profileId: prof?.id ?? project.profileId,
+      workspaceId: prof?.apps?.teams?.availableWorkspaces?.[0]?.teamId ?? 'teams-home',
+      channels: [],
+      role: 'client',
+      backfillDays: 30,
+      enabled: true,
+      createdAt: nowIso,
+      updatedAt: nowIso
+    }
+  }, [teamsSource, targetProfile, profiles, project])
+
   const whatsappSource = useMemo(
     () =>
       (project.sources ?? []).find(
@@ -189,6 +209,26 @@ export default function WorkspaceContent({
       ) ?? null,
     [project.sources]
   )
+
+  const effectiveWhatsAppSource: ProjectSource = useMemo(() => {
+    if (whatsappSource) return whatsappSource
+    const prof = targetProfile ?? profiles.find((p) => p.id === project.profileId)
+    const nowIso = new Date().toISOString()
+    return {
+      id: `src-${project.id}-whatsapp`,
+      workspaceName: 'WhatsApp Web',
+      kind: 'browser',
+      platform: 'whatsapp',
+      profileId: prof?.id ?? project.profileId,
+      workspaceId: 'whatsapp-web',
+      channels: [],
+      role: 'client',
+      backfillDays: 30,
+      enabled: true,
+      createdAt: nowIso,
+      updatedAt: nowIso
+    }
+  }, [whatsappSource, targetProfile, profiles, project])
 
   // Resolve genuine Slack team ID strictly for THIS card / profile, without cross-profile leakage
   const effectiveSlackTeamId = useMemo(() => {
@@ -704,33 +744,29 @@ export default function WorkspaceContent({
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                {teamsSource ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => setControlSource(teamsSource)}
-                      style={{
-                        background: 'rgba(99, 102, 241, 0.22)',
-                        border: '1px solid rgba(99, 102, 241, 0.45)',
-                        color: '#c7d2fe',
-                        fontSize: 11,
-                        borderRadius: 6,
-                        padding: '3px 10px',
-                        cursor: 'pointer',
-                        fontWeight: 650,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4
-                      }}
-                      title="Open Workspace Control: Channels, Schedule & Scrape Logs"
-                    >
-                      <span>⚙️ Control</span>
-                      <span style={{ fontSize: 10, opacity: 0.85, background: 'rgba(0,0,0,0.25)', padding: '1px 5px', borderRadius: 4 }}>
-                        {teamsSource.channels.filter((c) => c.enabled !== false).length}
-                      </span>
-                    </button>
-                  </>
-                ) : null}
+                <button
+                  type="button"
+                  onClick={() => setControlSource(effectiveTeamsSource)}
+                  style={{
+                    background: 'rgba(99, 102, 241, 0.22)',
+                    border: '1px solid rgba(99, 102, 241, 0.45)',
+                    color: '#c7d2fe',
+                    fontSize: 11,
+                    borderRadius: 6,
+                    padding: '3px 10px',
+                    cursor: 'pointer',
+                    fontWeight: 650,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4
+                  }}
+                  title="Open Teams Control: Channels, 4-Tier Matrix, Schedule & Scrape Logs"
+                >
+                  <span>⚙️ Control</span>
+                  <span style={{ fontSize: 10, opacity: 0.85, background: 'rgba(0,0,0,0.25)', padding: '1px 5px', borderRadius: 4 }}>
+                    {effectiveTeamsSource.channels.filter((c) => c.enabled !== false).length}
+                  </span>
+                </button>
                 <button
                   type="button"
                   onClick={() => void handleStartAppLogin(targetProfile?.id, 'teams')}
@@ -749,7 +785,7 @@ export default function WorkspaceContent({
                 </button>
               </div>
             </div>
-            <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
+            <div style={{ flex: '1 1 0%', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
               <CardLiveSlackEmbed appId="teams" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)} />
             </div>
           </div>
@@ -788,7 +824,7 @@ export default function WorkspaceContent({
                 Cancel
               </button>
             </div>
-            <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
+            <div style={{ flex: '1 1 0%', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
               <CardLiveSlackEmbed appId="teams" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)} />
             </div>
           </div>
@@ -877,33 +913,29 @@ export default function WorkspaceContent({
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                {whatsappSource ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => setControlSource(whatsappSource)}
-                      style={{
-                        background: 'rgba(99, 102, 241, 0.22)',
-                        border: '1px solid rgba(99, 102, 241, 0.45)',
-                        color: '#c7d2fe',
-                        fontSize: 11,
-                        borderRadius: 6,
-                        padding: '3px 10px',
-                        cursor: 'pointer',
-                        fontWeight: 650,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4
-                      }}
-                      title="Open Workspace Control: Channels, Schedule & Scrape Logs"
-                    >
-                      <span>⚙️ Control</span>
-                      <span style={{ fontSize: 10, opacity: 0.85, background: 'rgba(0,0,0,0.25)', padding: '1px 5px', borderRadius: 4 }}>
-                        {whatsappSource.channels.filter((c) => c.enabled !== false).length}
-                      </span>
-                    </button>
-                  </>
-                ) : null}
+                <button
+                  type="button"
+                  onClick={() => setControlSource(effectiveWhatsAppSource)}
+                  style={{
+                    background: 'rgba(99, 102, 241, 0.22)',
+                    border: '1px solid rgba(99, 102, 241, 0.45)',
+                    color: '#c7d2fe',
+                    fontSize: 11,
+                    borderRadius: 6,
+                    padding: '3px 10px',
+                    cursor: 'pointer',
+                    fontWeight: 650,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4
+                  }}
+                  title="Open WhatsApp Control: Chats, 4-Tier Matrix, Schedule & Scrape Logs"
+                >
+                  <span>⚙️ Control</span>
+                  <span style={{ fontSize: 10, opacity: 0.85, background: 'rgba(0,0,0,0.25)', padding: '1px 5px', borderRadius: 4 }}>
+                    {effectiveWhatsAppSource.channels.filter((c) => c.enabled !== false).length}
+                  </span>
+                </button>
                 <button
                   type="button"
                   onClick={() => void handleStartAppLogin(targetProfile?.id, 'whatsapp')}
@@ -922,7 +954,7 @@ export default function WorkspaceContent({
                 </button>
               </div>
             </div>
-            <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
+            <div style={{ flex: '1 1 0%', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
               <CardLiveSlackEmbed appId="whatsapp" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)} />
             </div>
           </div>
@@ -964,7 +996,7 @@ export default function WorkspaceContent({
                 {authBusyApp === 'whatsapp' ? 'Watching for QR Scan…' : 'Start QR Scan'}
               </button>
             </div>
-            <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
+            <div style={{ flex: '1 1 0%', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
               <CardLiveSlackEmbed appId="whatsapp" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)} />
             </div>
           </div>
@@ -1113,7 +1145,7 @@ export default function WorkspaceContent({
                 </button>
               </div>
             </div>
-            <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
+            <div style={{ flex: '1 1 0%', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
               <CardLiveSlackEmbed
                 projectId={project.id}
                 appId="slack"

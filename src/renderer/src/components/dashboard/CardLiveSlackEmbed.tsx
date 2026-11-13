@@ -154,15 +154,21 @@ export default function CardLiveSlackEmbed({
         console.error('Failed to activate CardLiveSlackEmbed', err)
       })
 
-    const ro = new ResizeObserver(() => {
-      sendBounds()
-    })
-    ro.observe(el)
-    if (document.body) {
-      ro.observe(document.body)
+    let ro: ResizeObserver | null = null
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => {
+        sendBounds()
+      })
+      ro.observe(el)
+      if (document.body) {
+        ro.observe(document.body)
+      }
     }
 
-    const onResizeOrLayout = () => startTrackingLoop(400)
+    const onResizeOrLayout = () => {
+      sendBounds()
+      startTrackingLoop(400)
+    }
     const onTransitionEnd = () => startTrackingLoop(150)
 
     window.addEventListener('resize', onResizeOrLayout)
@@ -181,7 +187,7 @@ export default function CardLiveSlackEmbed({
     return () => {
       cancelled = true
       if (animFrameId) cancelAnimationFrame(animFrameId)
-      ro.disconnect()
+      ro?.disconnect()
       unsubSettings?.()
       window.removeEventListener('resize', onResizeOrLayout)
       window.removeEventListener('scroll', sendBounds, true)
