@@ -239,6 +239,24 @@ describe('Slack Reader Core (SLK-2)', () => {
       expect(timeOnly).toMatch(/^\d{10}\.\d{6}$/)
     })
 
+    it('parses sender-prefixed time-only strings even if sender name contains month substrings', () => {
+      const mark = normalizeSlackTimestamp('Mark 5:28 PM')
+      expect(mark).not.toBeNull()
+      expect(mark).toMatch(/^\d{10}\.\d{6}$/)
+
+      const martin = normalizeSlackTimestamp('Martin 5:28 PM')
+      expect(martin).not.toBeNull()
+      expect(martin).toMatch(/^\d{10}\.\d{6}$/)
+
+      const mayur = normalizeSlackTimestamp('Mayur 5:28 PM')
+      expect(mayur).not.toBeNull()
+      expect(mayur).toMatch(/^\d{10}\.\d{6}$/)
+
+      const janice = normalizeSlackTimestamp('Janice 5:28 PM')
+      expect(janice).not.toBeNull()
+      expect(janice).toMatch(/^\d{10}\.\d{6}$/)
+    })
+
     it('parses date strings with ordinals (4th, 1st) and optional year', () => {
       const ordinal = normalizeSlackTimestamp('November 4th, 2026 at 2:35 PM')
       expect(ordinal).not.toBeNull()

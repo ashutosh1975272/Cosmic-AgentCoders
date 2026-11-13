@@ -98,9 +98,10 @@ export function normalizeSlackTimestamp(rawTs?: string | number): string | null 
       }
     }
 
-    // Time-only string with optional sender prefix or whitespace (e.g. "02:35 PM", "5:28 PM", "Ashutosh 5:28 PM")
+    // Time-only string with optional sender prefix or whitespace (e.g. "02:35 PM", "5:28 PM", "Ashutosh 5:28 PM", "Mark 5:28 PM")
     const timeOnlyMatch = trimmed.match(/(?:^|.*\s)(\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?)$/i)
-    if (timeOnlyMatch && !/(?:today|yesterday|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(trimmed)) {
+    const hasExplicitMonthWord = /\b(?:today|yesterday|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember))\b/i.test(trimmed)
+    if (timeOnlyMatch && !hasExplicitMonthWord) {
       const pureTime = timeOnlyMatch[1]
       const pureMatch = pureTime.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?$/i)
       if (pureMatch) {

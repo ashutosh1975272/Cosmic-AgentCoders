@@ -80,7 +80,9 @@ vi.mock('../../src/main/profiles/session-partition', () => ({
 import {
   isGoogleCookieDomain,
   syncGoogleSessionFromProfileToCard,
-  syncGoogleSessionToProfileCards
+  syncGoogleSessionToProfileCards,
+  syncAllCardPartitionsFromProfile,
+  checkCardGoogleSession
 } from '../../src/main/profiles/google-session-sync'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -314,4 +316,62 @@ describe('syncGoogleSessionToProfileCards', () => {
     expect(storeA2.some((c) => c.name === 'SAPISID')).toBe(true)
   })
 })
+
+// ── Tests: syncAllCardPartitionsFromProfile ──────────────────────────────────
+
+describe('syncAllCardPartitionsFromProfile', () => {
+  const profileId = 'profile-ashutosh'
+  const projectId = 'proj-ashutosh-01'
+
+  it('syncs Google cookies simultaneously to both slack and agentwork partitions of the card', async () => {
+    const profilePartition = `persist:profile-${profileId}-slack`
+    const googleCookie1 = makeCookie({ name: 'SID', domain: '.google.com' })
+    const googleCookie2 = makeCookie({ name: 'SSID', domain: '.google.com' })
+    const slackCookie = makeCookie({ name: 'd', domain: '.slack.com' })
+
+    seedPartition(profilePartition, [googleCookie1, googleCookie2, slackCookie])
+
+    const result = await syncAllCardPartitionsFromProfile(profileId, projectId)
+
+    expect(result.slack).toBe(2)
+    expect(result.agentwork).toBe(2)
+
+    const slackStore = getStore(`persist:card-${projectId}-slack`)
+    const agentworkStore = getStore(`persist:card-${projectId}-agentwork`)
+
+    // Both partitions have the Google session cookies
+    expect(slackStore.some((c) => c.name === 'SID')).toBe(true)
+    expect(slackStore.some((c) => c.name === 'SSID')).toBe(true)
+    expect(agentworkStore.some((c) => c.name === 'SID')).toBe(true)
+    expect(agentworkStore.some((c) => c.name === 'SSID')).toBe(true)
+
+    // Neither partition received the Slack cookie from Google sync
+    expect(agentworkStore.some((c) => c.name === 'd')).toBe(false)
+  })
+})
+
+// ── Tests: checkCardGoogleSession ─────────────────────────────────────────────
+
+describe('checkCardGoogleSession', () => {
+  const projectId = 'proj-check-01'
+
+  it('returns hasGoogleSession: false when partition has no cookies', async () => {
+    const check = await checkCardGoogleSession(projectId, 'agentwork')
+    expect(check.hasGoogleSession).toBe(false)
+    expect(check.count).toBe(0)
+  })
+
+  it('returns hasGoogleSession: true when auth cookies are present', async () => {
+    const agentworkPartition = `persist:card-${projectId}-agentwork`
+    seedPartition(agentworkPartition, [
+      makeCookie({ name: 'SID', domain: '.google.com' }),
+      makeCookie({ name: 'HSID', domain: '.google.com' })
+    ])
+
+    const check = await checkCardGoogleSession(projectId, 'agentwork')
+    expect(check.hasGoogleSession).toBe(true)
+    expect(check.count).toBe(2)
+  })
+})
+
 

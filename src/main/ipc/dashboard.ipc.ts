@@ -1,7 +1,7 @@
 import { BrowserWindow, session } from 'electron'
 import type { WebContentsView } from 'electron'
 import { partitionForCard } from '../profiles/session-partition'
-import { syncGoogleSessionFromProfileToCard } from '../profiles/google-session-sync'
+import { syncAllCardPartitionsFromProfile } from '../profiles/google-session-sync'
 import { seedChromeCardProfile } from '../profiles/chrome-browser-auth'
 import { IpcChannels } from '../../shared/ipc-contract'
 import type {
@@ -396,9 +396,9 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
       await deps.workspaceMapping.syncProjectWorkspaces(proj.id, workspaceIds)
     }
 
-    // Immediately seed the profile's authenticated Google session into this card
+    // Immediately seed the profile's authenticated Google session into this card across all tabs (slack + agentwork)
     if (proj.profileId && proj.id) {
-      void syncGoogleSessionFromProfileToCard(proj.profileId, proj.id, 'slack').catch(() => undefined)
+      void syncAllCardPartitionsFromProfile(proj.profileId, proj.id).catch(() => undefined)
       seedChromeCardProfile(proj.profileId, `card-${proj.id}`)
     }
 

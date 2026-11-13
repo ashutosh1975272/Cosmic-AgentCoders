@@ -215,7 +215,7 @@ export function buildReadVisibleMessagesScript(sinceTs = 0): string {
       if (timeText) {
         rawTs = currentDateContext && !timeText.includes(currentDateContext) ? (currentDateContext + ' at ' + timeText) : timeText;
       }
-    } else if (rawTs && currentDateContext && /^\\d{1,2}:\\d{2}/.test(rawTs) && !rawTs.includes(currentDateContext)) {
+    } else if (rawTs && currentDateContext && /(?:^|\\s)\\d{1,2}:\\d{2}/.test(rawTs) && !rawTs.includes(currentDateContext)) {
       rawTs = currentDateContext + ' at ' + rawTs;
     }
 

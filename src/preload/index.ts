@@ -100,7 +100,11 @@ const api: IpcApi = {
       bounds: ViewportBounds
     }) => ipcRenderer.invoke(IpcChannels.ProfileActivateCardWebEmbed, payload),
     reloadCardEmbed: () => ipcRenderer.invoke(IpcChannels.ProfileReloadCardEmbed),
-    startCardAppLogin: (payload: { projectId: string; profileId: string; appId: AppId; bounds?: ViewportBounds }) =>
+    checkCardGoogleSession: (payload: { projectId: string; appId?: string }) =>
+      ipcRenderer.invoke(IpcChannels.ProfileCheckCardGoogleSession, payload),
+    syncCardGoogleSessions: (payload: { profileId: string; projectId: string }) =>
+      ipcRenderer.invoke(IpcChannels.ProfileSyncCardGoogleSessions, payload),
+    startCardAppLogin: (payload: { projectId: string; profileId: string; appId: AppId | 'agentwork'; bounds?: ViewportBounds }) =>
       ipcRenderer.invoke(IpcChannels.ProfileStartCardAppLogin, payload),
     updateCardSlackEmbedBounds: (bounds: ViewportBounds) =>
       ipcRenderer.invoke(IpcChannels.ProfileUpdateCardSlackEmbedBounds, { bounds }),
@@ -518,6 +522,31 @@ const api: IpcApi = {
     getSummary: () => ipcRenderer.invoke(IpcChannels.StorageGetSummary),
     clean: (payload: import('../shared/ipc-contract').CleanStoragePayload) =>
       ipcRenderer.invoke(IpcChannels.StorageClean, payload)
+  },
+  agentwork: {
+    checkHealth: (baseUrl?: string) =>
+      ipcRenderer.invoke(IpcChannels.AgentWorkCheckHealth, { baseUrl }),
+    listAgents: (payload: { projectId: string; baseUrl?: string }) =>
+      ipcRenderer.invoke(IpcChannels.AgentWorkListAgents, payload),
+    dispatchQuery: (payload: {
+      projectId: string
+      query: string
+      role?: string
+      agentMode?: string
+      baseUrl?: string
+    }) => ipcRenderer.invoke(IpcChannels.AgentWorkDispatchQuery, payload),
+    getSessionEvents: (payload: {
+      projectId: string
+      sessionId: string
+      baseUrl?: string
+    }) => ipcRenderer.invoke(IpcChannels.AgentWorkGetSessionEvents, payload),
+    createAgent: (payload: {
+      projectId: string
+      name: string
+      role: string
+      systemPrompt?: string
+      baseUrl?: string
+    }) => ipcRenderer.invoke(IpcChannels.AgentWorkCreateAgent, payload)
   }
 }
 

@@ -1,6 +1,25 @@
 import { create } from 'zustand'
 
 export type SwarmAgentId = 'head' | 'architect' | 'coder' | 'reviewer' | 'tester' | 'executor'
+export type AgentCodersActiveView = 'agentwork' | SwarmAgentId
+
+export interface AgentWorkPortalMeta {
+  id: 'agentwork'
+  name: string
+  url: string
+  role: string
+  icon: string
+  badge: string
+}
+
+export const AGENTWORK_PORTAL_META: AgentWorkPortalMeta = {
+  id: 'agentwork',
+  name: 'AgentWork',
+  url: 'https://agents.excellencetechnologies.in/',
+  role: 'AgentWork AI Workspace & Portal',
+  icon: '⚡',
+  badge: 'PORTAL'
+}
 
 export interface SwarmAgentMeta {
   id: SwarmAgentId
@@ -132,6 +151,8 @@ export interface SwarmTask {
 
 interface AgentCodersStoreState {
   activeAgentId: SwarmAgentId
+  activeView: AgentCodersActiveView
+  currentProjectId: string | null
   agentMessages: Record<SwarmAgentId, SwarmMessage[]>
   tasks: SwarmTask[]
   swarmGoal: string | null
@@ -140,6 +161,9 @@ interface AgentCodersStoreState {
   activeQueries: Record<string, SwarmQuery>
 
   setActiveAgent: (id: SwarmAgentId) => void
+  setActiveView: (view: AgentCodersActiveView) => void
+  loadProjectHistory: (projectId: string) => void
+  clearProjectHistory: (projectId?: string) => void
   postMessage: (
     agentId: SwarmAgentId,
     message: Omit<SwarmMessage, 'id' | 'timestamp'> & Partial<Pick<SwarmMessage, 'id' | 'timestamp'>>
@@ -220,8 +244,40 @@ const INITIAL_MESSAGES: Record<SwarmAgentId, SwarmMessage[]> = {
   ]
 }
 
+export function getAgentCodersMessageStorageKey(projectId?: string | null): string {
+  return `agentcoders:messages:${projectId || 'default'}`
+}
+
+export function getAgentCodersStateStorageKey(projectId?: string | null): string {
+  return `agentcoders:state:${projectId || 'default'}`
+}
+
+function persistSwarmData(
+  projectId: string | null,
+  messages: Record<SwarmAgentId, SwarmMessage[]>,
+  tasks: SwarmTask[],
+  swarmGoal: string | null,
+  swarmProgress: number
+): void {
+  if (typeof window === 'undefined' || !window.localStorage) return
+  try {
+    const msgKey = getAgentCodersMessageStorageKey(projectId)
+    window.localStorage.setItem(msgKey, JSON.stringify(messages))
+
+    const stateKey = getAgentCodersStateStorageKey(projectId)
+    window.localStorage.setItem(
+      stateKey,
+      JSON.stringify({ tasks, swarmGoal, swarmProgress })
+    )
+  } catch (err) {
+    console.warn('[useAgentCodersStore] Failed to persist chat history to localStorage:', err)
+  }
+}
+
 export const useAgentCodersStore = create<AgentCodersStoreState>((set, get) => ({
   activeAgentId: 'head',
+  activeView: 'head',
+  currentProjectId: null,
   agentMessages: INITIAL_MESSAGES,
   tasks: [],
   swarmGoal: null,
@@ -229,7 +285,92 @@ export const useAgentCodersStore = create<AgentCodersStoreState>((set, get) => (
   isOrchestrating: false,
   activeQueries: {},
 
-  setActiveAgent: (id) => set({ activeAgentId: id }),
+  setActiveAgent: (id) => set({ activeAgentId: id, activeView: id }),
+  setActiveView: (view) =>
+    set(view === 'agentwork' ? { activeView: 'agentwork' } : { activeAgentId: view, activeView: view }),
+
+  loadProjectHistory: (projectId: string) => {
+    let loadedMessages: Record<SwarmAgentId, SwarmMessage[]> = { ...INITIAL_MESSAGES }
+    let loadedTasks: SwarmTask[] = []
+    let loadedGoal: string | null = null
+    let loadedProgress = 0
+
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        const msgRaw = window.localStorage.getItem(getAgentCodersMessageStorageKey(projectId))
+        if (msgRaw) {
+          const parsed = JSON.parse(msgRaw)
+          loadedMessages = {
+            head: Array.isArray(parsed.head) ? parsed.head : INITIAL_MESSAGES.head,
+            architect: Array.isArray(parsed.architect) ? parsed.architect : INITIAL_MESSAGES.architect,
+            coder: Array.isArray(parsed.coder) ? parsed.coder : INITIAL_MESSAGES.coder,
+            reviewer: Array.isArray(parsed.reviewer) ? parsed.reviewer : INITIAL_MESSAGES.reviewer,
+            tester: Array.isArray(parsed.tester) ? parsed.tester : INITIAL_MESSAGES.tester,
+            executor: Array.isArray(parsed.executor) ? parsed.executor : INITIAL_MESSAGES.executor
+          }
+        } else {
+          // If no stored messages for this project yet:
+          // ONLY if currentProjectId was null (first mount / unassociated query), adopt in-memory messages
+          const prevProj = get().currentProjectId
+          if (!prevProj) {
+            const current = get().agentMessages
+            const hasCustomMessages = Object.values(current).some(
+              (arr) => arr.length > 1 || arr.some((m) => m.senderId === 'user')
+            )
+            if (hasCustomMessages) {
+              loadedMessages = current
+              loadedTasks = get().tasks
+              loadedGoal = get().swarmGoal
+              loadedProgress = get().swarmProgress
+              persistSwarmData(projectId, loadedMessages, loadedTasks, loadedGoal, loadedProgress)
+            }
+          }
+        }
+
+        const stateRaw = window.localStorage.getItem(getAgentCodersStateStorageKey(projectId))
+        if (stateRaw) {
+          const parsedState = JSON.parse(stateRaw)
+          if (Array.isArray(parsedState.tasks)) loadedTasks = parsedState.tasks
+          if (typeof parsedState.swarmGoal === 'string' || parsedState.swarmGoal === null) {
+            loadedGoal = parsedState.swarmGoal
+          }
+          if (typeof parsedState.swarmProgress === 'number') {
+            loadedProgress = parsedState.swarmProgress
+          }
+        }
+      } catch (err) {
+        console.warn('[useAgentCodersStore] Error loading history for project:', projectId, err)
+      }
+    }
+
+    set({
+      currentProjectId: projectId,
+      agentMessages: loadedMessages,
+      tasks: loadedTasks,
+      swarmGoal: loadedGoal,
+      swarmProgress: loadedProgress
+    })
+  },
+
+  clearProjectHistory: (projectId?: string) => {
+    const targetProj = projectId || get().currentProjectId
+    if (typeof window !== 'undefined' && window.localStorage && targetProj) {
+      try {
+        window.localStorage.removeItem(getAgentCodersMessageStorageKey(targetProj))
+        window.localStorage.removeItem(getAgentCodersStateStorageKey(targetProj))
+      } catch {
+        // ignore
+      }
+    }
+    set({
+      agentMessages: INITIAL_MESSAGES,
+      tasks: [],
+      swarmGoal: null,
+      swarmProgress: 0,
+      isOrchestrating: false,
+      activeQueries: {}
+    })
+  },
 
   postMessage: (agentId, message) => {
     const newMsg: SwarmMessage = {
@@ -240,12 +381,22 @@ export const useAgentCodersStore = create<AgentCodersStoreState>((set, get) => (
         new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
 
-    set((state) => ({
-      agentMessages: {
+    set((state) => {
+      const nextMessages = {
         ...state.agentMessages,
-        [agentId]: [...state.agentMessages[agentId], newMsg]
+        [agentId]: [...(state.agentMessages[agentId] || []), newMsg]
       }
-    }))
+      persistSwarmData(
+        state.currentProjectId,
+        nextMessages,
+        state.tasks,
+        state.swarmGoal,
+        state.swarmProgress
+      )
+      return {
+        agentMessages: nextMessages
+      }
+    })
   },
 
   dispatchTaskFromHead: (goal: string) => {
@@ -327,19 +478,15 @@ export const useAgentCodersStore = create<AgentCodersStoreState>((set, get) => (
       statusBadge: 'A2A ORCHESTRATION ACTIVE'
     }
 
-    set((state) => ({
-      swarmGoal: goal,
-      isOrchestrating: true,
-      tasks: initialTasks,
-      swarmProgress: 15,
-      agentMessages: {
+    set((state) => {
+      const nextMessages = {
         ...state.agentMessages,
         head: [...state.agentMessages.head, userMsg, headReplyMsg],
         architect: [
           ...state.agentMessages.architect,
           {
             id: `arch-${Date.now()}`,
-            senderId: 'head',
+            senderId: 'head' as const,
             senderName: 'Head Agent',
             text: `📋 Assigned from Head Agent:\nTask: System Design & Deep Module Boundaries\nObjective: "${goal}"\nPlease design interfaces and deep seams.`,
             timestamp: timeStr,
@@ -348,7 +495,21 @@ export const useAgentCodersStore = create<AgentCodersStoreState>((set, get) => (
           }
         ]
       }
-    }))
+      persistSwarmData(
+        state.currentProjectId,
+        nextMessages,
+        initialTasks,
+        goal,
+        15
+      )
+      return {
+        swarmGoal: goal,
+        isOrchestrating: true,
+        tasks: initialTasks,
+        swarmProgress: 15,
+        agentMessages: nextMessages
+      }
+    })
 
     // Autonomous multi-agent progressive simulation
     setTimeout(() => {
@@ -468,6 +629,14 @@ export const useAgentCodersStore = create<AgentCodersStoreState>((set, get) => (
       const totalProgress = nextTasks.reduce((acc, t) => acc + t.progress, 0)
       const computed = nextTasks.length > 0 ? Math.round(totalProgress / nextTasks.length) : 0
 
+      persistSwarmData(
+        state.currentProjectId,
+        state.agentMessages,
+        nextTasks,
+        state.swarmGoal,
+        computed
+      )
+
       return {
         tasks: nextTasks,
         swarmProgress: computed
@@ -478,6 +647,8 @@ export const useAgentCodersStore = create<AgentCodersStoreState>((set, get) => (
   resetSwarm: () => {
     set({
       activeAgentId: 'head',
+      activeView: 'head',
+      currentProjectId: null,
       agentMessages: INITIAL_MESSAGES,
       tasks: [],
       swarmGoal: null,
@@ -495,6 +666,9 @@ export const useAgentCodersStore = create<AgentCodersStoreState>((set, get) => (
     parentQueryId,
     source = 'project_chat'
   }) => {
+    if (projectId && !get().currentProjectId) {
+      set({ currentProjectId: projectId })
+    }
     const queryId = customQueryId || `query-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
     const startedAt = Date.now()
 

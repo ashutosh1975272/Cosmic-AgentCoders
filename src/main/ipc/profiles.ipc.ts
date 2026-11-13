@@ -32,7 +32,9 @@ import {
 } from '../profiles/chrome-browser-auth'
 import {
   syncGoogleSessionToProfileCards,
-  syncGoogleSessionFromProfileToCard
+  syncGoogleSessionFromProfileToCard,
+  syncAllCardPartitionsFromProfile,
+  checkCardGoogleSession
 } from '../profiles/google-session-sync'
 import { runTeamsLoginForProfile } from '../profiles/teams-first-login-flow'
 import { waitForWhatsAppSignedIn } from '../profiles/whatsapp-login-flow'
@@ -182,7 +184,7 @@ async function runGoogleBrowserAuth(
           const cardIds = projects
             .filter((p) => p.profileId === profileId)
             .map((p) => p.id)
-          return syncGoogleSessionToProfileCards(profileId, cardIds, 'slack')
+          return syncGoogleSessionToProfileCards(profileId, cardIds)
         }).catch(() => undefined)
       }
 
@@ -743,6 +745,14 @@ export function registerProfileIpc(deps: ProfileIpcDeps): void {
       if (!mainWindow) {
         return
       }
+      deps.browserViewManager.setEmbedVisible(mainWindow, true)
+      if (payload.projectId && payload.profileId) {
+        await syncGoogleSessionFromProfileToCard(
+          payload.profileId,
+          payload.projectId,
+          (payload.linkId === 'agentwork' ? 'agentwork' : 'slack') as any
+        ).catch(() => undefined)
+      }
       deps.browserViewManager.activateCardWebEmbed(
         payload.projectId ?? '',
         payload.profileId,
@@ -759,14 +769,35 @@ export function registerProfileIpc(deps: ProfileIpcDeps): void {
   })
 
   handleInvoke(
+    IpcChannels.ProfileCheckCardGoogleSession,
+    async (payload: { projectId: string; appId?: AppId | 'agentwork' }) => {
+      return checkCardGoogleSession(payload.projectId, payload.appId || 'agentwork')
+    }
+  )
+
+  handleInvoke(
+    IpcChannels.ProfileSyncCardGoogleSessions,
+    async (payload: { profileId: string; projectId: string }) => {
+      const result = await syncAllCardPartitionsFromProfile(payload.profileId, payload.projectId)
+      deps.browserViewManager.reloadCardEmbed()
+      return result
+    }
+  )
+
+  handleInvoke(
     IpcChannels.ProfileStartCardAppLogin,
-    async (payload: { projectId: string; profileId: string; appId: AppId; bounds?: ViewportBounds }) => {
-      notifyAuthProgress(deps.getMainWindow, 'Waiting for Slack sign-in for card…')
+    async (payload: { projectId: string; profileId: string; appId: AppId | 'agentwork'; bounds?: ViewportBounds }) => {
+      notifyAuthProgress(deps.getMainWindow, 'Waiting for sign-in for card…')
       const profile = await deps.profileStore.get(payload.profileId)
       const emailHint = profile?.displayName || undefined
 
-      // Pre-seed Google session cookies into card partition
-      await syncGoogleSessionFromProfileToCard(payload.profileId, payload.projectId, payload.appId).catch(() => undefined)
+      // Pre-seed Google session cookies into card partition(s)
+      await syncAllCardPartitionsFromProfile(payload.profileId, payload.projectId).catch(() => undefined)
+
+      if (payload.appId === 'agentwork') {
+        deps.browserViewManager.reloadCardEmbed()
+        return profile || ({} as Profile)
+      }
 
       await runSlackChromeBrowserLogin(payload.profileId, {
         parentWindow: deps.getMainWindow(),

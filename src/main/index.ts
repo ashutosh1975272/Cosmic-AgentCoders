@@ -18,6 +18,7 @@ import { AppSettingsStore, defaultAppSettingsPath } from './app-settings'
 import { registerAppIpc } from './ipc/app.ipc'
 import { registerOauthIpc } from './ipc/oauth.ipc'
 import { registerProfileIpc } from './ipc/profiles.ipc'
+import { registerAgentWorkIpc } from './ipc/agentwork.ipc'
 import { registerSlackDataIpc } from './ipc/slack-data.ipc'
 import { registerDashboardIpc } from './ipc/dashboard.ipc'
 import { registerLogsIpc } from './ipc/logs.ipc'
@@ -679,6 +680,7 @@ if (!gotSingleInstanceLock) {
         }
       }
     })
+    registerAgentWorkIpc()
     registerOauthIpc({
       tokenStore,
       profileStore,

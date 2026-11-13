@@ -136,7 +136,7 @@ export function partitionForProfile(profileId: string, appId: AppId = 'slack'): 
  * Dedicated session isolation per project card + app.
  * Ensures complete independence between dashboard project cards.
  */
-export function partitionForCard(projectId: string, appId: AppId = 'slack'): string {
+export function partitionForCard(projectId: string, appId: AppId | 'agentwork' = 'slack'): string {
   return `persist:card-${projectId}-${appId}`
 }
 

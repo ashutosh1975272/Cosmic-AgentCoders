@@ -104,4 +104,65 @@ describe('AgentCodersPanel UI tests', () => {
     const sidebar = screen.getByTestId('agentcoders-inner-sidebar')
     expect(sidebar.style.width).toBe('280px')
   })
+
+  it('renders AgentWork above Head Agent and switches to AgentWork web portal view', () => {
+    localStorage.clear()
+    render(<AgentCodersPanel projectId="p-web" projectName="Acme Swarm" />)
+
+    // Check AgentWork is rendered in inner sidebar at top
+    const agentWorkBtn = screen.getByTestId('sidebar-agentwork-btn')
+    expect(agentWorkBtn).toBeDefined()
+    expect(screen.getAllByText('PORTAL').length).toBeGreaterThan(0)
+    expect(screen.getByText(/agents\.excellencetechnologies\.in · Web Portal/)).toBeDefined()
+
+    // Click AgentWork to switch to portal view
+    fireEvent.click(agentWorkBtn)
+
+    // Web portal container is rendered
+    expect(screen.getByTestId('agentwork-portal-container')).toBeDefined()
+    expect(screen.getByTestId('agentwork-top-control-bar')).toBeDefined()
+    expect(screen.getByText('AgentWork Workspace')).toBeDefined()
+    expect(screen.getByText('Connected')).toBeDefined()
+    expect(screen.getByTestId('agentwork-control-btn')).toBeDefined()
+    expect(screen.getByTestId('agentwork-oauth-btn')).toBeDefined()
+    expect(screen.getByRole('button', { name: /Reload/i })).toBeDefined()
+    expect(screen.getByRole('button', { name: /Open in Browser/i })).toBeDefined()
+
+    // Clicking Control button opens Control Modal with card-scoped partition details
+    fireEvent.click(screen.getByTestId('agentwork-control-btn'))
+    expect(screen.getByTestId('agentwork-control-modal')).toBeDefined()
+    expect(screen.getByText('AgentWork Control Suite')).toBeDefined()
+    expect(screen.getByText(/persist:card-p-web-agentwork/)).toBeDefined()
+    fireEvent.click(screen.getAllByRole('button', { name: /Close/i })[0])
+    expect(screen.queryByTestId('agentwork-control-modal')).toBeNull()
+
+    // Switch back to an agent (e.g. Coder)
+    fireEvent.click(screen.getByTestId('sidebar-agent-coder'))
+    expect(screen.queryByTestId('agentwork-portal-container')).toBeNull()
+    expect(screen.getByText('Autonomous TDD Implementation Engine')).toBeDefined()
+  })
+
+  it('persists questions and restores chat history across component remounts', () => {
+    localStorage.clear()
+    const { unmount } = render(<AgentCodersPanel projectId="proj-hist-ui" projectName="Acme Swarm" />)
+
+    // Switch to Coder and send a message
+    fireEvent.click(screen.getByTestId('sidebar-agent-coder'))
+    const textarea = screen.getByPlaceholderText(/Message Coder directly/) as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: 'Can you write a vitest test for auth tokens?' } })
+    fireEvent.click(screen.getByText('Send'))
+
+    // Verify message appears in feed
+    expect(screen.getByText('Can you write a vitest test for auth tokens?')).toBeDefined()
+
+    // Unmount component
+    unmount()
+
+    // Re-mount with the same projectId
+    render(<AgentCodersPanel projectId="proj-hist-ui" projectName="Acme Swarm" />)
+    fireEvent.click(screen.getByTestId('sidebar-agent-coder'))
+
+    // History is restored!
+    expect(screen.getByText('Can you write a vitest test for auth tokens?')).toBeDefined()
+  })
 })

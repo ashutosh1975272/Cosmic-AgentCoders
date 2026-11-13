@@ -365,6 +365,7 @@ export default function WorkspaceContent({
         <AgentCodersPanel
           projectId={summary.projectId}
           projectName={identity.name}
+          profileId={targetProfile?.id}
         />
       )
       bare = true

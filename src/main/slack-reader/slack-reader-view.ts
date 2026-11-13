@@ -509,11 +509,13 @@ export class SlackReaderView {
     const normalized: DashboardStoredMessage[] = []
 
     for (const raw of rawMessages) {
-      // If message permalink indicates a different channel archive and standard Slack ID was expected, filter it out
+      // If message permalink indicates a different channel archive/client URL and standard Slack ID was expected, filter it out
       if (
         isStandardSlackId &&
         raw.permalink &&
-        !raw.permalink.includes(`/archives/${channelId}/`)
+        !raw.permalink.includes(`/archives/${channelId}`) &&
+        !raw.permalink.includes(`/${channelId}/`) &&
+        !raw.permalink.includes(`/${channelId}`)
       ) {
         continue
       }
@@ -621,7 +623,9 @@ export class SlackReaderView {
         if (
           isStandardSlackId &&
           item.permalink &&
-          !item.permalink.includes(`/archives/${channelId}/`)
+          !item.permalink.includes(`/archives/${channelId}`) &&
+          !item.permalink.includes(`/${channelId}/`) &&
+          !item.permalink.includes(`/${channelId}`)
         ) {
           continue
         }

@@ -101,8 +101,16 @@ export const IpcChannels = {
   ProfileActivateCardWebEmbed: 'profile:activate-card-web-embed',
   ProfileReloadCardEmbed: 'profile:reload-card-embed',
   ProfileStartCardAppLogin: 'profile:start-card-app-login',
+  ProfileCheckCardGoogleSession: 'profile:check-card-google-session',
+  ProfileSyncCardGoogleSessions: 'profile:sync-card-google-sessions',
   ProfileUpdateCardSlackEmbedBounds: 'profile:update-card-slack-embed-bounds',
   ProfileClearCardSlackEmbed: 'profile:clear-card-slack-embed',
+
+  AgentWorkCheckHealth: 'agentwork:check-health',
+  AgentWorkListAgents: 'agentwork:list-agents',
+  AgentWorkDispatchQuery: 'agentwork:dispatch-query',
+  AgentWorkGetSessionEvents: 'agentwork:get-session-events',
+  AgentWorkCreateAgent: 'agentwork:create-agent',
   ProfileStartFirstLogin: 'profile:start-first-login',
   ProfileStartGoogleAuth: 'profile:start-google-auth',
   ProfileStartAppLogin: 'profile:start-app-login',
@@ -392,7 +400,9 @@ export interface IpcApi {
       bounds: ViewportBounds
     }) => Promise<void>
     reloadCardEmbed: () => Promise<void>
-    startCardAppLogin: (payload: { projectId: string; profileId: string; appId: AppId; bounds?: ViewportBounds }) => Promise<Profile>
+    checkCardGoogleSession: (payload: { projectId: string; appId?: string }) => Promise<{ hasGoogleSession: boolean; count: number }>
+    syncCardGoogleSessions: (payload: { profileId: string; projectId: string }) => Promise<{ slack: number; agentwork: number }>
+    startCardAppLogin: (payload: { projectId: string; profileId: string; appId: AppId | 'agentwork'; bounds?: ViewportBounds }) => Promise<Profile>
     updateCardSlackEmbedBounds: (bounds: ViewportBounds) => Promise<void>
     clearCardSlackEmbed: () => Promise<void>
     startGoogleAuth: (profileId: string, bounds?: ViewportBounds) => Promise<Profile>
@@ -623,6 +633,78 @@ export interface IpcApi {
     getSummary: () => Promise<StorageSummaryResult>
     clean: (payload: CleanStoragePayload) => Promise<CleanStorageResult>
   }
+  agentwork: {
+    checkHealth: (baseUrl?: string) => Promise<AgentWorkHealthResult>
+    listAgents: (payload: { projectId: string; baseUrl?: string }) => Promise<AgentWorkListAgentsResult>
+    dispatchQuery: (payload: {
+      projectId: string
+      query: string
+      role?: string
+      agentMode?: string
+      baseUrl?: string
+    }) => Promise<AgentWorkDispatchQueryResult>
+    getSessionEvents: (payload: {
+      projectId: string
+      sessionId: string
+      baseUrl?: string
+    }) => Promise<AgentWorkSessionEventsResult>
+    createAgent: (payload: {
+      projectId: string
+      name: string
+      role: string
+      systemPrompt?: string
+      baseUrl?: string
+    }) => Promise<AgentWorkCreateAgentResult>
+  }
+}
+
+export interface AgentWorkAgentSummary {
+  agent_id: string
+  agent_name: string
+  label?: string
+  purpose?: string
+  role?: 'head' | 'architect' | 'coder' | 'tester' | 'reviewer' | 'executor' | 'custom'
+  online?: boolean
+  presence?: string
+  delivery_mode?: string
+  published?: boolean
+  provider?: string
+  created_at?: string
+  last_active?: string
+}
+
+export interface AgentWorkHealthResult {
+  status: 'ok' | 'error'
+  url: string
+  latencyMs: number
+  data?: any
+  error?: string
+}
+
+export interface AgentWorkListAgentsResult {
+  success: boolean
+  agents: AgentWorkAgentSummary[]
+  source: 'live' | 'local'
+  error?: string
+}
+
+export interface AgentWorkDispatchQueryResult {
+  success: boolean
+  sessionId?: string
+  response?: string
+  error?: string
+}
+
+export interface AgentWorkSessionEventsResult {
+  success: boolean
+  events: any[]
+  error?: string
+}
+
+export interface AgentWorkCreateAgentResult {
+  success: boolean
+  agentId?: string
+  error?: string
 }
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error' | 'security'

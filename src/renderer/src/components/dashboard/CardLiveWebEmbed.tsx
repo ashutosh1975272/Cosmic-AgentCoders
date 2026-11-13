@@ -32,6 +32,9 @@ export default function CardLiveWebEmbed({
       return undefined
     }
 
+    // Force embed visible when activating or unhiding
+    void window.api?.profiles?.setEmbedVisible?.(true)
+
     const el = embedRef.current ?? containerRef.current
     if (!el) return
 
@@ -108,17 +111,34 @@ export default function CardLiveWebEmbed({
       sendBounds()
     })
     ro.observe(el)
+    if (document.body) {
+      ro.observe(document.body)
+    }
 
-    const onScroll = () => sendBounds()
-    window.addEventListener('scroll', onScroll, { capture: true, passive: true })
-    window.addEventListener('resize', onScroll, { passive: true })
+    const onResizeOrLayout = () => startTrackingLoop(400)
+    const onTransitionEnd = () => startTrackingLoop(150)
+
+    window.addEventListener('resize', onResizeOrLayout)
+    window.addEventListener('scroll', sendBounds, true)
+    window.addEventListener('layout-bounds-change', onResizeOrLayout)
+    document.addEventListener('transitionrun', onResizeOrLayout)
+    document.addEventListener('transitionstart', onResizeOrLayout)
+    document.addEventListener('transitionend', onTransitionEnd)
+    document.addEventListener('animationstart', onResizeOrLayout)
+    document.addEventListener('animationend', onTransitionEnd)
 
     return () => {
       cancelled = true
       if (animFrameId) cancelAnimationFrame(animFrameId)
       ro.disconnect()
-      window.removeEventListener('scroll', onScroll, { capture: true })
-      window.removeEventListener('resize', onScroll)
+      window.removeEventListener('resize', onResizeOrLayout)
+      window.removeEventListener('scroll', sendBounds, true)
+      window.removeEventListener('layout-bounds-change', onResizeOrLayout)
+      document.removeEventListener('transitionrun', onResizeOrLayout)
+      document.removeEventListener('transitionstart', onResizeOrLayout)
+      document.removeEventListener('transitionend', onTransitionEnd)
+      document.removeEventListener('animationstart', onResizeOrLayout)
+      document.removeEventListener('animationend', onTransitionEnd)
       void window.api?.profiles?.clearCardSlackEmbed?.()
     }
   }, [projectId, profileId, linkId, url, hidden])

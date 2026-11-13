@@ -26,9 +26,11 @@ import {
 import { SAMPLE_SLACK_THEME_SCRIPT } from './theme-sample'
 import type { WorkspaceThemePayload } from '../../shared/types'
 import {
+  applyChromeSessionTweaks,
   applySlackWebContentsTweaks,
   applyTeamsWebContentsTweaks,
   applyWhatsAppWebContentsTweaks,
+  CHROME_USER_AGENT,
   homeUrlForApp,
   injectHideDmCss,
   isMicrosoftSignedOutUrl,
@@ -1091,16 +1093,41 @@ export class BrowserViewManager {
     const key = customLinkKey(profileId, linkId)
     let view = this.views.get(key)
     if (!view || view.webContents.isDestroyed()) {
+      const partition = `persist:profile-${profileId}-link-${linkId}`
+      applyChromeSessionTweaks(partition)
       view = new WebContentsView({
         webPreferences: {
-          partition: `persist:profile-${profileId}-link-${linkId}`,
+          partition,
           contextIsolation: true,
           nodeIntegration: false,
           sandbox: true
         }
       })
       view.setBackgroundColor('#0C0D11')
+      view.webContents.setUserAgent(CHROME_USER_AGENT)
       view.webContents.setWindowOpenHandler(({ url: openUrl }) => {
+        if (
+          openUrl.includes('accounts.google.com') ||
+          openUrl.includes('google.com/o/oauth2') ||
+          openUrl.includes('appleid.apple.com') ||
+          openUrl.includes('github.com/login')
+        ) {
+          applyChromeSessionTweaks(partition)
+          return {
+            action: 'allow',
+            overrideBrowserWindowOptions: {
+              autoHideMenuBar: true,
+              width: 500,
+              height: 650,
+              webPreferences: {
+                partition,
+                contextIsolation: true,
+                nodeIntegration: false,
+                sandbox: true
+              }
+            }
+          }
+        }
         void view?.webContents.loadURL(openUrl)
         return { action: 'deny' }
       })
@@ -1270,18 +1297,54 @@ export class BrowserViewManager {
     bounds: Rectangle
   ): void {
     const key = `card:link:${projectId || profileId}:${linkId}`
+    const partition = projectId
+      ? partitionForCard(projectId, (linkId === 'agentwork' ? 'agentwork' : 'slack') as AppId)
+      : `persist:profile-${profileId || 'default'}-link-${linkId}`
+
+    if (projectId && profileId) {
+      void syncGoogleSessionFromProfileToCard(
+        profileId,
+        projectId,
+        (linkId === 'agentwork' ? 'agentwork' : 'slack') as any
+      ).catch(() => undefined)
+    }
+
     let view = this.views.get(key)
     if (!view || view.webContents.isDestroyed()) {
+      applyChromeSessionTweaks(partition)
       view = new WebContentsView({
         webPreferences: {
-          partition: `persist:profile-${profileId || 'default'}-link-${linkId}`,
+          partition,
           contextIsolation: true,
           nodeIntegration: false,
           sandbox: true
         }
       })
       view.setBackgroundColor('#0C0D11')
+      view.webContents.setUserAgent(CHROME_USER_AGENT)
       view.webContents.setWindowOpenHandler(({ url: openUrl }) => {
+        if (
+          openUrl.includes('accounts.google.com') ||
+          openUrl.includes('google.com/o/oauth2') ||
+          openUrl.includes('appleid.apple.com') ||
+          openUrl.includes('github.com/login')
+        ) {
+          applyChromeSessionTweaks(partition)
+          return {
+            action: 'allow',
+            overrideBrowserWindowOptions: {
+              autoHideMenuBar: true,
+              width: 500,
+              height: 650,
+              webPreferences: {
+                partition,
+                contextIsolation: true,
+                nodeIntegration: false,
+                sandbox: true
+              }
+            }
+          }
+        }
         void view?.webContents.loadURL(openUrl)
         return { action: 'deny' }
       })
@@ -1303,16 +1366,15 @@ export class BrowserViewManager {
 
     this.cardEmbedKey = key
     this.cardEmbedBounds = bounds
+    this.embedHidden = false
 
-    if (!this.embedHidden) {
-      if (!mainWindow.contentView.children.includes(view)) {
-        mainWindow.contentView.addChildView(view)
-      }
-      view.setBounds(bounds)
+    if (!mainWindow.contentView.children.includes(view)) {
+      mainWindow.contentView.addChildView(view)
     }
+    view.setBounds(bounds)
 
     this.noteActivity()
-    log.info('card web embed activated', { projectId, profileId, linkId, url, bounds })
+    log.info('card web embed activated', { projectId, profileId, linkId, url, bounds, partition })
   }
 
   reloadCardEmbed(): void {

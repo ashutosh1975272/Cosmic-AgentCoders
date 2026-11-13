@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it, beforeEach } from 'vitest'
 import { useAgentCodersStore, SWARM_AGENTS } from '../../src/renderer/src/hooks/useAgentCodersStore'
 
@@ -81,5 +82,55 @@ describe('useAgentCodersStore', () => {
     expect(state.swarmGoal).toBeNull()
     expect(state.swarmProgress).toBe(0)
     expect(state.isOrchestrating).toBe(false)
+  })
+
+  it('persists messages to localStorage and restores history via loadProjectHistory', () => {
+    const projId = 'proj-persist-test'
+    useAgentCodersStore.getState().loadProjectHistory(projId)
+
+    // Post a custom question to coder
+    useAgentCodersStore.getState().postMessage('coder', {
+      senderId: 'user',
+      senderName: 'You',
+      text: 'How do we implement red-green tests?'
+    })
+
+    // Reset store in-memory state
+    useAgentCodersStore.getState().resetSwarm()
+
+    // Load history for projId
+    useAgentCodersStore.getState().loadProjectHistory(projId)
+
+    const state = useAgentCodersStore.getState()
+    expect(
+      state.agentMessages.coder.some((m) => m.text === 'How do we implement red-green tests?')
+    ).toBe(true)
+  })
+
+  it('isolates chat history across different project IDs', () => {
+    const projA = 'proj-A'
+    const projB = 'proj-B'
+
+    useAgentCodersStore.getState().loadProjectHistory(projA)
+    useAgentCodersStore.getState().postMessage('architect', {
+      senderId: 'user',
+      senderName: 'You',
+      text: 'Question exclusive to Project A'
+    })
+
+    useAgentCodersStore.getState().loadProjectHistory(projB)
+    expect(
+      useAgentCodersStore
+        .getState()
+        .agentMessages.architect.some((m) => m.text === 'Question exclusive to Project A')
+    ).toBe(false)
+
+    // Re-loading projA restores the message
+    useAgentCodersStore.getState().loadProjectHistory(projA)
+    expect(
+      useAgentCodersStore
+        .getState()
+        .agentMessages.architect.some((m) => m.text === 'Question exclusive to Project A')
+    ).toBe(true)
   })
 })

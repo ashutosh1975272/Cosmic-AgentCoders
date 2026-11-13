@@ -52,10 +52,11 @@ export function isGoogleCookieDomain(domain: string): boolean {
 export async function syncGoogleSessionFromProfileToCard(
   profileId: string,
   projectId: string,
-  appId: AppId = 'slack'
+  appId: AppId | 'agentwork' = 'slack'
 ): Promise<number> {
-  const srcPartition = partitionForProfile(profileId, appId)
-  const dstPartition = partitionForCard(projectId, appId)
+  const srcAppId: AppId = appId === 'agentwork' ? 'slack' : appId
+  const srcPartition = partitionForProfile(profileId, srcAppId)
+  const dstPartition = partitionForCard(projectId, appId as AppId)
 
   if (srcPartition === dstPartition) return 0
 
@@ -136,28 +137,79 @@ export async function syncGoogleSessionFromProfileToCard(
 }
 
 /**
- * Propagates Google cookies from a profile to a list of card project IDs.
- * Used after a successful profile-level Google login to bring all existing
+ * Propagates Google cookies from a profile to a list of card project IDs across all partitions
+ * (Slack + AgentWork). Used after a successful profile-level Google login to bring all existing
  * cards under that profile up to date.
  */
 export async function syncGoogleSessionToProfileCards(
   profileId: string,
   cardProjectIds: string[],
-  appId: AppId = 'slack'
+  appId?: AppId | 'agentwork'
 ): Promise<void> {
   if (cardProjectIds.length === 0) return
 
+  const targets = appId ? [appId] : (['slack', 'agentwork'] as const)
+
   const results = await Promise.allSettled(
-    cardProjectIds.map((projectId) =>
-      syncGoogleSessionFromProfileToCard(profileId, projectId, appId)
+    cardProjectIds.flatMap((projectId) =>
+      targets.map((target) => syncGoogleSessionFromProfileToCard(profileId, projectId, target))
     )
   )
 
   const synced = results.filter((r) => r.status === 'fulfilled').length
-  log.info('google-session-sync: batch sync complete', {
+  log.info('google-session-sync: batch sync complete across card partitions', {
     profileId,
     total: cardProjectIds.length,
     synced
   })
 }
+
+/**
+ * Synchronizes Google authentication cookies from a profile into all key partitions
+ * of a project card (Slack, AgentWork, etc.) so that all tabs have immediate OAuth capability.
+ */
+export async function syncAllCardPartitionsFromProfile(
+  profileId: string,
+  projectId: string
+): Promise<{ slack: number; agentwork: number }> {
+  const [slack, agentwork] = await Promise.all([
+    syncGoogleSessionFromProfileToCard(profileId, projectId, 'slack'),
+    syncGoogleSessionFromProfileToCard(profileId, projectId, 'agentwork')
+  ])
+  return { slack, agentwork }
+}
+
+export interface CardGoogleSessionCheckResult {
+  hasGoogleSession: boolean
+  count: number
+}
+
+/**
+ * Checks whether a card partition possesses valid Google authentication cookies.
+ */
+export async function checkCardGoogleSession(
+  projectId: string,
+  appId: AppId | 'agentwork' = 'agentwork'
+): Promise<CardGoogleSessionCheckResult> {
+  try {
+    const partition = partitionForCard(projectId, appId as AppId)
+    const ses = electronSession.fromPartition(partition)
+    const cookies = await ses.cookies.get({})
+    const googleCookies = cookies.filter((c) => isGoogleCookieDomain(c.domain ?? ''))
+
+    // Critical authentication cookies: SID, SSID, HSID, __Secure-1PSID, etc.
+    const hasAuthCookie = googleCookies.some(
+      (c) => c.name === 'SID' || c.name === 'SSID' || c.name === '__Secure-1PSID' || c.name === '__Secure-3PSID'
+    )
+
+    return {
+      hasGoogleSession: hasAuthCookie || googleCookies.length >= 5,
+      count: googleCookies.length
+    }
+  } catch (err) {
+    log.warn('checkCardGoogleSession failed', { projectId, appId, err: String(err) })
+    return { hasGoogleSession: false, count: 0 }
+  }
+}
+
 

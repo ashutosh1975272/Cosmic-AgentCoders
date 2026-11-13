@@ -2,9 +2,12 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import {
   useAgentCodersStore,
   SWARM_AGENTS,
+  AGENTWORK_PORTAL_META,
   type SwarmAgentId
 } from '../../hooks/useAgentCodersStore'
 import ComposerAutocompletePopover, { AutocompleteItem } from './ComposerAutocompletePopover'
+import CardLiveWebEmbed from './CardLiveWebEmbed'
+import AgentWorkControlModal from './AgentWorkControlModal'
 
 export const INNER_SIDEBAR_DEFAULT = 280
 export const INNER_SIDEBAR_MIN = 180
@@ -14,22 +17,34 @@ export const INNER_SIDEBAR_COLLAPSED_W = 64
 interface AgentCodersPanelProps {
   projectId: string
   projectName: string
+  profileId?: string
 }
 
 export default function AgentCodersPanel({
-  projectId: _projectId,
-  projectName
+  projectId,
+  projectName,
+  profileId
 }: AgentCodersPanelProps): React.JSX.Element {
   const activeAgentId = useAgentCodersStore((s) => s.activeAgentId)
+  const activeView = useAgentCodersStore((s) => s.activeView)
   const agentMessages = useAgentCodersStore((s) => s.agentMessages)
   const tasks = useAgentCodersStore((s) => s.tasks)
   const swarmGoal = useAgentCodersStore((s) => s.swarmGoal)
   const swarmProgress = useAgentCodersStore((s) => s.swarmProgress)
   const isOrchestrating = useAgentCodersStore((s) => s.isOrchestrating)
   const setActiveAgent = useAgentCodersStore((s) => s.setActiveAgent)
+  const setActiveView = useAgentCodersStore((s) => s.setActiveView)
+  const loadProjectHistory = useAgentCodersStore((s) => s.loadProjectHistory)
   const dispatchTaskFromHead = useAgentCodersStore((s) => s.dispatchTaskFromHead)
   const postMessage = useAgentCodersStore((s) => s.postMessage)
   const resetSwarm = useAgentCodersStore((s) => s.resetSwarm)
+
+  // Hydrate persistent chat history and swarm tasks for this project
+  useEffect(() => {
+    if (projectId) {
+      loadProjectHistory(projectId)
+    }
+  }, [projectId, loadProjectHistory])
 
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     if (typeof window !== 'undefined') {
@@ -52,6 +67,45 @@ export default function AgentCodersPanel({
   })
 
   const [isDragging, setIsDragging] = useState(false)
+  const [isAuthenticating, setIsAuthenticating] = useState(false)
+  const [authError, setAuthError] = useState<string | null>(null)
+  const [showControlModal, setShowControlModal] = useState(false)
+  const [googleSession, setGoogleSession] = useState<{ hasSession: boolean; count: number } | null>(null)
+
+  const refreshGoogleSession = useCallback(async () => {
+    if (!window.api?.profiles?.checkCardGoogleSession || !projectId) return
+    try {
+      const res = await window.api.profiles.checkCardGoogleSession({ projectId, appId: 'agentwork' })
+      setGoogleSession({ hasSession: Boolean(res?.hasGoogleSession), count: res?.count ?? 0 })
+    } catch {
+      setGoogleSession(null)
+    }
+  }, [projectId])
+
+  useEffect(() => {
+    if (activeView === 'agentwork') {
+      void refreshGoogleSession()
+    }
+  }, [activeView, refreshGoogleSession])
+
+  const handleGoogleOAuthLogin = async () => {
+    if (!window.api?.profiles?.startCardAppLogin) return
+    setIsAuthenticating(true)
+    setAuthError(null)
+    try {
+      await window.api.profiles.startCardAppLogin({
+        projectId,
+        profileId: profileId || 'default',
+        appId: 'agentwork'
+      })
+      await refreshGoogleSession()
+    } catch (err: any) {
+      console.error('AgentWork Google OAuth failed:', err)
+      setAuthError(err?.message || 'Authentication failed')
+    } finally {
+      setIsAuthenticating(false)
+    }
+  }
 
   const [draft, setDraft] = useState('')
   const [autocompleteTrigger, setAutocompleteTrigger] = useState<'@' | '#' | '/' | '$' | null>(null)
@@ -77,6 +131,7 @@ export default function AgentCodersPanel({
       const next = !prev
       if (typeof window !== 'undefined') {
         localStorage.setItem('agentcoders_sidebar_collapsed', String(next))
+        window.dispatchEvent(new CustomEvent('layout-bounds-change'))
       }
       return next
     })
@@ -87,6 +142,7 @@ export default function AgentCodersPanel({
     setSidebarWidth(clamped)
     if (typeof window !== 'undefined') {
       localStorage.setItem('agentcoders_sidebar_width', String(clamped))
+      window.dispatchEvent(new CustomEvent('layout-bounds-change'))
     }
   }, [])
 
@@ -109,11 +165,15 @@ export default function AgentCodersPanel({
         setSidebarWidth(nextW)
         if (typeof window !== 'undefined') {
           localStorage.setItem('agentcoders_sidebar_width', String(nextW))
+          window.dispatchEvent(new CustomEvent('layout-bounds-change'))
         }
       }
 
       const onPointerUp = (ev: PointerEvent) => {
         setIsDragging(false)
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('layout-bounds-change'))
+        }
         try {
           handle.releasePointerCapture(ev.pointerId)
         } catch {
@@ -325,8 +385,38 @@ export default function AgentCodersPanel({
                 gap: 8
               }}
             >
+              {/* 1. AgentWork Portal Icon (Position 1: Above Head Agent) */}
+              <button
+                type="button"
+                onClick={() => setActiveView('agentwork')}
+                aria-label="AgentWork Portal"
+                title="AgentWork Portal (https://agents.excellencetechnologies.in/)"
+                style={{
+                  position: 'relative',
+                  width: 42,
+                  height: 42,
+                  borderRadius: 8,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background:
+                    activeView === 'agentwork'
+                      ? 'rgba(34, 197, 94, 0.25)'
+                      : 'rgba(255, 255, 255, 0.03)',
+                  border:
+                    activeView === 'agentwork'
+                      ? '1px solid rgba(34, 197, 94, 0.5)'
+                      : '1px solid rgba(255, 255, 255, 0.06)',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <span style={{ fontSize: 18 }}>⚡</span>
+              </button>
+
+              {/* 2. Swarm Agents (Shifted Down) */}
               {SWARM_AGENTS.map((agent) => {
-                const isSelected = agent.id === activeAgentId
+                const isSelected = activeView === agent.id
                 const activeTasks = activeTaskCountFor(agent.id)
                 return (
                   <button
@@ -499,13 +589,95 @@ export default function AgentCodersPanel({
 
             {/* Agent List */}
             <nav style={{ flex: 1, overflowY: 'auto', padding: '8px 6px' }}>
+              {/* 1. AgentWork Portal Button (Position 1: Above Head Agent) */}
+              <button
+                type="button"
+                data-testid="sidebar-agentwork-btn"
+                onClick={() => setActiveView('agentwork')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  width: '100%',
+                  gap: 10,
+                  padding: '9px 10px',
+                  borderRadius: 6,
+                  background:
+                    activeView === 'agentwork' ? 'rgba(34, 197, 94, 0.2)' : 'transparent',
+                  border:
+                    activeView === 'agentwork'
+                      ? '1px solid rgba(34, 197, 94, 0.4)'
+                      : '1px solid transparent',
+                  color: activeView === 'agentwork' ? '#f8fafc' : '#cbd5e1',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  marginBottom: 3,
+                  transition: 'background 0.12s ease'
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 16,
+                    width: 28,
+                    height: 28,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 6,
+                    background: 'rgba(34, 197, 94, 0.15)',
+                    border: '1px solid rgba(34, 197, 94, 0.4)',
+                    flexShrink: 0
+                  }}
+                >
+                  ⚡
+                </span>
+
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between'
+                    }}
+                  >
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#4ade80' }}>
+                      AgentWork
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 700,
+                        padding: '1px 5px',
+                        borderRadius: 3,
+                        background: 'rgba(34, 197, 94, 0.25)',
+                        color: '#86efac'
+                      }}
+                    >
+                      PORTAL
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 10.5,
+                      color: activeView === 'agentwork' ? '#cbd5e1' : '#64748b',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    agents.excellencetechnologies.in · Web Portal
+                  </div>
+                </div>
+              </button>
+
+              {/* 2. Swarm Agents (Shifted Down) */}
               {SWARM_AGENTS.map((agent) => {
-                const isSelected = agent.id === activeAgentId
+                const isSelected = activeView === agent.id
                 const activeTasks = activeTaskCountFor(agent.id)
                 return (
                   <button
                     key={agent.id}
                     type="button"
+                    data-testid={`sidebar-agent-${agent.id}`}
                     onClick={() => setActiveAgent(agent.id)}
                     style={{
                       display: 'flex',
@@ -703,14 +875,21 @@ export default function AgentCodersPanel({
             {/* Platform 1: AgentWork */}
             <button
               type="button"
+              onClick={() => setActiveView('agentwork')}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 6,
                 padding: '4px 10px',
                 borderRadius: 5,
-                background: 'rgba(34, 197, 94, 0.15)',
-                border: '1px solid rgba(34, 197, 94, 0.4)',
+                background:
+                  activeView === 'agentwork'
+                    ? 'rgba(34, 197, 94, 0.25)'
+                    : 'rgba(34, 197, 94, 0.1)',
+                border:
+                  activeView === 'agentwork'
+                    ? '1px solid rgba(34, 197, 94, 0.6)'
+                    : '1px solid rgba(34, 197, 94, 0.3)',
                 color: '#4ade80',
                 fontSize: 11,
                 fontWeight: 650,
@@ -725,11 +904,11 @@ export default function AgentCodersPanel({
                   fontWeight: 700,
                   padding: '1px 4px',
                   borderRadius: 3,
-                  background: '#22c55e',
-                  color: '#000'
+                  background: activeView === 'agentwork' ? '#22c55e' : 'rgba(34, 197, 94, 0.3)',
+                  color: activeView === 'agentwork' ? '#000' : '#86efac'
                 }}
               >
-                ACTIVE
+                {activeView === 'agentwork' ? 'ACTIVE' : 'PORTAL'}
               </span>
             </button>
 
@@ -806,18 +985,312 @@ export default function AgentCodersPanel({
           </div>
         </div>
 
-        {/* Agent Header */}
-        <header
-          style={{
-            padding: '12px 20px',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            background: 'rgba(15, 23, 42, 0.8)',
-            backdropFilter: 'blur(10px)'
-          }}
-        >
+        {activeView === 'agentwork' ? (
+          /* AgentWork Live Web Portal Embed */
+          <div
+            data-testid="agentwork-portal-container"
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              minWidth: 0,
+              height: '100%',
+              overflow: 'hidden',
+              background: '#0a0d14',
+              position: 'relative'
+            }}
+          >
+            {/* Slack-Style Control Bar */}
+            <div
+              data-testid="agentwork-top-control-bar"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '6px 14px',
+                background: 'var(--surface, #161922)',
+                borderBottom: '1px solid var(--border, rgba(255, 255, 255, 0.08))',
+                fontSize: 12,
+                color: 'var(--text, #e2e8f0)',
+                flexShrink: 0
+              }}
+            >
+              {/* Left: Icon, Title, Project Name, Connected Badge */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, overflow: 'hidden' }}>
+                <span
+                  style={{
+                    width: 20,
+                    height: 20,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 4,
+                    background: 'rgba(34, 197, 94, 0.15)',
+                    border: '1px solid rgba(34, 197, 94, 0.4)',
+                    color: '#4ade80',
+                    fontSize: 12,
+                    flexShrink: 0
+                  }}
+                >
+                  ⚡
+                </span>
+                <span style={{ fontWeight: 650, color: '#f8fafc', whiteSpace: 'nowrap' }}>
+                  AgentWork Workspace
+                </span>
+                <span
+                  style={{
+                    color: 'var(--text-faint, #94a3b8)',
+                    fontSize: 11,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  · {projectName}
+                </span>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    fontSize: 11,
+                    color: '#4ade80',
+                    background: 'rgba(74, 222, 128, 0.1)',
+                    padding: '2px 7px',
+                    borderRadius: 12,
+                    fontWeight: 600,
+                    flexShrink: 0
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      background: '#4ade80',
+                      boxShadow: '0 0 6px rgba(74, 222, 128, 0.6)'
+                    }}
+                  />
+                  Connected
+                </span>
+
+                {googleSession !== null && (
+                  <span
+                    data-testid="agentwork-google-session-badge"
+                    title={
+                      googleSession.hasSession
+                        ? `Google identity session active (${googleSession.count} cookies present)`
+                        : 'No Google identity session in card partition — click "Sign in with Google" to sync'
+                    }
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      fontSize: 10.5,
+                      color: googleSession.hasSession ? '#38bdf8' : '#f59e0b',
+                      background: googleSession.hasSession ? 'rgba(56, 189, 248, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                      border: googleSession.hasSession ? '1px solid rgba(56, 189, 248, 0.3)' : '1px solid rgba(245, 158, 11, 0.3)',
+                      padding: '2px 7px',
+                      borderRadius: 12,
+                      fontWeight: 600,
+                      flexShrink: 0
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 5,
+                        height: 5,
+                        borderRadius: '50%',
+                        background: googleSession.hasSession ? '#38bdf8' : '#f59e0b'
+                      }}
+                    />
+                    {googleSession.hasSession ? 'Google Session Active' : 'Google Sync Needed'}
+                  </span>
+                )}
+              </div>
+
+              {/* Right: Control, Google OAuth / Re-authenticate, Reload, Open in Browser */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                {/* 1. Control Button (Slack style) */}
+                <button
+                  type="button"
+                  data-testid="agentwork-control-btn"
+                  onClick={() => setShowControlModal((v) => !v)}
+                  style={{
+                    background: 'rgba(99, 102, 241, 0.22)',
+                    border: '1px solid rgba(99, 102, 241, 0.45)',
+                    color: '#c7d2fe',
+                    fontSize: 11,
+                    borderRadius: 6,
+                    padding: '3px 10px',
+                    cursor: 'pointer',
+                    fontWeight: 650,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4
+                  }}
+                  title="Open AgentWork Workspace Control & Configuration"
+                >
+                  <span>⚙️ Control</span>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      opacity: 0.85,
+                      background: 'rgba(0,0,0,0.25)',
+                      padding: '1px 5px',
+                      borderRadius: 4
+                    }}
+                  >
+                    A2A
+                  </span>
+                </button>
+
+                {/* 2. Google OAuth Button */}
+                <button
+                  type="button"
+                  data-testid="agentwork-oauth-btn"
+                  onClick={() => void handleGoogleOAuthLogin()}
+                  disabled={isAuthenticating}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.06)',
+                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    color: isAuthenticating ? '#94a3b8' : '#cbd5e1',
+                    fontSize: 11,
+                    borderRadius: 6,
+                    padding: '3px 10px',
+                    cursor: isAuthenticating ? 'wait' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    transition: 'all 0.15s ease'
+                  }}
+                  title="Pre-seed Google session and sign in with Google OAuth"
+                >
+                  <span>🌐</span>
+                  <span>{isAuthenticating ? 'Authenticating...' : 'Sign in with Google'}</span>
+                </button>
+
+                {/* 3. Reload Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    void window.api?.profiles?.reloadCardEmbed?.()
+                  }}
+                  title="Reload AgentWork portal"
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.06)',
+                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    color: '#cbd5e1',
+                    fontSize: 11,
+                    borderRadius: 6,
+                    padding: '3px 10px',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4
+                  }}
+                >
+                  <span>🔄</span>
+                  <span>Reload</span>
+                </button>
+
+                {/* 4. Open in Browser Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (typeof window !== 'undefined') {
+                      window.open(AGENTWORK_PORTAL_META.url, '_blank')
+                    }
+                  }}
+                  title="Open in external browser"
+                  style={{
+                    background: 'rgba(34, 197, 94, 0.15)',
+                    border: '1px solid rgba(34, 197, 94, 0.3)',
+                    color: '#86efac',
+                    fontSize: 11,
+                    borderRadius: 6,
+                    padding: '3px 10px',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4
+                  }}
+                >
+                  <span>↗️</span>
+                  <span>Open in Browser</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Error Banner if OAuth fails */}
+            {authError && (
+              <div
+                style={{
+                  padding: '6px 14px',
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  borderBottom: '1px solid rgba(239, 68, 68, 0.3)',
+                  color: '#fca5a5',
+                  fontSize: 11,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between'
+                }}
+              >
+                <span>⚠️ {authError}</span>
+                <button
+                  type="button"
+                  onClick={() => setAuthError(null)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#fca5a5',
+                    cursor: 'pointer',
+                    fontSize: 12
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {/* AgentWork Control Modal Overlay */}
+            {showControlModal && (
+              <AgentWorkControlModal
+                projectId={projectId}
+                projectName={projectName}
+                profileId={profileId}
+                isOpen={showControlModal}
+                onClose={() => setShowControlModal(false)}
+              />
+            )}
+
+            {/* Embedded Live Web View */}
+            <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+              <CardLiveWebEmbed
+                key={`agentwork-embed-${projectId || 'default'}`}
+                projectId={projectId}
+                profileId={profileId || 'default'}
+                linkId="agentwork"
+                url={AGENTWORK_PORTAL_META.url}
+                hidden={showControlModal}
+              />
+            </div>
+          </div>
+        ) : (
+          /* Agent Workspace (Header + Chat + Composer) */
+          <>
+            {/* Agent Header */}
+            <header
+              style={{
+                padding: '12px 20px',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: 'rgba(15, 23, 42, 0.8)',
+                backdropFilter: 'blur(10px)'
+              }}
+            >
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontSize: 20 }}>{activeAgent.icon}</span>
             <div>
@@ -1315,7 +1788,9 @@ export default function AgentCodersPanel({
             </button>
           </div>
         </div>
-      </main>
+      </>
+    )}
+  </main>
     </div>
   )
 }

@@ -871,7 +871,8 @@ export class DashboardSyncEngine {
       text: `Starting ${trigger} scrape for ${effectiveWorkspaceName}…`
     })
 
-    const requestedEngineMode = source.engineMode ?? 'direct_api'
+    const requestedEngineMode =
+      source.engineMode ?? (project.sourcePreference === 'browser_only' ? 'browser' : 'direct_api')
     let activeEngineMode: 'direct_api' | 'browser' = 'browser'
     let directApiClient: SlackApiClient | null = null
     const cacheKey = `slack:${project.id}:${source.workspaceId}`
