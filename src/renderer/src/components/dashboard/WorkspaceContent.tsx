@@ -20,6 +20,8 @@ import SchedulesPage from './SchedulesPage'
 import { AppIcon } from '../AppIcon'
 import { SourceChannelPicker } from './SourceChannelPicker'
 import { WorkspaceControlModal } from './WorkspaceControlModal'
+import { TeamsControlModal } from './TeamsControlModal'
+import { WhatsAppControlModal } from './WhatsAppControlModal'
 import { useProfileStore } from '../../hooks/useProfiles'
 import { useDashboardStore } from '../../hooks/useDashboard'
 import { BASE_APP_PRESETS } from '../../../../shared/base-app-presets'
@@ -318,15 +320,37 @@ export default function WorkspaceContent({
     null
 
   const controlModalElement = controlSource ? (
-    <WorkspaceControlModal
-      open={Boolean(controlSource)}
-      project={project}
-      source={controlSource}
-      onClose={() => setControlSource(null)}
-      onSaved={() => {
-        void useDashboardStore.getState().loadSnapshot()
-      }}
-    />
+    controlSource.platform === 'teams' ? (
+      <TeamsControlModal
+        open={Boolean(controlSource)}
+        project={project}
+        source={controlSource}
+        onClose={() => setControlSource(null)}
+        onSaved={() => {
+          void useDashboardStore.getState().loadSnapshot()
+        }}
+      />
+    ) : controlSource.platform === 'whatsapp' ? (
+      <WhatsAppControlModal
+        open={Boolean(controlSource)}
+        project={project}
+        source={controlSource}
+        onClose={() => setControlSource(null)}
+        onSaved={() => {
+          void useDashboardStore.getState().loadSnapshot()
+        }}
+      />
+    ) : (
+      <WorkspaceControlModal
+        open={Boolean(controlSource)}
+        project={project}
+        source={controlSource}
+        onClose={() => setControlSource(null)}
+        onSaved={() => {
+          void useDashboardStore.getState().loadSnapshot()
+        }}
+      />
+    )
   ) : null
 
   // Dashboard brings its own scroll surface and width; the generic panel header
@@ -714,7 +738,7 @@ export default function WorkspaceContent({
               </div>
             </div>
             <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
-              <CardLiveSlackEmbed appId="teams" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId)} />
+              <CardLiveSlackEmbed appId="teams" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)} />
             </div>
           </div>
         )
@@ -753,7 +777,7 @@ export default function WorkspaceContent({
               </button>
             </div>
             <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
-              <CardLiveSlackEmbed appId="teams" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId)} />
+              <CardLiveSlackEmbed appId="teams" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)} />
             </div>
           </div>
         )
@@ -887,7 +911,7 @@ export default function WorkspaceContent({
               </div>
             </div>
             <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
-              <CardLiveSlackEmbed appId="whatsapp" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId)} />
+              <CardLiveSlackEmbed appId="whatsapp" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)} />
             </div>
           </div>
         )
@@ -929,7 +953,7 @@ export default function WorkspaceContent({
               </button>
             </div>
             <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
-              <CardLiveSlackEmbed appId="whatsapp" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId)} />
+              <CardLiveSlackEmbed appId="whatsapp" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)} />
             </div>
           </div>
         )

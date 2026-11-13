@@ -9,6 +9,8 @@ dist-electron/
 *.tsbuildinfo
 
 # Env & secrets (keep .env.example)
+.env
+.env.*
 !.env.example
 
 # Logs & caches

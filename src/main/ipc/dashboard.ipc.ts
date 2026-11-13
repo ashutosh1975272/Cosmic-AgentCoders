@@ -74,6 +74,8 @@ import type { DashboardDeltaStore } from '../dashboard/delta-store'
 import { SlackReaderView } from '../slack-reader/slack-reader-view'
 import { sessionTokenExtractor } from '../slack-reader/session-token-extractor'
 import { SlackApiClient } from '../dashboard/slack-api-client'
+import { TeamsReaderView } from '../teams-reader/teams-reader-view'
+import { WhatsAppReaderView } from '../whatsapp-reader/whatsapp-reader-view'
 import { log } from '../logging'
 
 export interface DashboardIpcDeps {
@@ -229,6 +231,76 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
       }
       if (!profileId) {
         return { channels: [], error: 'Profile not found — log in to Slack first' }
+      }
+
+      const platform = source?.platform || (source?.id?.includes('teams') ? 'teams' : source?.id?.includes('whatsapp') ? 'whatsapp' : 'slack')
+
+      // Teams Channel & Chat Discovery
+      if (platform === 'teams') {
+        const existingTeamsView =
+          (payload.projectId
+            ? deps.getExistingCardView?.(payload.projectId, 'teams')
+            : null) ??
+          deps.getExistingProfileView?.(profileId, 'teams') ??
+          null
+        const reader = new TeamsReaderView({ profileId, existingView: existingTeamsView })
+        try {
+          if (!existingTeamsView) {
+            await reader.initialize()
+          }
+          const discovered = await reader.listChannels()
+          return {
+            channels: discovered.map((ch) => ({
+              id: ch.id,
+              name: ch.name,
+              isPrivate: ch.isPrivate,
+              isDm: ch.isDm,
+              kind: ch.kind,
+              enabled: false
+            }))
+          }
+        } catch (err: any) {
+          return {
+            channels: [],
+            error: err instanceof Error ? err.message : 'Teams channel discovery failed'
+          }
+        } finally {
+          reader.dispose()
+        }
+      }
+
+      // WhatsApp Chat & Contact Discovery
+      if (platform === 'whatsapp') {
+        const existingWaView =
+          (payload.projectId
+            ? deps.getExistingCardView?.(payload.projectId, 'whatsapp')
+            : null) ??
+          deps.getExistingProfileView?.(profileId, 'whatsapp') ??
+          null
+        const reader = new WhatsAppReaderView({ profileId, existingView: existingWaView })
+        try {
+          if (!existingWaView) {
+            await reader.initialize()
+          }
+          const discovered = await reader.listChats()
+          return {
+            channels: discovered.map((ch) => ({
+              id: ch.id,
+              name: ch.name,
+              isPrivate: true,
+              isDm: ch.isDm,
+              kind: ch.kind,
+              enabled: false
+            }))
+          }
+        } catch (err: any) {
+          return {
+            channels: [],
+            error: err instanceof Error ? err.message : 'WhatsApp chat discovery failed'
+          }
+        } finally {
+          reader.dispose()
+        }
       }
 
       const existingView =
