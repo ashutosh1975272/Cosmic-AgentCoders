@@ -188,7 +188,7 @@ function ActionCard({
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#4ade80', fontWeight: 600, fontSize: 12 }}>
             <span>⚡</span>
-            <span>Slack Message Dispatched</span>
+            <span>{card.data?.platform === 'whatsapp' ? 'WhatsApp' : card.data?.platform === 'teams' ? 'Teams' : 'Slack'} Message Dispatched</span>
             <span
               style={{
                 fontSize: 10,
@@ -199,7 +199,7 @@ function ActionCard({
                 fontWeight: 600
               }}
             >
-              Direct API (~150ms)
+              {card.data?.platform === 'whatsapp' || card.data?.platform === 'teams' ? 'DIRECT WEB' : 'Direct API (~150ms)'}
             </span>
           </div>
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{card.data?.time}</span>
@@ -385,8 +385,9 @@ function timeLabel(iso: string): string {
   return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
 
-function sourceLabel(source: DashboardProjectChatSourceRef['source']): string {
-  return source === 'ours' ? 'Our Slack' : 'Client Slack'
+function sourceLabel(source: DashboardProjectChatSourceRef['source'], platform?: string): string {
+  const p = platform === 'whatsapp' ? 'WhatsApp' : platform === 'teams' ? 'Teams' : 'Slack'
+  return source === 'ours' ? `Our ${p}` : `Client ${p}`
 }
 
 function modelSourceLabel(source: DashboardProjectChatStatus['modelSource']): string {
@@ -510,6 +511,21 @@ export default function AgentChatPanel({
     if (!activeChannelId || !socialSource?.channels) return null
     return socialSource.channels.find((c) => c.id === activeChannelId) ?? null
   }, [activeChannelId, socialSource])
+
+  const currentSource = useMemo(() => {
+    if (socialSource) return socialSource
+    if (activeChannelId && sources) {
+      return sources.find((s) => (s.channels ?? []).some((c) => c.id === activeChannelId)) ?? null
+    }
+    return null
+  }, [socialSource, activeChannelId, sources])
+
+  const platformName = useMemo(() => {
+    const plat = currentSource?.platform || socialSource?.platform
+    if (plat === 'whatsapp') return 'WhatsApp'
+    if (plat === 'teams') return 'Teams'
+    return 'Slack'
+  }, [currentSource, socialSource])
 
   const [masterPolicy, setMasterPolicy] = useState<AutoReplyPolicy>('mention_dm')
   const [masterPersona, setMasterPersona] = useState<AutoReplyPersona>('professional')
@@ -867,7 +883,7 @@ export default function AgentChatPanel({
     }
   }, [loadChannelAndChatHistory, activeChannelId])
 
-  const sendDirectSlackReply = useCallback(
+  const sendDirectPlatformReply = useCallback(
     async (textOverride?: string): Promise<void> => {
       const text = (textOverride ?? draft).trim()
       if (!text || !activeChannelId || sendingReply) return
@@ -904,7 +920,7 @@ export default function AgentChatPanel({
             prev.map((m) =>
               m.id === tempId
                 ? {
-                    id: `slack-${sent.channelId}-${sent.ts}`,
+                    id: `${platformName.toLowerCase()}-${sent.channelId}-${sent.ts}`,
                     role: 'user',
                     authorName: 'You',
                     atIso: sent.atIso,
@@ -919,18 +935,18 @@ export default function AgentChatPanel({
           setMessages((prev) =>
             prev.map((m) => (m.id === tempId ? { ...m, pending: false, failed: true } : m))
           )
-          setNotice(res.error || 'Failed to send message to Slack.')
+          setNotice(res.error || `Failed to send message to ${platformName}.`)
         }
       } catch (err) {
         setMessages((prev) =>
           prev.map((m) => (m.id === tempId ? { ...m, pending: false, failed: true } : m))
         )
-        setNotice(err instanceof Error ? err.message : 'Error sending message to Slack.')
+        setNotice(err instanceof Error ? err.message : `Error sending message to ${platformName}.`)
       } finally {
         setSendingReply(false)
       }
     },
-    [draft, activeChannelId, sendingReply, projectId, scrollToBottom]
+    [draft, activeChannelId, sendingReply, projectId, platformName, scrollToBottom]
   )
 
   const refreshStatus = useCallback((): void => {
@@ -1263,12 +1279,12 @@ export default function AgentChatPanel({
 
       event.preventDefault()
       if (activeChannel && !isSlashCommandOrExplicitDispatch(draft)) {
-        void sendDirectSlackReply()
+        void sendDirectPlatformReply()
       } else {
         void send()
       }
     },
-    [autocompleteTrigger, activeChannel, draft, sendDirectSlackReply, send]
+    [autocompleteTrigger, activeChannel, draft, sendDirectPlatformReply, send]
   )
 
   if (mode === 'agentwork') {
@@ -1557,7 +1573,7 @@ export default function AgentChatPanel({
                   ? 'No stored messages for this channel yet. Type a message below to start the conversation!'
                   : keyMissing
                     ? 'Add an AI key in Settings, then ask what the client needs, what changed, or what is blocked.'
-                    : 'I answer from this project’s Slack history and the state this card has already derived. Nothing is posted to Slack.'}
+                    : `I answer from this project’s ${platformName} history and the state this card has already derived. Nothing is posted to ${platformName}.`}
               </p>
               <div className="chat-suggestions">
                 {SUGGESTIONS.map((suggestion) => (
@@ -1636,7 +1652,7 @@ export default function AgentChatPanel({
                           fontWeight: 700
                         }}
                       >
-                        DIRECT API
+                        {platformName === 'WhatsApp' || platformName === 'Teams' ? 'DIRECT WEB' : 'DIRECT API'}
                       </span>
                     </div>
                   ) : (
@@ -1708,18 +1724,23 @@ export default function AgentChatPanel({
                     </button>
                     {message.sources && message.sources.length > 0 ? (
                       <div className="chat-sources" aria-label="Sources">
-                        {message.sources.map((source) => (
-                          <button
-                            type="button"
-                            className="chat-source"
-                            key={`${source.source}:${source.channelId}:${source.ts}`}
-                            title={`${sourceLabel(source.source)} · ${source.ts}`}
-                            onClick={() => onOpenSource?.(source)}
-                            disabled={!onOpenSource}
-                          >
-                            #{source.channelName}
-                          </button>
-                        ))}
+                        {message.sources.map((source) => {
+                          const srcPlatform =
+                            sources?.find((s) => (s.channels ?? []).some((c) => c.id === source.channelId))
+                              ?.platform ?? platformName
+                          return (
+                            <button
+                              type="button"
+                              className="chat-source"
+                              key={`${source.source}:${source.channelId}:${source.ts}`}
+                              title={`${sourceLabel(source.source, srcPlatform)} · ${source.ts}`}
+                              onClick={() => onOpenSource?.(source)}
+                              disabled={!onOpenSource}
+                            >
+                              #{source.channelName}
+                            </button>
+                          )
+                        })}
                       </div>
                     ) : null}
                   </div>
@@ -1887,7 +1908,7 @@ export default function AgentChatPanel({
         onSubmit={(event) => {
           event.preventDefault()
           if (activeChannel && !isSlashCommandOrExplicitDispatch(draft)) {
-            void sendDirectSlackReply()
+            void sendDirectPlatformReply()
           } else {
             void send()
           }
@@ -1910,7 +1931,7 @@ export default function AgentChatPanel({
             aria-label="Ask about this project"
             placeholder={
               activeChanDisplay
-                ? `Message ${activeChanDisplay.fullName} directly on Slack (type @ for accounts, # for channels, / for commands)…`
+                ? `Message ${activeChanDisplay.fullName} directly on ${platformName} (type @ for accounts, # for channels, / for commands)…`
                 : keyMissing
                   ? 'Add an AI key to start chatting'
                   : 'Ask about this project (type @ for accounts, # for channels, / for commands)…'
@@ -1942,7 +1963,7 @@ export default function AgentChatPanel({
         )}
       </form>
       <p className="chat-hint">
-        Enter sends, Shift+Enter adds a line. Cosmic can execute Slack dispatches, read channels, and trigger scrapes on command.
+        Enter sends, Shift+Enter adds a line. Cosmic can execute {platformName} dispatches, read channels, and trigger scrapes on command.
       </p>
       <p className="chat-visually-hidden" role="status" aria-live="polite">
         {liveMessage}

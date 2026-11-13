@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -108,5 +108,77 @@ describe('DashboardDeltaStore', () => {
     })
     const all = await store.listForProfile('px')
     expect(all.map((d) => d.channel.id)).toEqual(['ca', 'cb'])
+  })
+
+  it('self-heals corrupted "ts": "NaN" and "cursor": "NaN" files on load, persisting clean JSON', async () => {
+    const store = await tmpStore()
+    const filePath = join(store.rootDir, 'channels', 'prof1', 'default', 'wa_talent_killer___.json')
+    await mkdir(join(filePath, '..'), { recursive: true })
+
+    const corruptedData = {
+      channel: { id: 'wa_talent_killer___', name: 'Talent Killer 👿' },
+      messages: [
+        {
+          ts: 'NaN',
+          user: 'You',
+          text: 'First corrupted message',
+          source: 'ours'
+        },
+        {
+          ts: 'NaN',
+          user: 'You',
+          text: 'Second corrupted message',
+          source: 'ours'
+        }
+      ],
+      cursor: 'NaN',
+      lastSyncAt: '2026-11-13T14:12:59.393Z'
+    }
+
+    await writeFile(filePath, JSON.stringify(corruptedData), 'utf8')
+
+    // Load should automatically repair the file
+    const loaded = await store.load('prof1', 'default', 'wa_talent_killer___')
+    expect(loaded).not.toBeNull()
+    expect(loaded?.messages.length).toBe(2)
+    expect(loaded?.messages[0].ts).not.toBe('NaN')
+    expect(loaded?.messages[1].ts).not.toBe('NaN')
+    expect(isNaN(Number(loaded?.messages[0].ts))).toBe(false)
+    expect(isNaN(Number(loaded?.messages[1].ts))).toBe(false)
+    expect(Number(loaded?.messages[0].ts)).toBeLessThan(Number(loaded?.messages[1].ts))
+    expect(loaded?.cursor).toBe(loaded?.messages[1].ts)
+
+    // Check that the file on disk was rewritten with clean JSON
+    const diskContent = await readFile(filePath, 'utf8')
+    const parsedDisk = JSON.parse(diskContent)
+    expect(parsedDisk.cursor).toBe(loaded?.cursor)
+    expect(parsedDisk.messages[0].ts).toBe(loaded?.messages[0].ts)
+    expect(diskContent).not.toContain('"NaN"')
+  })
+
+  it('deduplicates messages on disk on load', async () => {
+    const store = await tmpStore()
+    const filePath = join(store.rootDir, 'channels', 'prof1', 't1', 'c_dup.json')
+    await mkdir(join(filePath, '..'), { recursive: true })
+
+    const dataWithDups = {
+      channel: { id: 'c_dup', name: 'dup-chan' },
+      messages: [
+        { ts: '100.0', user: 'Alice', text: 'Hello' },
+        { ts: '100.0', user: 'Alice', text: 'Hello' },
+        { ts: '200.0', user: 'Bob', text: 'World' }
+      ],
+      cursor: '200.0',
+      lastSyncAt: '2026-11-13T14:00:00.000Z'
+    }
+    await writeFile(filePath, JSON.stringify(dataWithDups), 'utf8')
+
+    const loaded = await store.load('prof1', 't1', 'c_dup')
+    expect(loaded?.messages).toHaveLength(2)
+    expect(loaded?.messages.map((m) => m.ts)).toEqual(['100.0', '200.0'])
+
+    const diskContent = await readFile(filePath, 'utf8')
+    const parsedDisk = JSON.parse(diskContent)
+    expect(parsedDisk.messages).toHaveLength(2)
   })
 })

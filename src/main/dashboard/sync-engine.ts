@@ -939,6 +939,22 @@ export class DashboardSyncEngine {
         }
         snippets.push(...scrapeResult.snippets)
         channelsRead += scrapeResult.channels.filter((c) => c.status === 'read').length
+
+        // Wire Real-Time Auto-Reply for newly scraped multiplatform messages
+        if (scrapeResult.deltas && scrapeResult.deltas.length > 0) {
+          const profileId = source.profileId || project.profileId
+          const teamId = source.workspaceId || (source.platform === 'teams' ? 'teams-home' : 'default')
+          for (const delta of scrapeResult.deltas) {
+            const addedCount = delta.newMessageCount ?? 0
+            if (addedCount > 0) {
+              const allMsgs = await this.deltaStore.messagesSince(profileId, teamId, delta.channelId)
+              const newMsgs = allMsgs.slice(-addedCount)
+              if (newMsgs.length > 0) {
+                void this.handleAutoReplyForNewMessages(project, delta.channelId, newMsgs)
+              }
+            }
+          }
+        }
       } else {
         if (requestedEngineMode === 'direct_api') {
         try {
@@ -1481,13 +1497,16 @@ export class DashboardSyncEngine {
 
     for (const msg of newMessages) {
       if (!msg.ts || this.repliedMessageTimestamps.has(msg.ts)) continue
+      const isMine = msg.source === 'ours' || msg.user === 'You' || msg.user === 'me'
+      if (isMine) continue
 
       const check = shouldAutoReplyToMessage(
         project,
         {
           text: msg.text || '',
           userId: msg.user,
-          userName: msg.user
+          userName: msg.user,
+          isMine
         },
         channelId
       )
@@ -1529,7 +1548,8 @@ export class DashboardSyncEngine {
           })
 
           if (res?.ok) {
-            this.log(`[auto-reply] Successfully dispatched automated reply to ${recipientName} (~150ms Direct API)`)
+            const platformLabel = check.source?.platform ? `${check.source.platform} Web` : '~150ms Direct API'
+            this.log(`[auto-reply] Successfully dispatched automated reply to ${recipientName} (${platformLabel})`)
           } else {
             this.log(`[auto-reply] Failed to dispatch reply to ${recipientName}: ${res?.error || 'unknown error'}`)
           }

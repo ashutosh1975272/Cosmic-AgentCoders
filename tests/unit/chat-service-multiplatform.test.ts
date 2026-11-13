@@ -254,4 +254,134 @@ describe('DashboardChatService — Multiplatform & Inheritance', () => {
     const stored = await deltaStore.load('pf3', 'ws-wa', 'wa_contact')
     expect(stored?.messages.some((m) => m.text === 'Hello from Cosmic!')).toBe(true)
   })
+
+  it('routes sendMessage to WhatsApp using getExistingCardView with card partition', async () => {
+    let queriedProjectId = ''
+    let queriedAppId = ''
+    const mockView = {
+      webContents: {
+        isDestroyed: () => false,
+        executeJavaScript: async (script: string) => {
+          if (script.includes('compose-btn-send') || script.includes('insertText')) {
+            return true
+          }
+          if (script.includes('Store.Cmd.openChatAt') || script.includes('pane-side')) {
+            return true
+          }
+          return false
+        }
+      }
+    } as any
+
+    const service = new DashboardChatService({
+      monitorStore,
+      deltaStore,
+      oauthTokenProvider: { tryGet: async () => null },
+      getAppSettings: async () => appSettings,
+      getExistingCardView: (projId, appId) => {
+        queriedProjectId = projId
+        queriedAppId = appId
+        return mockView
+      }
+    })
+
+    const result = await service.sendMessage({
+      projectId: project.id,
+      channelId: 'wa_contact',
+      text: 'Direct dispatch to WhatsApp via card session'
+    })
+
+    expect(result.ok).toBe(true)
+    expect(queriedProjectId).toBe(project.id)
+    expect(queriedAppId).toBe('whatsapp')
+    expect(result.message?.text).toBe('Direct dispatch to WhatsApp via card session')
+  })
+
+  it('enforces dynamic platform text limit error on WhatsApp', async () => {
+    const service = new DashboardChatService({
+      monitorStore,
+      deltaStore,
+      oauthTokenProvider: { tryGet: async () => null },
+      getAppSettings: async () => appSettings
+    })
+
+    const res = await service.sendMessage({
+      projectId: project.id,
+      channelId: 'wa_contact',
+      text: 'a'.repeat(4001)
+    })
+
+    expect(res.ok).toBe(false)
+    expect(res.error).toBe('WhatsApp messages are limited to 4000 characters.')
+  })
+
+  it('wires auto-reply on WhatsApp messages when autoReply is enabled and ignores our own messages', async () => {
+    const freshProject = await monitorStore.upsertProject({
+      project: {
+        ...project,
+        sources: project.sources?.map((s) =>
+          s.id === 'src-wa'
+            ? {
+                ...s,
+                channels: [
+                  {
+                    id: 'wa_contact',
+                    name: 'John WhatsApp',
+                    enabled: true,
+                    isDm: true,
+                    autoReply: true,
+                    autoReplyPersona: 'professional'
+                  }
+                ]
+              }
+            : s
+        )
+      }
+    })
+
+    let sentPayload: any = null
+    const mockService = {
+      sendMessage: async (p: any) => {
+        sentPayload = p
+        return { ok: true, message: { text: p.text, source: 'client' } }
+      }
+    }
+
+    const { DashboardInsightSyncEngine } = await import('../../src/main/dashboard/sync-engine')
+    const engine = new DashboardInsightSyncEngine({
+      monitorStore,
+      deltaStore,
+      chatService: mockService as any,
+      oauthTokenProvider: { tryGet: async () => null }
+    })
+
+    // 1. Message from client triggers auto-reply
+    await (engine as any).handleAutoReplyForNewMessages(freshProject, 'wa_contact', [
+      {
+        ts: '1730000000.000001',
+        user: 'John WhatsApp',
+        text: 'Hello, need an update please',
+        source: 'client'
+      }
+    ])
+
+    expect(sentPayload).not.toBeNull()
+    expect(sentPayload.projectId).toBe(project.id)
+    expect(sentPayload.channelId).toBe('wa_contact')
+    expect(sentPayload.text).toContain('Thanks for reaching out')
+    expect(sentPayload.isAgent).toBe(true)
+
+    // 2. Message from "You" / "ours" does NOT trigger auto-reply
+    sentPayload = null
+    await (engine as any).handleAutoReplyForNewMessages(freshProject, 'wa_contact', [
+      {
+        ts: '1730000000.000002',
+        user: 'You',
+        text: 'This is my own message',
+        source: 'ours'
+      }
+    ])
+
+    expect(sentPayload).toBeNull()
+  })
 })

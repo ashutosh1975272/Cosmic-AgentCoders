@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { DashboardSource } from '../../shared/dashboard-contract'
 
@@ -62,10 +62,105 @@ export class DashboardDeltaStore {
     teamId: string,
     channelId: string
   ): Promise<StoredChannelDelta | null> {
+    const filePath = this.channelFilePath(profileId, teamId, channelId)
     try {
-      const raw = await readFile(this.channelFilePath(profileId, teamId, channelId), 'utf8')
+      const raw = await readFile(filePath, 'utf8')
       const parsed = JSON.parse(raw) as StoredChannelDelta
       if (!parsed || !Array.isArray(parsed.messages)) return null
+
+      // Check if self-healing or deduplication is needed
+      let dirty = false
+
+      const hasInvalidTs = parsed.messages.some((m) => {
+        if (!m || typeof m.ts !== 'string' || m.ts === 'NaN') return true
+        const n = Number(m.ts)
+        return isNaN(n) || !isFinite(n)
+      })
+
+      const cursorNum = Number(parsed.cursor)
+      const hasInvalidCursor =
+        !parsed.cursor ||
+        parsed.cursor === 'NaN' ||
+        isNaN(cursorNum) ||
+        !isFinite(cursorNum)
+
+      if (hasInvalidTs || hasInvalidCursor) {
+        dirty = true
+
+        let baseEpoch = 0
+        if (parsed.lastSyncAt) {
+          const t = new Date(parsed.lastSyncAt).getTime()
+          if (!isNaN(t) && isFinite(t)) {
+            baseEpoch = t / 1000
+          }
+        }
+        if (baseEpoch <= 0) {
+          try {
+            const s = await stat(filePath)
+            if (s.mtimeMs && !isNaN(s.mtimeMs)) {
+              baseEpoch = s.mtimeMs / 1000
+            }
+          } catch {
+            // Ignore stat error
+          }
+        }
+        if (baseEpoch <= 0) {
+          baseEpoch = Date.now() / 1000
+        }
+
+        // Heal invalid timestamps
+        for (let i = 0; i < parsed.messages.length; i++) {
+          const m = parsed.messages[i]
+          if (!m) continue
+          const n = Number(m.ts)
+          if (!m.ts || m.ts === 'NaN' || isNaN(n) || !isFinite(n)) {
+            const offset = (parsed.messages.length - 1 - i) * 60 - i * 0.001
+            m.ts = (baseEpoch - offset).toFixed(6)
+          }
+          if (!m.user) m.user = 'Contact'
+          if (m.text === undefined || m.text === null) m.text = ''
+          if (!m.source) m.source = 'client'
+        }
+      }
+
+      // Deduplicate messages on disk (by ts or exact duplicates)
+      const seenTs = new Set<string>()
+      const uniqueMessages: DashboardStoredMessage[] = []
+      for (const m of parsed.messages) {
+        if (!m) continue
+        if (seenTs.has(m.ts)) {
+          dirty = true
+          continue
+        }
+        seenTs.add(m.ts)
+        uniqueMessages.push(m)
+      }
+      if (uniqueMessages.length !== parsed.messages.length) {
+        parsed.messages = uniqueMessages
+        dirty = true
+      }
+
+      // Sort messages in ascending order
+      parsed.messages.sort((a, b) => compareTs(a.ts, b.ts))
+
+      const newest = parsed.messages.at(-1)
+      const expectedCursor = newest ? newest.ts : '0'
+      if (parsed.cursor !== expectedCursor) {
+        parsed.cursor = expectedCursor
+        dirty = true
+      }
+
+      // If repaired, write back to disk atomically
+      if (dirty) {
+        try {
+          const tmpPath = `${filePath}.tmp`
+          await writeFile(tmpPath, JSON.stringify(parsed, null, 2), 'utf8')
+          await rename(tmpPath, filePath)
+        } catch {
+          // If disk write fails, return repaired in-memory object
+        }
+      }
+
       return parsed
     } catch {
       return null

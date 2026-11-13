@@ -1,5 +1,5 @@
 import { WebContentsView, session } from 'electron'
-import { partitionForProfile } from '../profiles/session-partition'
+import { partitionForCard, partitionForProfile } from '../profiles/session-partition'
 import { normalizeWhatsAppMessage, type RawWhatsAppMessage } from './whatsapp-normalizer'
 import type { DashboardStoredMessage } from '../dashboard/delta-store'
 
@@ -17,6 +17,7 @@ export interface WhatsAppDiscoveredChat {
 
 export interface WhatsAppReaderOptions {
   profileId: string
+  projectId?: string
   existingView?: WebContentsView | null
 }
 
@@ -238,18 +239,47 @@ export class WhatsAppReaderView {
   private view: WebContentsView | null = null
   private ownsView = false
   private readonly profileId: string
+  private readonly projectId?: string
 
   constructor(options: WhatsAppReaderOptions) {
     this.profileId = options.profileId
+    this.projectId = options.projectId
     if (options.existingView) {
       this.view = options.existingView
       this.ownsView = false
     }
   }
 
+  async waitForReady(timeoutMs = 8000): Promise<boolean> {
+    if (!this.view || this.view.webContents.isDestroyed()) return false
+    const deadline = Date.now() + timeoutMs
+    const probeScript = `
+      (() => {
+        return Boolean(
+          document.querySelector('#pane-side') ||
+          document.querySelector('.app-wrapper-web') ||
+          document.querySelector('#side') ||
+          document.querySelector('#main')
+        );
+      })()
+    `
+    while (Date.now() < deadline) {
+      try {
+        const ready = await this.view.webContents.executeJavaScript(probeScript, true)
+        if (ready) return true
+      } catch {
+        // Retry probe
+      }
+      await new Promise((r) => setTimeout(r, 300))
+    }
+    return false
+  }
+
   async initialize(): Promise<void> {
     if (this.view) return
-    const partition = partitionForProfile(this.profileId, 'whatsapp')
+    const partition = this.projectId
+      ? partitionForCard(this.projectId, 'whatsapp')
+      : partitionForProfile(this.profileId, 'whatsapp')
     const sess = session.fromPartition(partition)
     this.view = new WebContentsView({
       webPreferences: {
@@ -261,6 +291,7 @@ export class WhatsAppReaderView {
     this.ownsView = true
     try {
       await this.view.webContents.loadURL('https://web.whatsapp.com')
+      await this.waitForReady(8000)
     } catch {
       // Ignore initial load interruption if already navigated
     }
@@ -364,7 +395,7 @@ export class WhatsAppReaderView {
               }
             }
 
-            // 2. DOM selection fallback
+            // 2. DOM selection fallback from pane-side
             const chatItems = document.querySelectorAll(
               '#pane-side [role="listitem"], #pane-side div[tabindex="-1"], div[data-testid="cell-frame-container"]'
             );
@@ -389,6 +420,107 @@ export class WhatsAppReaderView {
         await new Promise((r) => setTimeout(r, 600))
         return true
       }
+
+      // 3. Fallback: Search box for virtualized contacts
+      const searchBoxScript = `
+        (() => {
+          try {
+            const cleanSlug = ${JSON.stringify(cleanSlug)};
+            const targetName = ${JSON.stringify(cleanName)};
+            const query = targetName || cleanSlug;
+            if (!query) return false;
+
+            const searchInput = document.querySelector(
+              '#side div[role="textbox"], div[data-tab="3"], [data-testid="chat-list-search"], div[contenteditable="true"][data-tab="3"], input[data-testid="chat-list-search"]'
+            );
+            if (!searchInput) return false;
+
+            searchInput.focus();
+            if ('value' in searchInput && typeof searchInput.value === 'string') {
+              searchInput.value = query;
+            }
+            document.execCommand('selectAll', false, null);
+            document.execCommand('insertText', false, query);
+            try {
+              searchInput.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: query }));
+            } catch {
+              // Ignore InputEvent constructor error in older environments
+            }
+            searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+            return true;
+          } catch {
+            return false;
+          }
+        })()
+      `
+      const searchInitiated = await this.view.webContents.executeJavaScript(searchBoxScript, true)
+      if (searchInitiated) {
+        const selectResultScript = `
+          (() => {
+            try {
+              const targetId = ${JSON.stringify(chatId)}.toLowerCase().trim();
+              const cleanSlug = ${JSON.stringify(cleanSlug)};
+              const targetName = ${JSON.stringify(cleanName)};
+
+              const matches = (candidate) => {
+                if (!candidate) return false;
+                const cand = candidate.toLowerCase().trim();
+                const candAlpha = cand.replace(/[^\\p{L}\\p{N}]/gu, '');
+                const slugAlpha = cleanSlug.replace(/[^\\p{L}\\p{N}]/gu, '');
+                const nameAlpha = targetName.replace(/[^\\p{L}\\p{N}]/gu, '');
+                const idAlpha = targetId.replace(/[^\\p{L}\\p{N}]/gu, '');
+
+                if (cand === targetId || cand === cleanSlug || (targetName && cand === targetName)) return true;
+                if (slugAlpha && candAlpha.includes(slugAlpha)) return true;
+                if (nameAlpha && candAlpha.includes(nameAlpha)) return true;
+                if (slugAlpha && slugAlpha.includes(candAlpha)) return true;
+                if (idAlpha && candAlpha.includes(idAlpha)) return true;
+                return false;
+              };
+
+              const chatItems = document.querySelectorAll(
+                '#pane-side [role="listitem"], #pane-side div[tabindex="-1"], div[data-testid="cell-frame-container"], div[aria-label="Search results."] [role="listitem"]'
+              );
+              for (const node of chatItems) {
+                const titleSpan = node.querySelector('span[title], div[title], [data-testid="cell-frame-title"] span');
+                const name = (titleSpan ? (titleSpan.getAttribute('title') || titleSpan.textContent || '') : '').toLowerCase().trim();
+                if (name && (name === targetId || matches(name))) {
+                  node.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+                  node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+                  node.click();
+
+                  const clearBtn = document.querySelector('button[data-testid="cancel-search"], span[data-icon="x-alt"], span[data-icon="back"]');
+                  if (clearBtn) {
+                    const btn = clearBtn.closest('button') || clearBtn;
+                    btn.click();
+                  } else {
+                    const searchInput = document.querySelector(
+                      '#side div[role="textbox"], div[data-tab="3"], [data-testid="chat-list-search"]'
+                    );
+                    if (searchInput) {
+                      searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+                    }
+                  }
+                  return true;
+                }
+              }
+              return false;
+            } catch {
+              return false;
+            }
+          })()
+        `
+        const searchDeadline = Date.now() + 3000
+        while (Date.now() < searchDeadline) {
+          await new Promise((r) => setTimeout(r, 250))
+          const searchClicked = await this.view.webContents.executeJavaScript(selectResultScript, true)
+          if (searchClicked) {
+            await new Promise((r) => setTimeout(r, 400))
+            return true
+          }
+        }
+      }
+
       return false
     } catch {
       return false
@@ -401,7 +533,7 @@ export class WhatsAppReaderView {
       return false
     }
     try {
-      const script = `
+      const typeScript = `
         (() => {
           try {
             const msg = ${JSON.stringify(text)};
@@ -411,23 +543,84 @@ export class WhatsAppReaderView {
             if (!box) return false;
             box.focus();
             document.execCommand('insertText', false, msg);
-            box.dispatchEvent(new Event('input', { bubbles: true }));
-
-            const sendBtn = document.querySelector(
-              'button[data-testid="compose-btn-send"], span[data-icon="send"]'
-            );
-            if (sendBtn) {
-              const clickable = sendBtn.closest('button') || sendBtn;
-              clickable.click();
-              return true;
+            try {
+              box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: msg }));
+            } catch {
+              // Ignore
             }
+            box.dispatchEvent(new Event('input', { bubbles: true }));
             return true;
           } catch {
             return false;
           }
         })()
       `
-      return await this.view.webContents.executeJavaScript(script, true)
+      const typed = await this.view.webContents.executeJavaScript(typeScript, true)
+      if (!typed) return false
+
+      const clickSendScript = `
+        (() => {
+          try {
+            const sendBtn = document.querySelector(
+              'button[data-testid="compose-btn-send"], span[data-icon="send"]'
+            );
+            if (sendBtn) {
+              const clickable = sendBtn.closest('button') || sendBtn;
+              clickable.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+              return true;
+            }
+            return false;
+          } catch {
+            return false;
+          }
+        })()
+      `
+
+      const deadline = Date.now() + 1200
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 150))
+        const sent = await this.view.webContents.executeJavaScript(clickSendScript, true)
+        if (sent) {
+          await new Promise((r) => setTimeout(r, 300))
+          return true
+        }
+      }
+
+      // Fallback: Dispatch DOM Enter and native OS Return key event
+      const fallbackEnterScript = `
+        (() => {
+          try {
+            const box = document.querySelector(
+              'footer [contenteditable="true"], [data-testid="conversation-compose-box-input"], footer div[role="textbox"]'
+            );
+            if (!box) return false;
+            box.focus();
+            const enterEvent = new KeyboardEvent('keydown', {
+              key: 'Enter',
+              code: 'Enter',
+              keyCode: 13,
+              which: 13,
+              bubbles: true,
+              cancelable: true
+            });
+            box.dispatchEvent(enterEvent);
+            return true;
+          } catch {
+            return false;
+          }
+        })()
+      `
+      await this.view.webContents.executeJavaScript(fallbackEnterScript, true)
+      try {
+        if (!this.view.webContents.isDestroyed()) {
+          this.view.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' })
+          this.view.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
+        }
+      } catch {
+        // Ignore native event dispatch error in mock test environments
+      }
+      await new Promise((r) => setTimeout(r, 300))
+      return true
     } catch {
       return false
     }

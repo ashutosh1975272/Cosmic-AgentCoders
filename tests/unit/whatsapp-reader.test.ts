@@ -131,4 +131,38 @@ describe('WhatsAppReaderView', () => {
     const posted = await reader.postMessage('chat-alice', 'Hello on WhatsApp!')
     expect(posted).toBe(true)
   })
+
+  it('falls back to search box when contact is not in top pane-side list', async () => {
+    const executedScripts: string[] = []
+    const mockWebContents = {
+      isDestroyed: vi.fn().mockReturnValue(false),
+      executeJavaScript: vi.fn().mockImplementation(async (script: string) => {
+        executedScripts.push(script)
+        // First attempt (pane-side DOM) returns false
+        if (script.includes('openChatAt') && script.includes('pane-side')) {
+          return false
+        }
+        // Search input initialization succeeds
+        if (script.includes('chat-list-search') || script.includes('data-tab="3"')) {
+          return true
+        }
+        // Second attempt after search results renders finds contact
+        if (script.includes('cancel-search')) {
+          return true
+        }
+        return false
+      })
+    }
+    const mockView = { webContents: mockWebContents } as any
+
+    const reader = new WhatsAppReaderView({
+      profileId: 'prof-1',
+      projectId: 'proj-123',
+      existingView: mockView
+    })
+
+    const selected = await reader.selectChat('wa_talent_killer___', 'Talent Killer')
+    expect(selected).toBe(true)
+    expect(executedScripts.some((s) => s.includes('chat-list-search') || s.includes('data-tab="3"'))).toBe(true)
+  })
 })

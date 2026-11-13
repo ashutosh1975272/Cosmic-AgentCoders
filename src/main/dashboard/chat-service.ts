@@ -638,14 +638,6 @@ export class DashboardChatService {
     if (!text) {
       return { ok: false, code: 'invalid_text', error: 'Write a message before sending.' }
     }
-    if (text.length > MAX_TEXT_LENGTH) {
-      return {
-        ok: false,
-        code: 'invalid_text',
-        error: `Slack messages are limited to ${MAX_TEXT_LENGTH} characters.`
-      }
-    }
-
     const project = await this.projectFor(payload.projectId)
     if (!project) {
       return { ok: false, code: 'not_connected', error: 'This project no longer exists.' }
@@ -662,6 +654,16 @@ export class DashboardChatService {
           c.name.replace(/^[#@]+/, '').toLowerCase() === payload.channelId.replace(/^[#@]+/, '').toLowerCase()
       )
     )
+
+    if (text.length > MAX_TEXT_LENGTH) {
+      const pName = targetSource?.platform === 'whatsapp' ? 'WhatsApp' : targetSource?.platform === 'teams' ? 'Teams' : 'Slack'
+      return {
+        ok: false,
+        code: 'invalid_text',
+        error: `${pName} messages are limited to ${MAX_TEXT_LENGTH} characters.`
+      }
+    }
+
     const targetChannel = targetSource?.channels?.find(
       (c) =>
         c.id === payload.channelId ||
@@ -692,6 +694,7 @@ export class DashboardChatService {
         const { WhatsAppReaderView } = await import('../whatsapp-reader/whatsapp-reader-view')
         const reader = new WhatsAppReaderView({
           profileId,
+          projectId: project.id,
           existingView
         })
         if (!existingView) {

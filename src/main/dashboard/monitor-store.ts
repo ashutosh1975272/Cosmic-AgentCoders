@@ -290,7 +290,11 @@ export class MonitorStore {
     const owners = data.channelOwners ?? {}
     for (const monitor of incoming.monitors ?? []) {
       const owner = owners[monitor.channelId]
-      if (owner && effectiveTeamId && owner !== effectiveTeamId) {
+      const matchingSource = incoming.sources?.find((s) =>
+        (s.channels ?? []).some((c) => c.id === monitor.channelId)
+      )
+      const expectedOwner = matchingSource?.workspaceId || effectiveTeamId
+      if (owner && expectedOwner && owner !== expectedOwner) {
         throw new Error(
           `Channel #${monitor.channelName} belongs to another workspace. One card = one workspace — pick channels from a single workspace.`
         )
@@ -329,7 +333,13 @@ export class MonitorStore {
     }
     // remember channel ownership for the cross-workspace guard
     const nextOwners = { ...owners }
-    for (const monitor of project.monitors) nextOwners[monitor.channelId] = teamId
+    for (const monitor of project.monitors) {
+      const matchingSource = project.sources?.find((s) =>
+        (s.channels ?? []).some((c) => c.id === monitor.channelId)
+      )
+      nextOwners[monitor.channelId] =
+        matchingSource?.workspaceId || effectiveTeamId || teamId || 'default'
+    }
     data.channelOwners = nextOwners
     data.projects.push(project)
     await this.write(data)

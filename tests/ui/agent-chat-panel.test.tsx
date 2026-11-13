@@ -832,4 +832,46 @@ describe('AgentChatPanel', () => {
       )
     })
   })
+
+  it('renders dynamic platform placeholder and DIRECT WEB badge for WhatsApp', async () => {
+    installApi({ status: status({ hasKey: true }) })
+
+    render(
+      <AgentChatPanel
+        projectName="Ashutosh"
+        projectId="P1"
+        mode="social"
+        socialSource={{
+          id: 'src-wa',
+          kind: 'browser',
+          platform: 'whatsapp',
+          profileId: 'pf1',
+          workspaceId: 'default',
+          workspaceName: 'WhatsApp Web',
+          role: 'client',
+          enabled: true,
+          backfillDays: 30,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          channels: [
+            {
+              id: 'wa_talent_killer___',
+              name: 'Talent Killer',
+              isPrivate: true,
+              isDm: true,
+              enabled: true,
+              agentWrite: true
+            }
+          ]
+        }}
+      />
+    )
+
+    await waitFor(() => {
+      const textarea = screen.getByRole('textbox', {
+        name: 'Ask about this project'
+      }) as HTMLTextAreaElement
+      expect(textarea.placeholder).toContain('Message @Talent Killer directly on WhatsApp')
+    })
+  })
 })

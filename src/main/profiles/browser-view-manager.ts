@@ -130,7 +130,11 @@ export class BrowserViewManager {
   }
 
   getExistingCardView(projectId: string, appId: AppId): WebContentsView | null {
-    return this.views.get(cardViewKey(projectId, appId)) ?? null
+    const view = this.views.get(cardViewKey(projectId, appId))
+    if (!view || view.webContents.isDestroyed()) {
+      return null
+    }
+    return view
   }
 
   findViewForApp(appId: AppId, projectId?: string, profileId?: string): WebContentsView | null {
