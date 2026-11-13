@@ -1323,7 +1323,7 @@ function filterRuns<
   const filtered = rows.filter((row) => {
     if (query.status && query.status !== 'all' && row.status !== query.status) return false
     if (query.trigger && query.trigger !== 'all' && row.trigger !== query.trigger) return false
-    if (query.sourceId && row.sourceId && row.sourceId !== query.sourceId) return false
+    if (query.sourceId && row.sourceId !== query.sourceId) return false
     if (query.platform && query.platform !== 'all') {
       const rowPlatform =
         row.platform ||
