@@ -194,4 +194,51 @@ describe('WhatsAppControlModal UI & Permissions Matrix', () => {
       expect(window.api.dashboard.getScrapeRuns).toHaveBeenCalled()
     })
   })
+
+  it('suppresses 0-message chats and strips leaked Slack channels', async () => {
+    window.api.dashboard.discoverSourceChannels = vi.fn().mockResolvedValue({
+      channels: [
+        { id: 'chat-client-ops', name: 'Client Operations & Deployments', isPrivate: false, isDm: true, messageCount: 5 },
+        { id: 'C_LEAKED_SLACK', name: '#agentworkprojecttesting', isPrivate: false, isDm: false, messageCount: 10 },
+        { id: 'wa-empty-chat', name: 'Empty Contact', isPrivate: true, isDm: true, messageCount: 0 }
+      ]
+    })
+
+    render(
+      <WhatsAppControlModal
+        open={true}
+        onClose={vi.fn()}
+        project={mockProject}
+        source={mockSource}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('Client Operations & Deployments')).toBeDefined()
+    })
+
+    expect(screen.queryByText('#agentworkprojecttesting')).toBeNull()
+    expect(screen.queryByText('Empty Contact')).toBeNull()
+  })
+
+  it('renders clean empty state when no chats have >= 1 message', async () => {
+    window.api.dashboard.discoverSourceChannels = vi.fn().mockResolvedValue({
+      channels: []
+    })
+
+    const emptySource = { ...mockSource, channels: [] }
+    render(
+      <WhatsAppControlModal
+        open={true}
+        onClose={vi.fn()}
+        project={mockProject}
+        source={emptySource}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('No active conversations found')).toBeDefined()
+    })
+    expect(screen.getByText(/Only conversations with a minimum of 1 message are displayed/)).toBeDefined()
+  })
 })

@@ -181,7 +181,14 @@ export default function WorkspaceContent({
   )
 
   const effectiveTeamsSource: ProjectSource = useMemo(() => {
-    if (teamsSource) return teamsSource
+    if (teamsSource) {
+      return {
+        ...teamsSource,
+        channels: (teamsSource.channels ?? []).filter(
+          (c) => !c.id.startsWith('C') && !c.id.startsWith('U') && !c.name.startsWith('#')
+        )
+      }
+    }
     const prof = targetProfile ?? profiles.find((p) => p.id === project.profileId)
     const nowIso = new Date().toISOString()
     return {
@@ -209,7 +216,14 @@ export default function WorkspaceContent({
   )
 
   const effectiveWhatsAppSource: ProjectSource = useMemo(() => {
-    if (whatsappSource) return whatsappSource
+    if (whatsappSource) {
+      return {
+        ...whatsappSource,
+        channels: (whatsappSource.channels ?? []).filter(
+          (c) => !c.id.startsWith('C') && !c.id.startsWith('U') && !c.name.startsWith('#')
+        )
+      }
+    }
     const prof = targetProfile ?? profiles.find((p) => p.id === project.profileId)
     const nowIso = new Date().toISOString()
     return {
