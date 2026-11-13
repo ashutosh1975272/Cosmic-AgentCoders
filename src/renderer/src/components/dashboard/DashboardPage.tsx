@@ -352,6 +352,23 @@ export default function DashboardPage({
   const hasInsight = Boolean(insight)
   const metrics = snapshot.metrics
   const busy = syncing || snapshot.syncState === 'syncing'
+  const [showAgentControl, setShowAgentControl] = useState<boolean>(false)
+
+  useEffect(() => {
+    void window.api?.app?.getSettings?.().then((settings) => {
+      if (typeof settings?.showDashboardAgentControl === 'boolean') {
+        setShowAgentControl(settings.showDashboardAgentControl)
+      }
+    })
+    const unsub = window.api?.app?.onSettingsChanged?.((settings) => {
+      if (typeof settings?.showDashboardAgentControl === 'boolean') {
+        setShowAgentControl(settings.showDashboardAgentControl)
+      }
+    })
+    return () => {
+      unsub?.()
+    }
+  }, [])
 
   // Live 5-second ticker ensures relative timestamps ("just now", "15s ago", "30s ago")
   // and latest messages re-query automatically without clicking any button
@@ -722,12 +739,14 @@ export default function DashboardPage({
                 ) : null}
               </section>
 
-              <AgentCockpitCard
-                project={project}
-                nextStep={centre.nextStep}
-                situationLine={centre.situationLine}
-                onOpenControl={onOpenControl}
-              />
+              {showAgentControl ? (
+                <AgentCockpitCard
+                  project={project}
+                  nextStep={centre.nextStep}
+                  situationLine={centre.situationLine}
+                  onOpenControl={onOpenControl}
+                />
+              ) : null}
 
               {hasDaily ? (
                 <section className="dash-panel" aria-label="Activity">
