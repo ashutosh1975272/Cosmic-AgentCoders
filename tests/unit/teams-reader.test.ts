@@ -144,9 +144,18 @@ describe('TeamsReaderView', () => {
   it('selects channel and posts message', async () => {
     const mockWebContents = {
       isDestroyed: vi.fn().mockReturnValue(false),
+      sendInputEvent: vi.fn(),
       executeJavaScript: vi.fn().mockImplementation(async (script: string) => {
-        if (script.includes('team-channel-item')) return true
-        if (script.includes('ckeditor-replyConversation')) return true
+        if (script.includes('team-channel-item') || script.includes('chat-header-title')) return true
+        if (script.includes('insertText') || script.includes('contenteditable')) {
+          return { ok: true, hasText: true }
+        }
+        if (script.includes('sendMessageButton') || script.includes('candidates')) {
+          return true
+        }
+        if (script.includes('cleared')) {
+          return { cleared: true }
+        }
         return true
       })
     }

@@ -566,6 +566,15 @@ export class TeamsReaderView {
               .toLowerCase();
             const target = rawTarget.toLowerCase().trim();
 
+            // 1. Check if the active chat header already matches
+            const headerEl = document.querySelector(
+              '[data-tid="chat-header-title"], [data-tid="channel-header-title"], header h1, header h2'
+            );
+            const activeHeader = headerEl ? (headerEl.textContent || '').toLowerCase().trim() : '';
+            if (activeHeader && (activeHeader.includes(cleanTarget) || (cleanTarget && cleanTarget.includes(activeHeader)))) {
+              return true;
+            }
+
             const nodes = document.querySelectorAll(
               '[data-tid="team-channel-item"], [data-tid="channel-list-item"], [data-tid="chat-list-item"], [data-tid="chat-item"], [data-tid="contact-list-item"], [role="treeitem"], [role="listitem"]'
             );
@@ -617,75 +626,127 @@ export class TeamsReaderView {
         await this.selectChannel(channelId)
       }
 
-      const script = `
+      // 2. Type text into Teams V2 composer, resolving to the actual contenteditable node
+      const typeScript = `
         (() => {
           try {
             const msg = ${JSON.stringify(text)};
-            // Match Teams V2 Fluent UI, RoosterJS, Lexical, and fallback contenteditable composers
-            const box = document.querySelector(
-              '[data-tid="new-message-textarea"], div[aria-label="Type a message"], div[aria-label*="Type a message"], [data-tid="ckeditor-replyConversation"], [role="textbox"][contenteditable="true"], .ck-editor__editable, textarea'
+            // Match editable composer node or resolve inner contenteditable
+            let box = document.querySelector(
+              '[contenteditable="true"][role="textbox"], [data-tid="new-message-textarea"] [contenteditable="true"], div[aria-label*="Type a message"] [contenteditable="true"], [data-tid="new-message-textarea"], div[aria-label="Type a message"], div[aria-label*="Type a message"], [data-tid="ckeditor-replyConversation"], [role="textbox"][contenteditable="true"], .ck-editor__editable, textarea'
             );
             if (!box) return { ok: false, error: 'composer_not_found' };
+
+            if (!box.isContentEditable && box.querySelector) {
+              const inner = box.querySelector('[contenteditable="true"], textarea, [role="textbox"]');
+              if (inner) box = inner;
+            }
 
             box.focus();
 
             if (box.isContentEditable) {
               document.execCommand('selectAll', false, null);
-              const inserted = document.execCommand('insertText', false, msg);
-              if (!inserted || !box.textContent.trim()) {
-                box.textContent = msg;
-              }
-              box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: msg }));
+              document.execCommand('insertText', false, msg);
+              try {
+                box.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: msg }));
+                box.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: msg }));
+              } catch {}
+              box.dispatchEvent(new Event('input', { bubbles: true }));
               box.dispatchEvent(new Event('change', { bubbles: true }));
+
+              if (!box.textContent || !box.textContent.trim()) {
+                const escaped = msg.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\\n/g, '<br>');
+                box.innerHTML = '<p>' + escaped + '</p>';
+                box.dispatchEvent(new Event('input', { bubbles: true }));
+                box.dispatchEvent(new Event('change', { bubbles: true }));
+              }
             } else {
               box.value = msg;
               box.dispatchEvent(new Event('input', { bubbles: true }));
               box.dispatchEvent(new Event('change', { bubbles: true }));
             }
 
-            // Locate Teams V2 send button
-            const sendBtn = document.querySelector(
-              '[data-tid="sendMessageButton"], [data-tid="chat-send-message-button"], button[data-tid="sendButton"], button[aria-label*="Send message"], button[aria-label*="Send"], button[title*="Send"]'
-            );
-
-            if (sendBtn && !sendBtn.disabled) {
-              sendBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-              sendBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-              sendBtn.click();
-              return { ok: true, method: 'button_click' };
-            }
-
-            // Fallback: Dispatch Enter key event to submit message
-            const enterDown = new KeyboardEvent('keydown', {
-              key: 'Enter',
-              code: 'Enter',
-              keyCode: 13,
-              which: 13,
-              bubbles: true,
-              cancelable: true
-            });
-            const enterUp = new KeyboardEvent('keyup', {
-              key: 'Enter',
-              code: 'Enter',
-              keyCode: 13,
-              which: 13,
-              bubbles: true,
-              cancelable: true
-            });
-            box.dispatchEvent(enterDown);
-            box.dispatchEvent(enterUp);
-            return { ok: true, method: 'enter_key' };
+            return { ok: true, hasText: Boolean(box.textContent?.trim() || box.value?.trim()) };
           } catch (err) {
             return { ok: false, error: String(err) };
           }
         })()
       `
-      const res = await this.view.webContents.executeJavaScript(script, true)
-      if (res === true || (res && res.ok)) {
-        await new Promise((r) => setTimeout(r, 600))
-        return true
+      const typeRes = await this.view.webContents.executeJavaScript(typeScript, true)
+      if (!typeRes || !typeRes.ok) {
+        return false
       }
-      return false
+
+      // 3. Poll for up to 1800ms for Teams V2 send button to become enabled and click it
+      const clickSendScript = `
+        (() => {
+          try {
+            const candidates = Array.from(document.querySelectorAll(
+              '[data-tid="sendMessageButton"], [data-tid="chat-send-message-button"], button[data-tid="sendButton"], button[aria-label*="Send" i], button[title*="Send" i], button[data-tid*="send" i], [role="button"][aria-label*="Send" i], span[data-tid="sendMessageButton"]'
+            ));
+
+            for (const el of candidates) {
+              const btn = el.closest('button') || el;
+              const isDis = btn.disabled ||
+                btn.getAttribute('aria-disabled') === 'true' ||
+                btn.getAttribute('disabled') !== null ||
+                btn.classList.contains('disabled');
+
+              if (!isDis) {
+                btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+                btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+                btn.click();
+                return true;
+              }
+            }
+            return false;
+          } catch {
+            return false;
+          }
+        })()
+      `
+
+      const deadline = Date.now() + 1800
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 150))
+        const clicked = await this.view.webContents.executeJavaScript(clickSendScript, true)
+        if (clicked) {
+          await new Promise((r) => setTimeout(r, 300))
+          return true
+        }
+      }
+
+      // 4. Fallback: Dispatch trusted native Electron Enter key event
+      try {
+        if (!this.view.webContents.isDestroyed()) {
+          this.view.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' })
+          this.view.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
+          await new Promise((r) => setTimeout(r, 400))
+        }
+      } catch {
+        // Ignore in environments without real native webContents
+      }
+
+      // 5. Verification: Check if editor is cleared (indicating message was submitted)
+      const verifyScript = `
+        (() => {
+          try {
+            let box = document.querySelector(
+              '[contenteditable="true"][role="textbox"], [data-tid="new-message-textarea"] [contenteditable="true"], div[aria-label*="Type a message"] [contenteditable="true"], [data-tid="new-message-textarea"], div[aria-label="Type a message"]'
+            );
+            if (box && !box.isContentEditable && box.querySelector) {
+              const inner = box.querySelector('[contenteditable="true"]');
+              if (inner) box = inner;
+            }
+            const currentText = (box ? (box.textContent || box.value || '') : '').trim();
+            return { cleared: currentText === '' || currentText === '<br>' };
+          } catch {
+            return { cleared: true };
+          }
+        })()
+      `
+      const verifyRes = await this.view.webContents.executeJavaScript(verifyScript, true)
+      return Boolean(verifyRes?.cleared ?? true)
     } catch {
       return false
     }
