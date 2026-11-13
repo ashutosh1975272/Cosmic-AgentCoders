@@ -55,16 +55,38 @@ describe('UnifiedSettingsModal Advance Control and Modal Dimensions', () => {
     expect(modal.style.maxHeight).toBe('min(92vh, 920px)')
   })
 
-  it('shows only Preferences & Appearance and Advance Control when Advanced Settings is off', () => {
+  it('shows Preferences & Appearance, Dashboard, and Advance Control when Advanced Settings is off', () => {
     const { container } = render(<UnifiedSettingsModal {...dummyProps} />)
     const aside = container.querySelector('aside')
     expect(aside).not.toBeNull()
     expect(aside?.textContent).toContain('Preferences & Appearance')
+    expect(aside?.textContent).toContain('Dashboard')
     expect(aside?.textContent).toContain('Advance Control')
     expect(aside?.textContent).not.toContain('Sidebar & Navigation')
     expect(aside?.textContent).not.toContain('Global AI & NVIDIA NIM')
     expect(aside?.textContent).not.toContain('Accounts & Workspaces')
     expect(aside?.textContent).not.toContain('System & Maintenance')
+  })
+
+  it('renders Dashboard tab and toggles Show Agent Control & Slack Dispatcher Card', () => {
+    const onChangeSettings = vi.fn()
+    const { container } = render(<UnifiedSettingsModal {...dummyProps} onChangeSettings={onChangeSettings} />)
+    const buttons = Array.from(container.querySelectorAll('aside button'))
+    const dashboardBtn = buttons.find((b) => b.textContent?.includes('Dashboard')) as HTMLButtonElement
+    expect(dashboardBtn).toBeDefined()
+    fireEvent.click(dashboardBtn)
+
+    const main = container.querySelector('main')
+    expect(main?.textContent).toContain('Dashboard Preferences')
+    expect(main?.textContent).toContain('Agent Control & Slack Dispatcher')
+    expect(main?.textContent).toContain('Show Agent Control & Slack Dispatcher Card')
+
+    const agentCheckbox = main?.querySelector('input[type="checkbox"]') as HTMLInputElement
+    expect(agentCheckbox).toBeDefined()
+    expect(agentCheckbox.checked).toBe(false)
+
+    fireEvent.click(agentCheckbox)
+    expect(onChangeSettings).toHaveBeenCalledWith({ showDashboardAgentControl: true })
   })
 
   it('reveals all 6 tabs when Advanced Settings toggle is clicked', () => {

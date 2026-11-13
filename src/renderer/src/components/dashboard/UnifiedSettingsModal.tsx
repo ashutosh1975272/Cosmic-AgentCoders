@@ -11,6 +11,7 @@ import { LogsObservabilityTab } from './LogsObservabilityTab'
 import { ScrapeLogsTab } from './ScrapeLogsTab'
 export type SettingsTabKey =
   | 'general'
+  | 'dashboard'
   | 'sidebar'
   | 'ai'
   | 'accounts'
@@ -71,7 +72,7 @@ export function UnifiedSettingsModal({
 
   useEffect(() => {
     if (open) {
-      if (initialTab !== 'general' && initialTab !== 'advance') {
+      if (initialTab !== 'general' && initialTab !== 'dashboard' && initialTab !== 'advance') {
         setIsAdvanceMode(true)
       }
       setActiveTab(initialTab)
@@ -166,6 +167,7 @@ export function UnifiedSettingsModal({
 
   const allNavItems: Array<{ key: SettingsTabKey; label: string; icon: string }> = [
     { key: 'general', label: 'Preferences & Appearance', icon: '🎨' },
+    { key: 'dashboard', label: 'Dashboard', icon: '📊' },
     { key: 'advance', label: 'Advance Control', icon: '🎛️' },
     { key: 'sidebar', label: 'Sidebar & Navigation', icon: '📑' },
     { key: 'ai', label: 'Global AI & NVIDIA NIM', icon: '🤖' },
@@ -177,7 +179,9 @@ export function UnifiedSettingsModal({
 
   const visibleNavItems = isAdvanceMode
     ? allNavItems
-    : allNavItems.filter((item) => item.key === 'general' || item.key === 'advance')
+    : allNavItems.filter(
+        (item) => item.key === 'general' || item.key === 'dashboard' || item.key === 'advance'
+      )
 
   return (
     <div
@@ -295,7 +299,7 @@ export function UnifiedSettingsModal({
                     } catch {
                       // ignore localStorage errors
                     }
-                    if (!next && activeTab !== 'general' && activeTab !== 'advance') {
+                    if (!next && activeTab !== 'general' && activeTab !== 'dashboard' && activeTab !== 'advance') {
                       setActiveTab('general')
                     }
                   }}
@@ -731,6 +735,79 @@ export function UnifiedSettingsModal({
                         max={240}
                         value={settings.idleSleepMinutes}
                         onChange={(e) => onChangeSettings({ idleSleepMinutes: Number(e.target.value) || 0 })}
+                      />
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB: DASHBOARD PREFERENCES */}
+            {activeTab === 'dashboard' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                <header>
+                  <h3 style={{ margin: 0, fontSize: '16px', color: '#f8fafc' }}>
+                    Dashboard Preferences
+                  </h3>
+                  <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#94a3b8' }}>
+                    Configure which modular cards, dispatchers, and intelligence panels appear on project dashboards.
+                  </p>
+                </header>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <div
+                    style={{
+                      background: 'rgba(15, 23, 42, 0.4)',
+                      padding: '18px 20px',
+                      borderRadius: '10px',
+                      border: '1px solid rgba(255, 255, 255, 0.07)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '14px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <h4 style={{ margin: 0, fontSize: '14px', color: '#e2e8f0', fontWeight: 600 }}>
+                          🤖 Agent Control &amp; Slack Dispatcher
+                        </h4>
+                        <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginTop: '2px' }}>
+                          Zero-DOM Direct API autonomous message composer and channel permission matrix
+                        </span>
+                      </div>
+                      <span
+                        style={{
+                          fontSize: '10.5px',
+                          fontWeight: 650,
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          background: settings.showDashboardAgentControl ? 'rgba(74, 222, 128, 0.15)' : 'rgba(148, 163, 184, 0.15)',
+                          color: settings.showDashboardAgentControl ? '#86efac' : '#94a3b8',
+                          border: settings.showDashboardAgentControl ? '1px solid rgba(74, 222, 128, 0.3)' : '1px solid rgba(148, 163, 184, 0.3)'
+                        }}
+                      >
+                        {settings.showDashboardAgentControl ? 'Visible' : 'Hidden by Default'}
+                      </span>
+                    </div>
+
+                    <label
+                      className="settings-row"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        cursor: 'pointer',
+                        padding: '8px 0 0'
+                      }}
+                    >
+                      <span style={{ fontSize: '13px', color: '#cbd5e1' }}>
+                        Show Agent Control &amp; Slack Dispatcher Card
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(settings.showDashboardAgentControl)}
+                        onChange={(e) => onChangeSettings({ showDashboardAgentControl: e.target.checked })}
+                        style={{ width: '18px', height: '18px', accentColor: '#3b82f6', cursor: 'pointer' }}
                       />
                     </label>
                   </div>
