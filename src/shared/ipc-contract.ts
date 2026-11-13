@@ -305,9 +305,12 @@ export interface AppSettings {
   showCosmicProfileNavButtons?: boolean
   /** When true, display "Linked Accounts & Workspaces" section in the Create Project Card modal. Default: false. */
   showNewProjectLinkedAccounts?: boolean
+  /** When true, display Agent Control & Slack Dispatcher card on dashboard. Default: false. */
+  showDashboardAgentControl?: boolean
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
+  showDashboardAgentControl: false,
   showNewProjectLinkedAccounts: false,
   baseAppLayout: 'standard',
   showSidebarItemActions: true,
