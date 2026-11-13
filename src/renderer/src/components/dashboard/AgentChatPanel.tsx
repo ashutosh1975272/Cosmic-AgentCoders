@@ -868,6 +868,11 @@ export default function AgentChatPanel({
           })
         : () => {}
 
+    // Auto-trigger background sync when opening a social channel so fresh messages populate immediately
+    if (activeChannelId && socialSource?.platform === 'whatsapp' && typeof window.api.dashboard?.syncNow === 'function') {
+      void window.api.dashboard.syncNow({ projectId }).catch(() => undefined)
+    }
+
     // If scoped to a channel, poll every 5s for newly scraped messages
     let timer: NodeJS.Timeout | null = null
     if (activeChannelId) {

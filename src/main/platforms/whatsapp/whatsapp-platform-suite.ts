@@ -89,6 +89,7 @@ export class WhatsAppPlatformSuite implements IPlatformBackendAdapter {
 
     const reader = new WhatsAppReaderView({
       profileId: source.profileId || '',
+      projectId: project.id,
       existingView: existingView ?? null
     })
 

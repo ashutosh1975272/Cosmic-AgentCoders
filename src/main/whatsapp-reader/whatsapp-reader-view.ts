@@ -71,9 +71,22 @@ const WHATSAPP_DISCOVER_CHATS_SCRIPT = `
     );
 
     chatItems.forEach((node) => {
-      const titleSpan = node.querySelector('span[title], div[title], [data-testid="cell-frame-title"] span');
-      const name = titleSpan ? (titleSpan.getAttribute('title') || titleSpan.textContent || '').trim() : '';
-      if (!name || seen.has(name)) return;
+      const titleSpan = node.querySelector(
+        '[data-testid="cell-frame-title"] span[title], [data-testid="cell-frame-title"] span[dir="auto"], [data-testid="cell-frame-title"] span, [data-testid="cell-frame-title"] div[title]'
+      ) || node.querySelector('div[role="gridcell"] span[title], span[title]');
+      let name = titleSpan ? (titleSpan.getAttribute('title') || titleSpan.textContent || '').trim() : '';
+
+      // If title captured an unread badge tooltip (e.g. "1 unread message"), resolve clean title from container
+      if (/^\d+[\s,]*unread\s*message/i.test(name)) {
+        const titleContainer = node.querySelector('[data-testid="cell-frame-title"]');
+        if (titleContainer) {
+          const inner = titleContainer.querySelector('span[dir="auto"], span');
+          name = (inner ? (inner.textContent || '') : '').trim();
+        }
+      }
+
+      // Reject empty or unread badge artifacts
+      if (!name || seen.has(name) || /^\d+[\s,]*unread\s*message/i.test(name)) return;
 
       const unreadBadge = node.querySelector('[data-testid="unread-count"], [aria-label*="unread"]');
       const unreadCount = unreadBadge ? parseInt(unreadBadge.textContent || '0', 10) || 0 : 0;
@@ -180,9 +193,12 @@ const WHATSAPP_READ_MESSAGES_SCRIPT = `
       : 'WhatsApp Contact';
 
     // 3. DOM extraction scoped to #main conversation pane
-    const msgNodes = document.querySelectorAll(
-      '#main [data-testid="msg-container"], #main div.message-in, #main div.message-out, #main [role="row"]'
-    );
+    let msgNodes = document.querySelectorAll('#main div.message-in, #main div.message-out');
+    if (msgNodes.length === 0) {
+      msgNodes = document.querySelectorAll(
+        '#main [data-testid="msg-container"], #main [role="row"]'
+      );
+    }
 
     msgNodes.forEach((node, idx) => {
       const textEl = node.querySelector('.selectable-text, [data-testid="selectable-text"], span.copyable-text');
@@ -368,6 +384,7 @@ export class WhatsAppReaderView {
             (item) =>
               item &&
               item.hasMessages !== false &&
+              !/^\d+[\s,]*unread\s*message/i.test(String(item.name || '')) &&
               (item.messageCount === undefined || item.messageCount >= 1)
           )
           .map((item) => ({
@@ -466,8 +483,17 @@ export class WhatsAppReaderView {
               '#pane-side [role="listitem"], #pane-side div[tabindex="-1"], div[data-testid="cell-frame-container"]'
             );
             for (const node of chatItems) {
-              const titleSpan = node.querySelector('span[title], div[title], [data-testid="cell-frame-title"] span');
-              const name = (titleSpan ? (titleSpan.getAttribute('title') || titleSpan.textContent || '') : '').toLowerCase().trim();
+              const titleSpan = node.querySelector(
+                '[data-testid="cell-frame-title"] span[title], [data-testid="cell-frame-title"] span[dir="auto"], [data-testid="cell-frame-title"] span, [data-testid="cell-frame-title"] div[title]'
+              ) || node.querySelector('div[role="gridcell"] span[title], span[title]');
+              let name = (titleSpan ? (titleSpan.getAttribute('title') || titleSpan.textContent || '') : '').toLowerCase().trim();
+              if (/^\d+[\s,]*unread\s*message/i.test(name)) {
+                const titleContainer = node.querySelector('[data-testid="cell-frame-title"]');
+                if (titleContainer) {
+                  const inner = titleContainer.querySelector('span[dir="auto"], span');
+                  name = (inner ? (inner.textContent || '') : '').toLowerCase().trim();
+                }
+              }
               if (name && (name === targetId || matches(name))) {
                 node.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
                 node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
@@ -561,8 +587,17 @@ export class WhatsAppReaderView {
                 '#pane-side [role="listitem"], #pane-side div[tabindex="-1"], div[data-testid="cell-frame-container"], div[aria-label="Search results."] [role="listitem"]'
               );
               for (const node of chatItems) {
-                const titleSpan = node.querySelector('span[title], div[title], [data-testid="cell-frame-title"] span');
-                const name = (titleSpan ? (titleSpan.getAttribute('title') || titleSpan.textContent || '') : '').toLowerCase().trim();
+                const titleSpan = node.querySelector(
+                  '[data-testid="cell-frame-title"] span[title], [data-testid="cell-frame-title"] span[dir="auto"], [data-testid="cell-frame-title"] span, [data-testid="cell-frame-title"] div[title]'
+                ) || node.querySelector('div[role="gridcell"] span[title], span[title]');
+                let name = (titleSpan ? (titleSpan.getAttribute('title') || titleSpan.textContent || '') : '').toLowerCase().trim();
+                if (/^\d+[\s,]*unread\s*message/i.test(name)) {
+                  const titleContainer = node.querySelector('[data-testid="cell-frame-title"]');
+                  if (titleContainer) {
+                    const inner = titleContainer.querySelector('span[dir="auto"], span');
+                    name = (inner ? (inner.textContent || '') : '').toLowerCase().trim();
+                  }
+                }
                 if (name && (name === targetId || matches(name))) {
                   node.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
                   node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));

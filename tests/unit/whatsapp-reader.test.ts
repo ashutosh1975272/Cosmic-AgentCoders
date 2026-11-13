@@ -232,7 +232,7 @@ describe('WhatsAppReaderView', () => {
     expect(messages[0].text).toBe('Hello, this is authentic Creator message')
   })
 
-  it('matchesTarget correctly handles emojis, case insensitivity, and rejects empty strings', () => {
+  it('matchesTarget correctly handles emojis, case insensitivity, and rejects empty strings or unread badges', () => {
     const reader = new WhatsAppReaderView({ profileId: 'prof-1' })
 
     // Exact and slug matches
@@ -240,9 +240,36 @@ describe('WhatsAppReaderView', () => {
     expect(reader.matchesTarget('Talent Killer 👿', 'wa_talent_killer___', 'Talent Killer 👿')).toBe(true)
     expect(reader.matchesTarget('Talent Killer', 'wa_talent_killer___', 'Talent Killer 👿')).toBe(true)
 
+    // Rejection of unread badges
+    expect(reader.matchesTarget('1 unread message', 'wa_talent_killer___', 'Talent Killer 👿')).toBe(false)
+    expect(reader.matchesTarget('94 unread messages', 'wa_talent_killer___', 'Talent Killer 👿')).toBe(false)
+    expect(reader.matchesTarget('1,064 unread messages', 'wa_the_creator', 'The Creator')).toBe(false)
+
     // Mismatches
     expect(reader.matchesTarget('Completely Different Chat', 'wa_the_creator', 'The Creator')).toBe(false)
     expect(reader.matchesTarget('BotFather', 'wa_talent_killer___', 'Talent Killer 👿')).toBe(false)
     expect(reader.matchesTarget('', 'wa_the_creator', 'The Creator')).toBe(false)
+  })
+
+  it('filters out phantom unread badge titles during chat discovery', async () => {
+    const mockWebContents = {
+      isDestroyed: vi.fn().mockReturnValue(false),
+      executeJavaScript: vi.fn().mockResolvedValue([
+        { id: 'wa_talent_killer___', name: 'Talent Killer 👿', isPrivate: true, kind: 'dm', messageCount: 2, hasMessages: true },
+        { id: 'wa_1_unread_message', name: '1 unread message', isPrivate: true, kind: 'dm', messageCount: 1, hasMessages: true },
+        { id: 'wa_94_unread_messages', name: '94 unread messages', isPrivate: true, kind: 'dm', messageCount: 94, hasMessages: true }
+      ])
+    }
+    const mockView = { webContents: mockWebContents } as any
+
+    const reader = new WhatsAppReaderView({
+      profileId: 'prof-1',
+      existingView: mockView
+    })
+
+    const chats = await reader.listChats()
+    expect(chats.length).toBe(1)
+    expect(chats[0].name).toBe('Talent Killer 👿')
+    expect(chats.some((c) => /unread\s*message/i.test(c.name))).toBe(false)
   })
 })
