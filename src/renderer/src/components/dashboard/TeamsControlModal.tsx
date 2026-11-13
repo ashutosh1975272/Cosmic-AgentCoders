@@ -87,6 +87,7 @@ export function TeamsControlModal({
       .discoverSourceChannels({
         projectId: project.id,
         sourceId: source.id,
+        platform: 'teams',
         profileId: source.profileId,
         workspaceId: source.workspaceId
       })
@@ -215,6 +216,8 @@ export function TeamsControlModal({
         projectId: project.id,
         sourceId: source.id,
         patch: {
+          platform: 'teams',
+          workspaceName: source.workspaceName || 'Microsoft Teams',
           channels: updatedChannels,
           selectionMode,
           channelsReviewedAt: new Date().toISOString()
@@ -799,7 +802,7 @@ export function TeamsControlModal({
                     Detailed history of automated and manual sync executions for Teams.
                   </p>
                 </div>
-                <ScrapeLogExplorer projectId={project.id} />
+                <ScrapeLogExplorer projectId={project.id} sourceId={source.id} platform="teams" />
               </div>
             )}
           </main>

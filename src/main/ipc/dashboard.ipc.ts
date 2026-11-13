@@ -112,6 +112,7 @@ export interface DashboardIpcDeps {
   /** Reuse the card/profile's live Slack view for passive channel discovery. */
   getExistingCardView?: (projectId: string, appId: string) => WebContentsView | null
   getExistingProfileView?: (profileId: string, appId: string) => WebContentsView | null
+  findViewForApp?: (appId: string, projectId?: string, profileId?: string) => WebContentsView | null
 }
 
 export interface DashboardIpcRegistration {
@@ -233,11 +234,23 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
         return { channels: [], error: 'Profile not found — log in to Slack first' }
       }
 
-      const platform = source?.platform || (source?.id?.includes('teams') ? 'teams' : source?.id?.includes('whatsapp') ? 'whatsapp' : 'slack')
+      const platform =
+        payload.platform ||
+        source?.platform ||
+        (payload.sourceId?.includes('teams')
+          ? 'teams'
+          : payload.sourceId?.includes('whatsapp')
+            ? 'whatsapp'
+            : source?.id?.includes('teams')
+              ? 'teams'
+              : source?.id?.includes('whatsapp')
+                ? 'whatsapp'
+                : 'slack')
 
       // Teams Channel & Chat Discovery
       if (platform === 'teams') {
         const existingTeamsView =
+          deps.findViewForApp?.('teams', payload.projectId, profileId) ??
           (payload.projectId
             ? deps.getExistingCardView?.(payload.projectId, 'teams')
             : null) ??
@@ -272,6 +285,7 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
       // WhatsApp Chat & Contact Discovery
       if (platform === 'whatsapp') {
         const existingWaView =
+          deps.findViewForApp?.('whatsapp', payload.projectId, profileId) ??
           (payload.projectId
             ? deps.getExistingCardView?.(payload.projectId, 'whatsapp')
             : null) ??
@@ -1289,13 +1303,37 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
   }
 }
 
-function filterRuns<T extends { status: string; trigger: string }>(
+function filterRuns<
+  T extends {
+    status: string
+    trigger: string
+    sourceId?: string
+    platform?: string
+  }
+>(
   rows: T[],
-  query: { status?: string; trigger?: string; limit?: number }
+  query: {
+    status?: string
+    trigger?: string
+    sourceId?: string
+    platform?: string
+    limit?: number
+  }
 ): T[] {
   const filtered = rows.filter((row) => {
     if (query.status && query.status !== 'all' && row.status !== query.status) return false
     if (query.trigger && query.trigger !== 'all' && row.trigger !== query.trigger) return false
+    if (query.sourceId && row.sourceId && row.sourceId !== query.sourceId) return false
+    if (query.platform && query.platform !== 'all') {
+      const rowPlatform =
+        row.platform ||
+        (row.sourceId?.includes('teams')
+          ? 'teams'
+          : row.sourceId?.includes('whatsapp')
+            ? 'whatsapp'
+            : 'slack')
+      if (rowPlatform !== query.platform) return false
+    }
     return true
   })
   const limit = Number(query.limit)

@@ -125,10 +125,11 @@ export class MonitorStore {
 
       if (sourceIndex < 0) {
         const isPlatformAutoUpsert =
-          sourceId.startsWith('src_teams_') ||
-          sourceId.startsWith('src_whatsapp_') ||
+          sourceId.includes('teams') ||
+          sourceId.includes('whatsapp') ||
           patch.platform === 'teams' ||
-          patch.platform === 'whatsapp'
+          patch.platform === 'whatsapp' ||
+          (sourceId.startsWith('src-') && (sourceId.endsWith('-teams') || sourceId.endsWith('-whatsapp')))
 
         if (!isPlatformAutoUpsert) {
           throw new Error('Source not found')
@@ -136,12 +137,12 @@ export class MonitorStore {
 
         const platform =
           (patch.platform as any) ||
-          (sourceId.includes('teams') ? 'teams' : 'whatsapp')
+          (sourceId.includes('teams') ? 'teams' : sourceId.includes('whatsapp') ? 'whatsapp' : 'slack')
         const newSource: ProjectSource = {
           id: sourceId,
           workspaceName:
             patch.workspaceName ||
-            (platform === 'teams' ? 'Microsoft Teams' : 'WhatsApp Web'),
+            (platform === 'teams' ? 'Microsoft Teams' : platform === 'whatsapp' ? 'WhatsApp Web' : 'Slack Workspace'),
           kind: 'browser',
           platform,
           profileId: patch.profileId || project.profileId,

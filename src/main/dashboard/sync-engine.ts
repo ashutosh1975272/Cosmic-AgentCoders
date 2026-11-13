@@ -1553,6 +1553,13 @@ export class DashboardSyncEngine {
         projectName: project.name,
         sourceId: source.id,
         sourceKind: 'browser',
+        platform:
+          (source.platform as 'slack' | 'teams' | 'whatsapp' | undefined) ||
+          (source.id.includes('teams')
+            ? 'teams'
+            : source.id.includes('whatsapp')
+              ? 'whatsapp'
+              : 'slack'),
         engineMode: activeEngineMode,
         workspaceId: source.workspaceId,
         workspaceName: effectiveWorkspaceName,
