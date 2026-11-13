@@ -50,8 +50,11 @@ export class WhatsAppPlatformSuite implements IPlatformBackendAdapter {
         await reader.initialize()
       }
       const discovered = await reader.listChats()
+      const activeChats = discovered.filter(
+        (ch) => ch.hasMessages !== false && (ch.messageCount === undefined || ch.messageCount >= 1)
+      )
       return {
-        channels: discovered.map((ch) => ({
+        channels: activeChats.map((ch) => ({
           id: ch.id,
           name: ch.name,
           isPrivate: true,
