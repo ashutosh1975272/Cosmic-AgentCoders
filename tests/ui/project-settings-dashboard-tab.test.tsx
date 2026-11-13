@@ -62,7 +62,7 @@ beforeEach(() => {
   useDashboardStore.setState({
     projects: [richSnapshot.project],
     upsertProject: vi.fn().mockImplementation(async (p) => {
-      useDashboardStore.setState({ projects: [p] })
+      useDashboardStore.setState({ projects: [p] } as any)
       return p
     })
   } as any)

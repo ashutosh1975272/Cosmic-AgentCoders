@@ -21,7 +21,7 @@ import { slackClientUrlForTeam } from '../../shared/slack-url'
 import { log } from '../logging'
 import type { BrowserViewManager } from '../profiles/browser-view-manager'
 import type { ProfileStore } from '../profiles/profile-store'
-import { partitionForProfile, partitionForCard } from '../profiles/session-partition'
+import { partitionForProfile, partitionForCard, TEAMS_HOME_URL, WHATSAPP_WEB_URL } from '../profiles/session-partition'
 import {
   cancelChromeBrowserAuth,
   closeChromeStayEmbed,
@@ -761,20 +761,71 @@ export function registerProfileIpc(deps: ProfileIpcDeps): void {
   handleInvoke(
     IpcChannels.ProfileStartCardAppLogin,
     async (payload: { projectId: string; profileId: string; appId: AppId; bounds?: ViewportBounds }) => {
-      notifyAuthProgress(deps.getMainWindow, 'Waiting for Slack sign-in for card…')
-      const profile = await deps.profileStore.get(payload.profileId)
-      const emailHint = profile?.displayName || undefined
+      const appId = payload.appId || 'slack'
 
       // Pre-seed Google session cookies into card partition
-      await syncGoogleSessionFromProfileToCard(payload.profileId, payload.projectId, payload.appId).catch(() => undefined)
+      await syncGoogleSessionFromProfileToCard(payload.profileId, payload.projectId, appId).catch(() => undefined)
 
-      await runSlackChromeBrowserLogin(payload.profileId, {
-        parentWindow: deps.getMainWindow(),
-        contentBounds: payload.bounds,
-        targetPartition: partitionForCard(payload.projectId, payload.appId),
-        chromeKey: `card-${payload.projectId}`,
-        loginHint: emailHint
-      })
+      if (appId === 'slack') {
+        notifyAuthProgress(deps.getMainWindow, 'Waiting for Slack sign-in for card…')
+        const profile = await deps.profileStore.get(payload.profileId)
+        const emailHint = profile?.displayName || undefined
+
+        await runSlackChromeBrowserLogin(payload.profileId, {
+          parentWindow: deps.getMainWindow(),
+          contentBounds: payload.bounds,
+          targetPartition: partitionForCard(payload.projectId, appId),
+          chromeKey: `card-${payload.projectId}`,
+          loginHint: emailHint
+        })
+      } else if (appId === 'teams') {
+        notifyAuthProgress(deps.getMainWindow, 'Loading Microsoft Teams for card…')
+        const mainWindow = deps.getMainWindow()
+        if (mainWindow) {
+          const viewBounds = payload.bounds ?? {
+            x: 300,
+            y: 0,
+            width: Math.max(640, mainWindow.getContentBounds().width - 300),
+            height: Math.max(480, mainWindow.getContentBounds().height)
+          }
+          await deps.browserViewManager.activateCardSlackEmbed(
+            payload.profileId,
+            '',
+            mainWindow,
+            viewBounds,
+            'teams',
+            payload.projectId
+          )
+          const cardView = deps.browserViewManager.getOrCreateCardView(payload.projectId, 'teams')
+          if (cardView && !cardView.webContents.isDestroyed()) {
+            void cardView.webContents.loadURL(TEAMS_HOME_URL)
+          }
+        }
+      } else if (appId === 'whatsapp') {
+        notifyAuthProgress(deps.getMainWindow, 'Loading WhatsApp for card…')
+        const mainWindow = deps.getMainWindow()
+        if (mainWindow) {
+          const viewBounds = payload.bounds ?? {
+            x: 300,
+            y: 0,
+            width: Math.max(640, mainWindow.getContentBounds().width - 300),
+            height: Math.max(480, mainWindow.getContentBounds().height)
+          }
+          await deps.browserViewManager.activateCardSlackEmbed(
+            payload.profileId,
+            '',
+            mainWindow,
+            viewBounds,
+            'whatsapp',
+            payload.projectId
+          )
+          const cardView = deps.browserViewManager.getOrCreateCardView(payload.projectId, 'whatsapp')
+          if (cardView && !cardView.webContents.isDestroyed()) {
+            void cardView.webContents.loadURL(WHATSAPP_WEB_URL)
+          }
+        }
+      }
+
       const updated = await deps.profileStore.get(payload.profileId)
       return updated || ({} as Profile)
     }

@@ -44,6 +44,8 @@ import {
 } from './session-partition'
 import { parseUnreadFromTitle, READ_PAGE_UNREAD_SCRIPT, unreadKey } from './unread-from-title'
 import { syncGoogleSessionFromProfileToCard } from './google-session-sync'
+import { VERIFY_TEAMS_SESSION_SCRIPT } from './teams-first-login-flow'
+import { VERIFY_WHATSAPP_SESSION_SCRIPT } from './whatsapp-login-flow'
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -1348,15 +1350,83 @@ export class BrowserViewManager {
 
   async isCardSessionAuthenticated(projectId: string, appId: AppId = 'slack'): Promise<boolean> {
     const partition = partitionForCard(projectId, appId)
-    const sess = session.fromPartition(partition)
+    const key = cardViewKey(projectId, appId)
+    const existingView = this.views.get(key)
+
     if (appId === 'slack') {
-      const cookies = await sess.cookies.get({ domain: '.slack.com' })
-      return cookies.some((c) => (c.name === 'd' || c.name === 'd-s') && Boolean(c.value))
+      try {
+        const sess = session.fromPartition(partition)
+        const cookies = await sess.cookies.get({ domain: '.slack.com' })
+        const hasAuthCookie = cookies.some((c) => (c.name === 'd' || c.name === 'd-s') && Boolean(c.value))
+        if (hasAuthCookie) return true
+      } catch {}
+
+      if (existingView && !existingView.webContents.isDestroyed()) {
+        const url = existingView.webContents.getURL() || ''
+        if (url.includes('/client/T') && !url.includes('/client/team')) {
+          return true
+        }
+      }
+      return false
     }
+
     if (appId === 'teams') {
-      const cookies = await sess.cookies.get({ domain: '.microsoft.com' })
-      return cookies.some((c) => Boolean(c.value))
+      if (existingView && !existingView.webContents.isDestroyed()) {
+        const url = existingView.webContents.getURL() || ''
+        if (isTeamsSignedInUrl(url)) {
+          try {
+            const ok = await existingView.webContents.executeJavaScript(VERIFY_TEAMS_SESSION_SCRIPT, true)
+            if (ok === true) return true
+          } catch {}
+        }
+      }
+
+      try {
+        const sess = session.fromPartition(partition)
+        const cookies = await sess.cookies.get({})
+        const hasMsCookie = cookies.some((c) => {
+          const dom = (c.domain || '').toLowerCase()
+          if (!/(?:^|\.)(?:microsoft\.com|microsoftonline\.com|live\.com|teams\.microsoft\.com)$/i.test(dom)) {
+            return false
+          }
+          const name = (c.name || '').toUpperCase()
+          return (
+            name === 'ESTSAUTH' ||
+            name === 'ESTSAUTHPERSISTENT' ||
+            name === 'AUTHTOKEN' ||
+            name === 'SKYPETOKEN_ASM' ||
+            name === 'SSOCOOKIEPPU' ||
+            name === 'WLSSC' ||
+            (dom.includes('teams.microsoft.com') && Boolean(c.value))
+          )
+        })
+        if (hasMsCookie) return true
+      } catch {}
+
+      return false
     }
+
+    if (appId === 'whatsapp') {
+      if (existingView && !existingView.webContents.isDestroyed()) {
+        try {
+          const ok = await existingView.webContents.executeJavaScript(VERIFY_WHATSAPP_SESSION_SCRIPT, true)
+          if (ok === true) return true
+        } catch {}
+      }
+
+      try {
+        const sess = session.fromPartition(partition)
+        const cookies = await sess.cookies.get({})
+        const hasWaCookie = cookies.some((c) => {
+          const dom = (c.domain || '').toLowerCase()
+          return (dom.includes('whatsapp.com') || dom.includes('wa.me')) && (c.name === 'wa_ul' || Boolean(c.value))
+        })
+        if (hasWaCookie) return true
+      } catch {}
+
+      return false
+    }
+
     return false
   }
 

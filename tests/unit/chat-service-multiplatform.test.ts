@@ -46,7 +46,7 @@ describe('DashboardChatService — Multiplatform & Inheritance', () => {
         profileId: 'pf1',
         teamId: 'T1',
         appId: 'slack',
-        tokenSource: 'browser_only',
+        tokenSource: 'manual',
         monitors: [],
         sources: [
           {

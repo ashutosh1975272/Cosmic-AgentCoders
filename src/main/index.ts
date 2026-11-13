@@ -708,6 +708,7 @@ if (!gotSingleInstanceLock) {
       listTeamWorkspaceCandidates,
       workspaceMapping: workspaceMappingStore,
       viewedStore: dashboardViewedStore,
+      browserViewManager,
       getExistingCardView: (projectId, appId) =>
         browserViewManager.getExistingCardView(projectId, appId as AppId),
       getExistingProfileView: (profileId, appId) =>
