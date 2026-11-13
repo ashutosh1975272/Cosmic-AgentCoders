@@ -895,9 +895,9 @@ export class DashboardSyncEngine {
       if (source.platform && source.platform !== 'slack' && platformBackendRegistry.has(source.platform)) {
         activeEngineMode = source.engineMode ?? 'direct_api'
         const existingPlatformView =
+          this.getExistingBrowserView?.(source.profileId, source.platform as any) ??
           this.getExistingCardView?.(project.id, source.platform as any) ??
           this.getOrCreateCardView?.(project.id, source.platform as any) ??
-          this.getExistingBrowserView?.(source.profileId, source.platform as any) ??
           null
 
         const adapter = platformBackendRegistry.get(source.platform)

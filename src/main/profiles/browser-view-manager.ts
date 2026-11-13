@@ -138,13 +138,13 @@ export class BrowserViewManager {
   }
 
   findViewForApp(appId: AppId, projectId?: string, profileId?: string): WebContentsView | null {
-    if (projectId) {
-      const cardView = this.views.get(cardViewKey(projectId, appId))
-      if (cardView && !cardView.webContents.isDestroyed()) return cardView
-    }
     if (profileId) {
       const profileView = this.views.get(viewKey(profileId, appId))
       if (profileView && !profileView.webContents.isDestroyed()) return profileView
+    }
+    if (projectId) {
+      const cardView = this.views.get(cardViewKey(projectId, appId))
+      if (cardView && !cardView.webContents.isDestroyed()) return cardView
     }
     for (const [key, view] of this.views.entries()) {
       if (

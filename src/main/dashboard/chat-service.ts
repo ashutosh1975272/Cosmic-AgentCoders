@@ -690,9 +690,9 @@ export class DashboardChatService {
       try {
         const profileId = targetSource.profileId || project.profileId
         const existingView =
+          this.getExistingBrowserView?.(profileId, 'whatsapp') ??
           this.getExistingCardView?.(project.id, 'whatsapp') ??
           this.getOrCreateCardView?.(project.id, 'whatsapp') ??
-          this.getExistingBrowserView?.(profileId, 'whatsapp') ??
           null
 
         const { WhatsAppReaderView } = await import('../whatsapp-reader/whatsapp-reader-view')
@@ -771,9 +771,9 @@ export class DashboardChatService {
       try {
         const profileId = targetSource.profileId || project.profileId
         const existingView =
-          this.getOrCreateCardView?.(project.id, 'teams') ??
-          this.getExistingCardView?.(project.id, 'teams') ??
           this.getExistingBrowserView?.(profileId, 'teams') ??
+          this.getExistingCardView?.(project.id, 'teams') ??
+          this.getOrCreateCardView?.(project.id, 'teams') ??
           null
 
         const { TeamsReaderView } = await import('../teams-reader/teams-reader-view')

@@ -297,6 +297,56 @@ describe('DashboardChatService — Multiplatform & Inheritance', () => {
     expect(result.message?.text).toBe('Direct dispatch to WhatsApp via card session')
   })
 
+  it('prioritizes authenticated profile view over getOrCreateCardView for Teams and WhatsApp', async () => {
+    let usedView = ''
+    const mockProfileView = {
+      webContents: {
+        isDestroyed: () => false,
+        executeJavaScript: async (script: string) => {
+          usedView = 'profile'
+          if (script.includes('sendMessageButton') || script.includes('sendButton')) {
+            return true
+          }
+          if (script.includes('new-message-textarea') || script.includes('Type a message') || script.includes('ckeditor')) {
+            return { ok: true, hasText: true, cleared: true }
+          }
+          if (script.includes('chat-header-title') || script.includes('team-channel-item')) {
+            return true
+          }
+          return { ok: true, cleared: true }
+        }
+      }
+    } as any
+
+    const mockCardView = {
+      webContents: {
+        isDestroyed: () => false,
+        executeJavaScript: async () => {
+          usedView = 'card'
+          return true
+        }
+      }
+    } as any
+
+    const service = new DashboardChatService({
+      monitorStore,
+      deltaStore,
+      oauthTokenProvider: { tryGet: async () => null },
+      getAppSettings: async () => appSettings,
+      getExistingBrowserView: () => mockProfileView,
+      getOrCreateCardView: () => mockCardView
+    })
+
+    const result = await service.sendMessage({
+      projectId: project.id,
+      channelId: 'C_TEAMS',
+      text: 'Hello Teams via authenticated profile session'
+    })
+
+    expect(result.ok).toBe(true)
+    expect(usedView).toBe('profile')
+  })
+
   it('enforces dynamic platform text limit error on WhatsApp', async () => {
     const service = new DashboardChatService({
       monitorStore,
