@@ -320,7 +320,7 @@ describe('SyncEngine Multi-Platform Ingestion (Teams & WhatsApp without Slack)',
       clientName: 'Ashutush',
       profileId: 'prof-ar-1',
       teamId: 'default',
-      appId: 'teams',
+      appId: 'slack',
       tokenSource: 'oauth',
       monitors: [],
       sources: [
