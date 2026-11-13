@@ -60,6 +60,7 @@ export interface ChatServiceDeps {
   getExistingBrowserView?: (profileId: string, appId: any) => WebContentsView | null
   getExistingCardView?: (projectId: string, appId: any) => WebContentsView | null
   getOrCreateCardView?: (projectId: string, appId: any) => WebContentsView | null
+  findViewForApp?: (appId: any, projectId?: string, profileId?: string) => WebContentsView | null
 }
 
 /** One workspace the chat panel can read: the card's own, or ours. */
@@ -160,6 +161,7 @@ export class DashboardChatService {
   private readonly getExistingBrowserView?: (profileId: string, appId: any) => WebContentsView | null
   private readonly getExistingCardView?: (projectId: string, appId: any) => WebContentsView | null
   private readonly getOrCreateCardView?: (projectId: string, appId: any) => WebContentsView | null
+  private readonly findViewForApp?: (appId: any, projectId?: string, profileId?: string) => WebContentsView | null
   private readonly contextCache = new Map<string, ChatWorkspaceContext>()
   private readonly activityCache = new Map<string, { at: number; value: DashboardProjectActivity }>()
 
@@ -176,6 +178,7 @@ export class DashboardChatService {
     this.getExistingBrowserView = deps.getExistingBrowserView
     this.getExistingCardView = deps.getExistingCardView
     this.getOrCreateCardView = deps.getOrCreateCardView
+    this.findViewForApp = deps.findViewForApp
   }
 
   private async projectFor(projectId: string): Promise<DashboardProject | null> {
@@ -690,6 +693,7 @@ export class DashboardChatService {
       try {
         const profileId = targetSource.profileId || project.profileId
         const existingView =
+          this.findViewForApp?.('whatsapp', project.id, profileId) ??
           this.getExistingBrowserView?.(profileId, 'whatsapp') ??
           this.getExistingCardView?.(project.id, 'whatsapp') ??
           this.getOrCreateCardView?.(project.id, 'whatsapp') ??
@@ -771,6 +775,7 @@ export class DashboardChatService {
       try {
         const profileId = targetSource.profileId || project.profileId
         const existingView =
+          this.findViewForApp?.('teams', project.id, profileId) ??
           this.getExistingBrowserView?.(profileId, 'teams') ??
           this.getExistingCardView?.(project.id, 'teams') ??
           this.getOrCreateCardView?.(project.id, 'teams') ??

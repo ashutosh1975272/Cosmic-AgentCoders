@@ -1140,6 +1140,7 @@ export async function executeAgentAction(
           channelName: channel.name,
           persona,
           platform: targetPlatform,
+          text: synthesizedText,
           ts: res.message?.ts
         },
         replyMarkdown: [

@@ -649,6 +649,16 @@ export class TeamsReaderView {
             }
 
             box.focus();
+            try {
+              const sel = window.getSelection();
+              if (sel) {
+                const range = document.createRange();
+                range.selectNodeContents(box);
+                range.collapse(false);
+                sel.removeAllRanges();
+                sel.addRange(range);
+              }
+            } catch {}
 
             if (box.isContentEditable) {
               document.execCommand('selectAll', false, null);
@@ -663,6 +673,10 @@ export class TeamsReaderView {
               if (!box.textContent || !box.textContent.trim()) {
                 const escaped = msg.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\\n/g, '<br>');
                 box.innerHTML = '<p>' + escaped + '</p>';
+                try {
+                  box.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: msg }));
+                  box.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: msg }));
+                } catch {}
                 box.dispatchEvent(new Event('input', { bubbles: true }));
                 box.dispatchEvent(new Event('change', { bubbles: true }));
               }
@@ -690,7 +704,7 @@ export class TeamsReaderView {
         }
       } catch {}
 
-      // 3. Poll for up to 1800ms for Teams V2 send button to become enabled and click it
+      // 3. Dispatch Send: Try button click first, then native Return key, with continuous verification
       const clickSendScript = `
         (() => {
           try {
@@ -706,8 +720,12 @@ export class TeamsReaderView {
                 btn.classList.contains('disabled');
 
               if (!isDis) {
-                btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-                btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+                try {
+                  btn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerType: 'mouse', button: 0 }));
+                  btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
+                  btn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, pointerType: 'mouse', button: 0 }));
+                  btn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0 }));
+                } catch {}
                 btn.click();
                 return true;
               }
@@ -719,31 +737,36 @@ export class TeamsReaderView {
         })()
       `
 
-      const deadline = Date.now() + 1800
-      while (Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 150))
-        const clicked = await this.view.webContents.executeJavaScript(clickSendScript, true)
-        if (clicked) {
-          await new Promise((r) => setTimeout(r, 300))
-          return true
-        }
-      }
+      const focusComposerScript = `
+        (() => {
+          try {
+            let box = document.querySelector(
+              '[contenteditable="true"][role="textbox"], [data-tid="new-message-textarea"] [contenteditable="true"], div[aria-label*="Type a message"] [contenteditable="true"], [data-tid="new-message-textarea"], div[aria-label="Type a message"], div[aria-label*="Type a message"], [data-tid="ckeditor-replyConversation"], [role="textbox"][contenteditable="true"], .ck-editor__editable, textarea'
+            );
+            if (!box) return false;
+            if (!box.isContentEditable && box.querySelector) {
+              const inner = box.querySelector('[contenteditable="true"], textarea, [role="textbox"]');
+              if (inner) box = inner;
+            }
+            box.focus();
+            try {
+              const sel = window.getSelection();
+              if (sel) {
+                const range = document.createRange();
+                range.selectNodeContents(box);
+                range.collapse(false);
+                sel.removeAllRanges();
+                sel.addRange(range);
+              }
+            } catch {}
+            return true;
+          } catch {
+            return false;
+          }
+        })()
+      `
 
-      // 4. Fallback: Dispatch trusted native Electron Enter key event
-      try {
-        if (!this.view.webContents.isDestroyed()) {
-          this.view.webContents.focus()
-          this.view.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' })
-          this.view.webContents.sendInputEvent({ type: 'char', keyCode: '\r' })
-          this.view.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
-          await new Promise((r) => setTimeout(r, 400))
-        }
-      } catch {
-        // Ignore in environments without real native webContents
-      }
-
-      // 5. Verification: Check if editor is cleared (indicating message was submitted)
-      const verifyScript = `
+      const checkClearedScript = `
         (() => {
           try {
             let box = document.querySelector(
@@ -766,8 +789,53 @@ export class TeamsReaderView {
           }
         })()
       `
-      const verifyRes = await this.view.webContents.executeJavaScript(verifyScript, true)
-      return Boolean(verifyRes?.ok && verifyRes?.cleared)
+
+      // Attempt 1: Try clicking send button
+      await this.view.webContents.executeJavaScript(clickSendScript, true)
+      await new Promise((r) => setTimeout(r, 200))
+
+      let vRes = await this.view.webContents.executeJavaScript(checkClearedScript, true)
+      if (vRes?.ok && vRes?.cleared) {
+        return true
+      }
+
+      // Attempt 2: Re-focus composer and dispatch native Return key
+      try {
+        if (!this.view.webContents.isDestroyed()) {
+          this.view.webContents.focus()
+          await this.view.webContents.executeJavaScript(focusComposerScript, true)
+          this.view.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' })
+          this.view.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
+          await new Promise((r) => setTimeout(r, 300))
+        }
+      } catch {}
+
+      vRes = await this.view.webContents.executeJavaScript(checkClearedScript, true)
+      if (vRes?.ok && vRes?.cleared) {
+        return true
+      }
+
+      // Attempt 3: Loop with Send button & Return key polling up to deadline
+      const deadline = Date.now() + 2000
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 200))
+        await this.view.webContents.executeJavaScript(clickSendScript, true)
+
+        try {
+          if (!this.view.webContents.isDestroyed()) {
+            await this.view.webContents.executeJavaScript(focusComposerScript, true)
+            this.view.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' })
+            this.view.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
+          }
+        } catch {}
+
+        vRes = await this.view.webContents.executeJavaScript(checkClearedScript, true)
+        if (vRes?.ok && vRes?.cleared) {
+          return true
+        }
+      }
+
+      return Boolean(vRes?.ok && vRes?.cleared)
     } catch {
       return false
     }

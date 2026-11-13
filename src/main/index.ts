@@ -445,6 +445,8 @@ if (!gotSingleInstanceLock) {
       },
       getAppSettings: () => settingsStore.get(),
       log: (msg) => log.info(msg),
+      findViewForApp: (appId, projectId, profileId) =>
+        browserViewManager.findViewForApp(appId as AppId, projectId, profileId),
       getExistingBrowserView: (profileId, appId) =>
         browserViewManager.getExistingView(profileId, appId),
       getExistingCardView: (projectId, appId) =>
@@ -471,6 +473,8 @@ if (!gotSingleInstanceLock) {
       },
       historyReader: (projectId: string) => dashboardHistoryStore.read(projectId),
       viewedStore: dashboardViewedStore,
+      findViewForApp: (appId, projectId, profileId) =>
+        browserViewManager.findViewForApp(appId as AppId, projectId, profileId),
       getExistingBrowserView: (profileId, appId) =>
         browserViewManager.getExistingView(profileId, appId),
       getExistingCardView: (projectId, appId) =>

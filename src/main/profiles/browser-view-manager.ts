@@ -138,14 +138,83 @@ export class BrowserViewManager {
   }
 
   findViewForApp(appId: AppId, projectId?: string, profileId?: string): WebContentsView | null {
+    const isLoadedForApp = (v: WebContentsView | null | undefined): boolean => {
+      if (!v || v.webContents.isDestroyed()) return false
+      try {
+        const url = v.webContents.getURL() || ''
+        if (!url || url === 'about:blank') return false
+        if (appId === 'teams') {
+          return (
+            url.includes('teams.live.com') ||
+            url.includes('teams.microsoft.com') ||
+            url.includes('teams.cloud.microsoft')
+          )
+        }
+        if (appId === 'whatsapp') {
+          return url.includes('web.whatsapp.com')
+        }
+        if (appId === 'slack') {
+          return url.includes('slack.com')
+        }
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    // 1. If currently embedded card view matches this appId and is loaded, prioritize it
+    if (this.cardEmbedKey) {
+      const activeCardView = this.views.get(this.cardEmbedKey)
+      if (
+        activeCardView &&
+        !activeCardView.webContents.isDestroyed() &&
+        (this.cardEmbedKey.endsWith(`-${appId}`) || this.cardEmbedKey.includes(`-${appId}`)) &&
+        (!projectId || this.cardEmbedKey.includes(projectId))
+      ) {
+        if (isLoadedForApp(activeCardView)) {
+          return activeCardView
+        }
+      }
+    }
+
+    // 2. Check card view for project if loaded
+    if (projectId) {
+      const cardView = this.views.get(cardViewKey(projectId, appId))
+      if (cardView && !cardView.webContents.isDestroyed() && isLoadedForApp(cardView)) {
+        return cardView
+      }
+    }
+
+    // 3. Check profile view if loaded
     if (profileId) {
       const profileView = this.views.get(viewKey(profileId, appId))
-      if (profileView && !profileView.webContents.isDestroyed()) return profileView
+      if (profileView && !profileView.webContents.isDestroyed() && isLoadedForApp(profileView)) {
+        return profileView
+      }
     }
+
+    // 4. Check any view for this appId that is loaded
+    for (const [key, view] of this.views.entries()) {
+      if (
+        (key.endsWith(`:${appId}`) || key.includes(`-${appId}`)) &&
+        !view.webContents.isDestroyed() &&
+        isLoadedForApp(view)
+      ) {
+        return view
+      }
+    }
+
+    // 5. Fallback if not yet loaded: project cardView first, then profileView
     if (projectId) {
       const cardView = this.views.get(cardViewKey(projectId, appId))
       if (cardView && !cardView.webContents.isDestroyed()) return cardView
     }
+    if (profileId) {
+      const profileView = this.views.get(viewKey(profileId, appId))
+      if (profileView && !profileView.webContents.isDestroyed()) return profileView
+    }
+
+    // 6. Final fallback: any view matching appId
     for (const [key, view] of this.views.entries()) {
       if (
         (key.endsWith(`:${appId}`) || key.includes(`-${appId}`)) &&
