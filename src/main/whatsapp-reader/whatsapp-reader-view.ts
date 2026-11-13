@@ -445,9 +445,11 @@ export class WhatsAppReaderView {
 
   async initialize(): Promise<void> {
     if (this.view) return
-    const partition = this.projectId
-      ? partitionForCard(this.projectId, 'whatsapp')
-      : partitionForProfile(this.profileId, 'whatsapp')
+    const partition = this.profileId
+      ? partitionForProfile(this.profileId, 'whatsapp')
+      : this.projectId
+        ? partitionForCard(this.projectId, 'whatsapp')
+        : 'persist:default'
     const sess = session.fromPartition(partition)
     this.view = new WebContentsView({
       webPreferences: {

@@ -1500,71 +1500,81 @@ export class DashboardSyncEngine {
   ): Promise<void> {
     if (!this.chatService?.sendMessage || !newMessages || newMessages.length === 0) return
 
-    for (const msg of newMessages) {
-      if (!msg.ts || this.repliedMessageTimestamps.has(msg.ts)) continue
+    // 1. Filter out candidate unreplied messages from other senders
+    const candidates = newMessages.filter((msg) => {
+      if (!msg.ts || this.repliedMessageTimestamps.has(msg.ts)) return false
       const isMine = msg.source === 'ours' || msg.user === 'You' || msg.user === 'me'
-      if (isMine) continue
+      return !isMine
+    })
+    if (candidates.length === 0) return
 
-      const check = shouldAutoReplyToMessage(
-        project,
-        {
-          text: msg.text || '',
-          userId: msg.user,
-          userName: msg.user,
-          isMine
-        },
-        channelId
-      )
+    // 2. Mark all candidates in repliedMessageTimestamps to prevent multi-message bursts / repeat replays
+    for (const msg of candidates) {
+      if (msg.ts) this.repliedMessageTimestamps.add(msg.ts)
+    }
 
-      if (check.shouldReply) {
-        this.repliedMessageTimestamps.add(msg.ts)
-        const recipientName = check.channel?.name ? `#${check.channel.name}` : `#${channelId}`
-        const sender = msg.user ? `@${msg.user}` : 'there'
+    // 3. Only evaluate and dispatch auto-reply to the single latest candidate message in this cycle
+    const latestMsg = candidates[candidates.length - 1]
+    const isMine = latestMsg.source === 'ours' || latestMsg.user === 'You' || latestMsg.user === 'me'
 
-        const persona = check.channel?.autoReplyPersona || 'professional'
-        let replyText = ''
-        if (persona === 'friendly') {
-          replyText =
-            check.reason === 'dm'
-              ? `Hi ${sender}! Thanks for reaching out 😊 I received your message and I'm already looking into this for you!`
-              : `Hello ${sender}! Thanks for reaching out! Noted, I am on it.`
-        } else if (persona === 'concise') {
-          replyText = `Received. Reviewing now.`
-        } else if (persona === 'empathetic') {
-          replyText = `Hi ${sender}, thank you so much for reaching out! I want to reassure you that I've received your note and am prioritizing it right away. Will follow up shortly.`
-        } else if (persona === 'technical') {
-          replyText = `Message acknowledged. Technical context and parameters recorded. Reviewing specifications and initiating follow-up.`
-        } else if (persona === 'executive') {
-          replyText = `Status update: Message received and logged. Action items will be tracked against current milestone deliverables.`
+    const check = shouldAutoReplyToMessage(
+      project,
+      {
+        text: latestMsg.text || '',
+        userId: latestMsg.user,
+        userName: latestMsg.user,
+        isMine
+      },
+      channelId
+    )
+
+    if (check.shouldReply) {
+      const recipientName = check.channel?.name ? `#${check.channel.name}` : `#${channelId}`
+      const sender = latestMsg.user ? `@${latestMsg.user}` : 'there'
+
+      const persona = check.channel?.autoReplyPersona || 'professional'
+      let replyText = ''
+      if (persona === 'friendly') {
+        replyText =
+          check.reason === 'dm'
+            ? `Hi ${sender}! Thanks for reaching out 😊 I received your message and I'm already looking into this for you!`
+            : `Hello ${sender}! Thanks for reaching out! Noted, I am on it.`
+      } else if (persona === 'concise') {
+        replyText = `Received. Reviewing now.`
+      } else if (persona === 'empathetic') {
+        replyText = `Hi ${sender}, thank you so much for reaching out! I want to reassure you that I've received your note and am prioritizing it right away. Will follow up shortly.`
+      } else if (persona === 'technical') {
+        replyText = `Message acknowledged. Technical context and parameters recorded. Reviewing specifications and initiating follow-up.`
+      } else if (persona === 'executive') {
+        replyText = `Status update: Message received and logged. Action items will be tracked against current milestone deliverables.`
+      } else {
+        // professional default
+        replyText =
+          check.reason === 'dm'
+            ? `Hi ${sender}! I received your message. Thanks for reaching out — I am reviewing this and will get back to you shortly.`
+            : `Hello ${sender}! Thanks for mentioning me. Noted, I am looking into this right away.`
+      }
+
+      try {
+        const res = await this.chatService.sendMessage({
+          projectId: project.id,
+          channelId,
+          text: replyText,
+          isAgent: true
+        })
+
+        if (res?.ok) {
+          const platformLabel = check.source?.platform ? `${check.source.platform} Web` : '~150ms Direct API'
+          this.log(`[auto-reply] Successfully dispatched automated reply to ${recipientName} (${platformLabel})`)
         } else {
-          // professional default
-          replyText =
-            check.reason === 'dm'
-              ? `Hi ${sender}! I received your message. Thanks for reaching out — I am reviewing this and will get back to you shortly.`
-              : `Hello ${sender}! Thanks for mentioning me. Noted, I am looking into this right away.`
+          this.log(`[auto-reply] Failed to dispatch reply to ${recipientName}: ${res?.error || 'unknown error'}`)
         }
-
-        try {
-          const res = await this.chatService.sendMessage({
-            projectId: project.id,
-            channelId,
-            text: replyText,
-            isAgent: true
-          })
-
-          if (res?.ok) {
-            const platformLabel = check.source?.platform ? `${check.source.platform} Web` : '~150ms Direct API'
-            this.log(`[auto-reply] Successfully dispatched automated reply to ${recipientName} (${platformLabel})`)
-          } else {
-            this.log(`[auto-reply] Failed to dispatch reply to ${recipientName}: ${res?.error || 'unknown error'}`)
-          }
-        } catch (err) {
-          this.log(
-            `[auto-reply] Error auto-replying to ${recipientName}: ${
-              err instanceof Error ? err.message : String(err)
-            }`
-          )
-        }
+      } catch (err) {
+        this.log(
+          `[auto-reply] Error auto-replying to ${recipientName}: ${
+            err instanceof Error ? err.message : String(err)
+          }`
+        )
       }
     }
   }

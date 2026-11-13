@@ -309,4 +309,83 @@ describe('SyncEngine Multi-Platform Ingestion (Teams & WhatsApp without Slack)',
     expect(storedDelta!.messages[0].user).toBe('Talent Killer 👿')
     expect(storedDelta!.messages[0].text).toBe('Hey are you reviewing the proposal?')
   })
+
+  it('throttles auto-reply bursts to dispatch only once for the latest message in a multi-message batch', async () => {
+    const { monitors, delta } = await stores()
+    const now = new Date().toISOString()
+
+    const mockProject: DashboardProject = {
+      id: 'proj-autoreply-throttle',
+      name: 'Ashutush AutoReply',
+      clientName: 'Ashutush',
+      profileId: 'prof-ar-1',
+      teamId: 'default',
+      appId: 'teams',
+      tokenSource: 'oauth',
+      monitors: [],
+      sources: [
+        {
+          id: 'src-teams-ar',
+          kind: 'browser',
+          platform: 'teams',
+          profileId: 'prof-ar-1',
+          workspaceId: 'default',
+          workspaceName: 'Teams Org',
+          channelsReviewedAt: now,
+          channels: [
+            {
+              id: 'teams_chat_knp',
+              name: 'unknown knp',
+              enabled: true,
+              kind: 'dm',
+              autoReply: true,
+              autoReplyPersona: 'professional'
+            }
+          ],
+          role: 'client',
+          enabled: true,
+          backfillDays: 7,
+          createdAt: now,
+          updatedAt: now
+        }
+      ],
+      createdAt: now
+    }
+
+    await monitors.upsertProject({ project: mockProject })
+
+    const sentReplies: any[] = []
+    const mockChatService = {
+      sendMessage: vi.fn().mockImplementation(async (payload) => {
+        sentReplies.push(payload)
+        return { ok: true, message: { ts: '1731518500.000000', text: payload.text } }
+      })
+    }
+
+    const engine = new DashboardSyncEngine({
+      monitorStore: monitors,
+      deltaStore: delta,
+      chatService: mockChatService as any,
+      oauthTokenProvider: { tryGet: async () => null }
+    })
+
+    const batch = [
+      { ts: '1731518100.000001', user: 'unknown knp', text: 'hiii' },
+      { ts: '1731518100.000002', user: 'unknown knp', text: 'how are you what we do in thier' },
+      { ts: '1731518100.000003', user: 'unknown knp', text: 'tell me all of the points' },
+      { ts: '1731518100.000004', user: 'unknown knp', text: 'are you ready ?' }
+    ]
+
+    await (engine as any).handleAutoReplyForNewMessages(
+      mockProject,
+      'teams_chat_knp',
+      batch
+    )
+
+    // Should only dispatch 1 reply for the latest message, not 4
+    expect(sentReplies.length).toBe(1)
+    expect(sentReplies[0].channelId).toBe('teams_chat_knp')
+    expect(sentReplies[0].text).toContain('unknown knp')
+    expect(sentReplies[0].text).toContain('reviewing this and will get back to you shortly')
+  })
 })
