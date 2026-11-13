@@ -76,4 +76,49 @@ describe('BrowserViewManager Embed Lifecycle', () => {
     expect(mockWindow.contentView.children).not.toContain(mockView)
     expect((bvm as any).cardEmbedKey).toBeNull()
   })
+
+  it('setEmbedVisible(false) removes ALL child views from contentView and sets embedHidden to true', () => {
+    const bvm = new BrowserViewManager()
+    const view1 = { webContents: { isDestroyed: () => false }, setBounds: vi.fn() } as any
+    const view2 = { webContents: { isDestroyed: () => false }, setBounds: vi.fn() } as any
+
+    const children: any[] = [view1, view2]
+    const mockWindow = {
+      contentView: {
+        children,
+        removeChildView: vi.fn((v: any) => {
+          const idx = children.indexOf(v)
+          if (idx !== -1) children.splice(idx, 1)
+        })
+      }
+    } as any
+
+    bvm.setEmbedVisible(mockWindow, false)
+    expect(mockWindow.contentView.children.length).toBe(0)
+    expect((bvm as any).embedHidden).toBe(true)
+  })
+
+  it('clearCardSlackEmbed nullifies activeKey if it matches cardEmbedKey', () => {
+    const bvm = new BrowserViewManager()
+    const mockView = { webContents: { isDestroyed: () => false }, setBounds: vi.fn() } as any
+    ;(bvm as any).views.set('card:p1:teams', mockView)
+    ;(bvm as any).cardEmbedKey = 'card:p1:teams'
+    ;(bvm as any).activeKey = 'card:p1:teams'
+
+    const children: any[] = [mockView]
+    const mockWindow = {
+      contentView: {
+        children,
+        removeChildView: vi.fn((v: any) => {
+          const idx = children.indexOf(v)
+          if (idx !== -1) children.splice(idx, 1)
+        })
+      }
+    } as any
+
+    bvm.clearCardSlackEmbed(mockWindow)
+    expect((bvm as any).cardEmbedKey).toBeNull()
+    expect((bvm as any).activeKey).toBeNull()
+    expect(mockWindow.contentView.children).not.toContain(mockView)
+  })
 })

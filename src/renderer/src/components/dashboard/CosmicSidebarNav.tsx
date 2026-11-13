@@ -59,19 +59,16 @@ export function CosmicSidebarContent({
   }, [profiles])
 
   // Active projects to display:
-  // For 'all' (or minimal/basic): all active projects across all profiles
+  // For 'all' (or minimal/basic or global): all active projects across all profiles
   // For a specific profile: all active projects for that profile
   const displayedProjects = useMemo(() => {
     if (!snapshot) return []
-    if (isFlatNav || cosmicLevel1 === 'all') {
+    if (isFlatNav || cosmicLevel1 === 'all' || cosmicLevel1 === 'global') {
       return snapshot.projects.filter(
         (p) =>
           p.project.workflowStatus !== 'completed' &&
           p.project.workflowStatus !== 'removed'
       )
-    }
-    if (cosmicLevel1 === 'global') {
-      return []
     }
     return snapshot.projects.filter(
       (p) =>
@@ -115,7 +112,7 @@ export function CosmicSidebarContent({
     [snapshot, setCosmicNavigation]
   )
 
-  const isAllProjects = isFlatNav || cosmicLevel1 === 'all'
+  const isAllProjects = isFlatNav || cosmicLevel1 === 'all' || cosmicLevel1 === 'global'
   const isProfileSelected = Boolean(
     !isFlatNav && cosmicLevel1 && cosmicLevel1 !== 'all' && cosmicLevel1 !== 'global'
   )
@@ -235,7 +232,11 @@ export function CosmicSidebarContent({
               {showDashboardBtn && (
                 <button
                   type="button"
-                  onClick={() => setCosmicNavigation(cosmicLevel1, null)}
+                  onClick={() => {
+                    setCosmicNavigation(cosmicLevel1, null)
+                    void window.api?.profiles?.setEmbedVisible?.(false)
+                    void window.api?.profiles?.clearCardSlackEmbed?.()
+                  }}
                   title={isAllProjects ? 'View All Projects Dashboard' : 'View Projects Dashboard for this Profile'}
                   style={{
                     display: 'flex',
@@ -352,6 +353,8 @@ export function CosmicSidebarContent({
                     onClick={() => {
                       setCosmicNavigation(cosmicLevel1, entry.project.id)
                       useProfileStore.getState().clearActiveApp()
+                      void window.api?.profiles?.setEmbedVisible?.(false)
+                      void window.api?.profiles?.clearCardSlackEmbed?.()
                     }}
                     style={{
                       display: 'flex',
@@ -432,3 +435,6 @@ export function CosmicSidebarContent({
     </div>
   )
 }
+
+export const CosmicSidebarNav = CosmicSidebarContent
+export default CosmicSidebarContent

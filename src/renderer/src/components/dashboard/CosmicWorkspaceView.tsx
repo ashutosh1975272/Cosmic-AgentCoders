@@ -59,6 +59,14 @@ export function CosmicWorkspaceView({
     }
   }, [snapshot, loadSnapshot])
 
+  // Clear native embeds whenever dashboard tab is selected
+  useEffect(() => {
+    if (basicActiveTab === 'dashboard') {
+      void window.api?.profiles?.setEmbedVisible?.(false)
+      void window.api?.profiles?.clearCardSlackEmbed?.()
+    }
+  }, [basicActiveTab])
+
   // Listen for snapshot broadcasts and sync completions from background scraper
   useEffect(() => {
     if (!window.api?.dashboard?.onSnapshotChanged) return

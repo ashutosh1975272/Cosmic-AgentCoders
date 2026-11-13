@@ -181,13 +181,7 @@ export default function WorkspaceContent({
   }, [nav.selection, project.sources, onSelect])
 
 
-  useEffect(() => {
-    if (channelPickerSourceId || controlSource) {
-      void window.api?.profiles?.setEmbedVisible?.(false)
-    } else {
-      void window.api?.profiles?.setEmbedVisible?.(true)
-    }
-  }, [channelPickerSourceId, controlSource])
+
 
   const slackBrowserSource = useMemo(
     () =>
@@ -300,6 +294,44 @@ export default function WorkspaceContent({
       }).catch(() => undefined)
     }
   }, [project?.id, project?.teamId, effectiveSlackTeamId, targetProfile])
+
+  const isEmbedActive = useMemo(() => {
+    if (nav.openGroup !== 'slack') return false
+    if (channelPickerSourceId || controlSource) return false
+    if (!sel) {
+      return (
+        slackViewMode === 'live' &&
+        Boolean(cardAuthenticated === true || effectiveSlackTeamId || project.teamId || channels.teamConnected)
+      )
+    }
+    if (sel.startsWith('c:teams') || sel.startsWith('c:whatsapp')) return true
+    if (sel.startsWith('c:preset:') || sel.startsWith('c:link:') || sel.startsWith('c:custom:')) return true
+    if (isGlobalWorkspaceId(sel)) return true
+    const isWholeWorkspace = sel === 's:team' || sel === 's:client' || !isChannelId(sel)
+    if (isWholeWorkspace && slackViewMode === 'live') {
+      return Boolean(cardAuthenticated === true || effectiveSlackTeamId || project.teamId || channels.teamConnected)
+    }
+    return false
+  }, [
+    nav.openGroup,
+    sel,
+    channelPickerSourceId,
+    controlSource,
+    slackViewMode,
+    cardAuthenticated,
+    effectiveSlackTeamId,
+    project.teamId,
+    channels.teamConnected
+  ])
+
+  useEffect(() => {
+    if (nav.openGroup === 'dash' || !isEmbedActive) {
+      void window.api?.profiles?.setEmbedVisible?.(false)
+      void window.api?.profiles?.clearCardSlackEmbed?.()
+    } else {
+      void window.api?.profiles?.setEmbedVisible?.(true)
+    }
+  }, [nav.openGroup, sel, channelPickerSourceId, controlSource, isEmbedActive])
 
   const handleStartCardAppLogin = async (
     projectId?: string,
