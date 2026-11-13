@@ -50,8 +50,11 @@ export class TeamsPlatformSuite implements IPlatformBackendAdapter {
         await reader.initialize()
       }
       const discovered = await reader.listChannels()
+      const activeChannels = discovered.filter(
+        (ch) => ch.hasMessages !== false && (ch.messageCount === undefined || ch.messageCount >= 1)
+      )
       return {
-        channels: discovered.map((ch) => ({
+        channels: activeChannels.map((ch) => ({
           id: ch.id,
           name: ch.name,
           isPrivate: ch.isPrivate,

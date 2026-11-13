@@ -60,6 +60,27 @@ describe('TeamsReaderView', () => {
     expect(channels[1].kind).toBe('dm')
   })
 
+  it('filters out 0-message channels and empty personal drafts', async () => {
+    const mockWebContents = {
+      isDestroyed: vi.fn().mockReturnValue(false),
+      executeJavaScript: vi.fn().mockResolvedValue([
+        { id: 'teams_active', name: 'General', isPrivate: false, isDm: false, kind: 'public', messageCount: 12, hasMessages: true },
+        { id: 'teams_empty_space', name: 'unknown knp (You)', isPrivate: true, isDm: true, kind: 'dm', messageCount: 0, hasMessages: false }
+      ])
+    }
+    const mockView = { webContents: mockWebContents } as any
+
+    const reader = new TeamsReaderView({
+      profileId: 'prof-1',
+      existingView: mockView
+    })
+
+    const channels = await reader.listChannels()
+    expect(channels.length).toBe(1)
+    expect(channels[0].name).toBe('General')
+    expect(channels[0].messageCount).toBe(12)
+  })
+
   it('reads messages from evaluated script in WebContentsView', async () => {
     const mockWebContents = {
       isDestroyed: vi.fn().mockReturnValue(false),
