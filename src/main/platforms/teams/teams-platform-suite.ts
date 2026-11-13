@@ -42,6 +42,7 @@ export class TeamsPlatformSuite implements IPlatformBackendAdapter {
 
     const reader = new TeamsReaderView({
       profileId: ctx.profileId,
+      projectId: (ctx as any).projectId,
       existingView: ctx.existingView ?? null
     })
 
@@ -89,6 +90,7 @@ export class TeamsPlatformSuite implements IPlatformBackendAdapter {
 
     const reader = new TeamsReaderView({
       profileId: source.profileId || '',
+      projectId: project.id,
       existingView: existingView ?? null
     })
 

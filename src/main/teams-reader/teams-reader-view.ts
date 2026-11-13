@@ -1,5 +1,5 @@
 import { WebContentsView, session } from 'electron'
-import { partitionForProfile } from '../profiles/session-partition'
+import { partitionForProfile, partitionForCard } from '../profiles/session-partition'
 import { normalizeTeamsMessage, type RawTeamsMessage } from './teams-normalizer'
 import type { DashboardStoredMessage } from '../dashboard/delta-store'
 
@@ -17,6 +17,7 @@ export interface TeamsDiscoveredChannel {
 
 export interface TeamsReaderOptions {
   profileId: string
+  projectId?: string
   existingView?: WebContentsView | null
 }
 
@@ -181,9 +182,11 @@ export class TeamsReaderView {
   private view: WebContentsView | null = null
   private ownsView = false
   private readonly profileId: string
+  private readonly projectId?: string
 
   constructor(options: TeamsReaderOptions) {
     this.profileId = options.profileId
+    this.projectId = options.projectId
     if (options.existingView) {
       this.view = options.existingView
       this.ownsView = false
@@ -192,15 +195,19 @@ export class TeamsReaderView {
 
   async initialize(): Promise<void> {
     if (this.view) return
-    const partition = partitionForProfile(this.profileId, 'teams')
+    const partition = this.projectId
+      ? partitionForCard(this.projectId, 'teams')
+      : partitionForProfile(this.profileId, 'teams')
     const sess = session.fromPartition(partition)
     this.view = new WebContentsView({
       webPreferences: {
         session: sess,
         sandbox: false,
-        contextIsolation: true
+        contextIsolation: true,
+        backgroundThrottling: false
       }
     })
+    this.view.setBounds({ x: -10000, y: -10000, width: 1280, height: 900 })
     this.ownsView = true
   }
 

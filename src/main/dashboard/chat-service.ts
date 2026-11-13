@@ -771,6 +771,7 @@ export class DashboardChatService {
       try {
         const profileId = targetSource.profileId || project.profileId
         const existingView =
+          this.getOrCreateCardView?.(project.id, 'teams') ??
           this.getExistingCardView?.(project.id, 'teams') ??
           this.getExistingBrowserView?.(profileId, 'teams') ??
           null
@@ -778,6 +779,7 @@ export class DashboardChatService {
         const { TeamsReaderView } = await import('../teams-reader/teams-reader-view')
         const reader = new TeamsReaderView({
           profileId,
+          projectId: project.id,
           existingView
         })
         if (!existingView) {
