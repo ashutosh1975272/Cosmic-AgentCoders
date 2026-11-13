@@ -336,6 +336,14 @@ export function detectAgentAction(
       let rawPlatform = atMatch ? atMatch[1].trim() : undefined
       let rawTarget = hashMatch ? hashMatch[1].trim() : undefined
 
+      // If no hashMatch, check if target was specified with "to/in <target>" in header
+      if (!rawTarget) {
+        const targetInHeader = header.match(/(?:to|in|for|into)\s+(?:the\s+)?(?:#|@)?([a-zA-Z0-9_-]+)/i)
+        if (targetInHeader && !['slack', 'teams', 'whatsapp'].includes(targetInHeader[1].toLowerCase())) {
+          rawTarget = targetInHeader[1].trim()
+        }
+      }
+
       // If atMatch is present but no hashMatch, check if atMatch was a target channel/person instead of platform
       if (!rawTarget && atMatch) {
         const candidate = atMatch[1].trim()
