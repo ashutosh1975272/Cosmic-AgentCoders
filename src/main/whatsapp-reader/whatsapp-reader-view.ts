@@ -251,6 +251,158 @@ const WHATSAPP_READ_MESSAGES_SCRIPT = `
 })()
 `
 
+export function buildWhatsAppDirectReadScript(chatId: string, chatName?: string): string {
+  const cleanSlug = chatId.replace(/^wa_/, '').replace(/_+/g, ' ').toLowerCase().trim()
+  const cleanName = (chatName || '').replace(/^[#@]+/, '').toLowerCase().trim()
+  const targetId = chatId.toLowerCase().trim()
+
+  return `
+    (async () => {
+      try {
+        const targetId = ${JSON.stringify(targetId)};
+        const cleanSlug = ${JSON.stringify(cleanSlug)};
+        const targetName = ${JSON.stringify(cleanName)};
+
+        const matches = (candidate) => {
+          if (!candidate) return false;
+          const cand = candidate.toLowerCase().trim();
+          const candAlpha = cand.replace(/[^\\p{L}\\p{N}]/gu, '');
+          const slugAlpha = cleanSlug.replace(/[^\\p{L}\\p{N}]/gu, '');
+          const nameAlpha = targetName.replace(/[^\\p{L}\\p{N}]/gu, '');
+          const idAlpha = targetId.replace(/[^\\p{L}\\p{N}]/gu, '');
+
+          if (cand === targetId || cand === cleanSlug || (targetName && cand === targetName)) return true;
+          if (candAlpha.length >= 2) {
+            if (slugAlpha.length >= 2 && (candAlpha === slugAlpha || candAlpha.includes(slugAlpha) || slugAlpha.includes(candAlpha))) return true;
+            if (nameAlpha.length >= 2 && (candAlpha === nameAlpha || candAlpha.includes(nameAlpha) || nameAlpha.includes(candAlpha))) return true;
+            if (idAlpha.length >= 2 && (candAlpha === idAlpha || candAlpha.includes(idAlpha))) return true;
+          }
+          return false;
+        };
+
+        // 1. Direct check: WhatsApp Web internal Store models (if available/injected)
+        if (typeof window !== 'undefined' && window.Store && window.Store.Chat) {
+          try {
+            const chatModels = window.Store.Chat.models || [];
+            const chat = chatModels.find((c) => {
+              const cName = (c.name || c.formattedTitle || '').trim();
+              const cId = (c.id?._serialized || String(c.id || '')).trim();
+              return matches(cName) || matches(cId);
+            });
+            if (chat && chat.msgs && Array.isArray(chat.msgs.models) && chat.msgs.models.length > 0) {
+              const results = [];
+              for (const m of chat.msgs.models.slice(-50)) {
+                const text = m.body || m.caption || m.__x_body || '';
+                if (text) {
+                  results.push({
+                    id: m.id?._serialized || String(m.id || Date.now()),
+                    chatId: chat.id?._serialized || targetId,
+                    senderId: m.fromMe ? 'me' : (m.sender?.id?._serialized || 'contact'),
+                    senderName: m.fromMe ? 'You' : (chat.name || chat.formattedTitle || 'Contact'),
+                    text,
+                    timestamp: (m.t || Date.now() / 1000) * 1000,
+                    fromMe: Boolean(m.fromMe)
+                  });
+                }
+              }
+              if (results.length > 0) return results;
+            }
+          } catch {
+            // fallback to indexedDB
+          }
+        }
+
+        // 2. Direct IndexedDB extraction from 'model-storage'
+        if (typeof window !== 'undefined' && window.indexedDB) {
+          const idbResult = await new Promise((resolve) => {
+            const timer = setTimeout(() => resolve([]), 2000);
+            try {
+              const openReq = window.indexedDB.open('model-storage');
+              openReq.onerror = () => { clearTimeout(timer); resolve([]); };
+              openReq.onsuccess = (e) => {
+                const db = e.target.result;
+                const storeNames = Array.from(db.objectStoreNames || []);
+                const chatStoreName = storeNames.find((s) => s === 'chat' || s === 'chats');
+                const msgStoreName = storeNames.find((s) => s === 'message' || s === 'messages' || s === 'msg');
+
+                if (!chatStoreName || !msgStoreName) {
+                  clearTimeout(timer);
+                  resolve([]);
+                  return;
+                }
+
+                const tx = db.transaction([chatStoreName, msgStoreName], 'readonly');
+                const chatStore = tx.objectStore(chatStoreName);
+                const msgStore = tx.objectStore(msgStoreName);
+
+                const chatReq = chatStore.getAll();
+                chatReq.onerror = () => { clearTimeout(timer); resolve([]); };
+                chatReq.onsuccess = () => {
+                  const allChats = chatReq.result || [];
+                  const matchedChat = allChats.find((c) => {
+                    const cName = (c.name || c.formattedTitle || '').trim();
+                    const cId = (c.id?._serialized || String(c.id || '')).trim();
+                    return matches(cName) || matches(cId);
+                  });
+
+                  if (!matchedChat) {
+                    clearTimeout(timer);
+                    resolve([]);
+                    return;
+                  }
+
+                  const matchedChatId = (matchedChat.id?._serialized || String(matchedChat.id || '')).trim();
+                  const matchedTitle = (matchedChat.name || matchedChat.formattedTitle || 'Contact').trim();
+
+                  const msgReq = msgStore.getAll();
+                  msgReq.onerror = () => { clearTimeout(timer); resolve([]); };
+                  msgReq.onsuccess = () => {
+                    clearTimeout(timer);
+                    const allMsgs = msgReq.result || [];
+                    const chatMsgs = allMsgs.filter((m) => {
+                      if (!m) return false;
+                      const mChatId = (m.chatId || m.to || m.from || m.id?.remote || '').trim();
+                      return mChatId === matchedChatId || (matchedChatId && mChatId.includes(matchedChatId)) || (mChatId && matchedChatId.includes(mChatId));
+                    }).sort((a, b) => (Number(a.t || 0) - Number(b.t || 0))).slice(-50);
+
+                    const results = [];
+                    for (const m of chatMsgs) {
+                      const text = m.body || m.caption || '';
+                      if (text) {
+                        results.push({
+                          id: m.id?._serialized || String(m.id || Date.now()),
+                          chatId: matchedChatId,
+                          senderId: m.fromMe ? 'me' : 'contact',
+                          senderName: m.fromMe ? 'You' : matchedTitle,
+                          text,
+                          timestamp: (Number(m.t) || Date.now() / 1000) * 1000,
+                          fromMe: Boolean(m.fromMe)
+                        });
+                      }
+                    }
+                    resolve(results);
+                  };
+                };
+              };
+            } catch {
+              clearTimeout(timer);
+              resolve([]);
+            }
+          });
+
+          if (Array.isArray(idbResult) && idbResult.length > 0) {
+            return idbResult;
+          }
+        }
+
+        return [];
+      } catch {
+        return [];
+      }
+    })()
+  `
+}
+
 export class WhatsAppReaderView {
   private view: WebContentsView | null = null
   private ownsView = false
@@ -266,15 +418,16 @@ export class WhatsAppReaderView {
     }
   }
 
-  async waitForReady(timeoutMs = 8000): Promise<boolean> {
+  async waitForReady(timeoutMs = 12000): Promise<boolean> {
     if (!this.view || this.view.webContents.isDestroyed()) return false
     const deadline = Date.now() + timeoutMs
     const probeScript = `
       (() => {
         return Boolean(
-          document.querySelector('#pane-side') ||
-          document.querySelector('#side') ||
-          document.querySelector('#main')
+          document.querySelector('#pane-side [role="listitem"]') ||
+          document.querySelector('#pane-side [data-testid="cell-frame-container"]') ||
+          document.querySelector('#main') ||
+          (typeof window !== 'undefined' && window.Store && window.Store.Chat)
         );
       })()
     `
@@ -300,13 +453,15 @@ export class WhatsAppReaderView {
       webPreferences: {
         session: sess,
         sandbox: false,
-        contextIsolation: true
+        contextIsolation: true,
+        backgroundThrottling: false
       }
     })
     this.ownsView = true
+    this.view.setBounds({ x: -10000, y: -10000, width: 1280, height: 900 })
     try {
       await this.view.webContents.loadURL('https://web.whatsapp.com')
-      await this.waitForReady(8000)
+      await this.waitForReady(12000)
     } catch {
       // Ignore initial load interruption if already navigated
     }
@@ -409,6 +564,25 @@ export class WhatsAppReaderView {
       return []
     }
     try {
+      // 1. Direct IndexedDB / WebStore extraction (Zero-DOM, instant, unaffected by virtualization)
+      const directScript = buildWhatsAppDirectReadScript(chatId, expectedName)
+      const directRaw = await this.view.webContents.executeJavaScript(directScript, true)
+      if (Array.isArray(directRaw) && directRaw.length > 0) {
+        const validDirect = directRaw.filter((m: RawWhatsAppMessage) => {
+          if (!expectedName && !chatId) return true
+          const sender = m.senderName || ''
+          return (
+            m.fromMe ||
+            this.matchesTarget(sender, chatId, expectedName) ||
+            this.matchesTarget(m.chatId || '', chatId, expectedName)
+          )
+        })
+        if (validDirect.length > 0) {
+          return validDirect.map((m: RawWhatsAppMessage) => normalizeWhatsAppMessage(m, chatId))
+        }
+      }
+
+      // 2. Fallback to DOM extraction
       if (expectedName || chatId) {
         const active = await this.getActiveChatTitle()
         // If an active header is present and does not match the target contact, do NOT read to avoid cross-chat contamination
@@ -416,6 +590,20 @@ export class WhatsAppReaderView {
           return []
         }
       }
+
+      // Wait up to 1500ms for message bubbles to hydrate in #main if currently active
+      const hydrationWaitScript = `
+        (() => {
+          return Boolean(document.querySelector('#main div.message-in, #main div.message-out, #main [data-testid="msg-container"]'));
+        })()
+      `
+      const deadline = Date.now() + 1500
+      while (Date.now() < deadline) {
+        const hasMessages = await this.view.webContents.executeJavaScript(hydrationWaitScript, true).catch(() => false)
+        if (hasMessages) break
+        await new Promise((r) => setTimeout(r, 150))
+      }
+
       const raw = await this.view.webContents.executeJavaScript(
         WHATSAPP_READ_MESSAGES_SCRIPT,
         true

@@ -272,4 +272,42 @@ describe('WhatsAppReaderView', () => {
     expect(chats[0].name).toBe('Talent Killer 👿')
     expect(chats.some((c) => /unread\s*message/i.test(c.name))).toBe(false)
   })
+
+  it('extracts messages directly from WhatsApp IndexedDB model-storage when available', async () => {
+    const mockWebContents = {
+      isDestroyed: vi.fn().mockReturnValue(false),
+      executeJavaScript: vi.fn().mockImplementation(async (script: string) => {
+        if (script.includes('indexedDB') || script.includes('model-storage')) {
+          return [
+            {
+              id: 'wa-id-1',
+              chatId: 'talent_killer',
+              senderName: 'Talent Killer 👿',
+              text: 'Hello from Talent Killer!',
+              timestamp: 1731518400000,
+              fromMe: false
+            },
+            {
+              id: 'wa-id-2',
+              chatId: 'talent_killer',
+              senderName: 'You',
+              text: 'Acknowledged, reviewing now.',
+              timestamp: 1731518460000,
+              fromMe: true
+            }
+          ]
+        }
+        return []
+      })
+    }
+    const reader = new WhatsAppReaderView({
+      profileId: 'prof-1',
+      existingView: { webContents: mockWebContents } as any
+    })
+    const messages = await reader.readMessages('wa_talent_killer___', 'Talent Killer 👿')
+    expect(messages.length).toBe(2)
+    expect(messages[0].user).toBe('Talent Killer 👿')
+    expect(messages[0].text).toBe('Hello from Talent Killer!')
+    expect(messages[1].user).toBe('You')
+  })
 })
