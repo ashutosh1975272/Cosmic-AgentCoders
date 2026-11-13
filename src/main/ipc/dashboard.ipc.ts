@@ -72,6 +72,7 @@ import type { DashboardViewedStore } from '../dashboard/viewed-store'
 import { RunLogStore } from '../dashboard/run-log-store'
 import type { DashboardDeltaStore } from '../dashboard/delta-store'
 import { platformBackendRegistry } from '../platforms/registry'
+import type { BrowserViewManager } from '../profiles/browser-view-manager'
 
 export interface DashboardIpcDeps {
   monitorStore: MonitorStore
@@ -81,6 +82,7 @@ export interface DashboardIpcDeps {
   scheduler: DashboardScheduler
   getMainWindow: () => BrowserWindow | null
   oauthTokenProvider: { tryGet(profileId: string, teamId: string): Promise<string | null> }
+  browserViewManager?: BrowserViewManager
   /** v2.2 — insight history (optional, additive) */
   historyStore?: HistoryStore
   /** v2.3 — the "Recent" strip feed (built from local data, no LLM call) */
@@ -1097,10 +1099,30 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
     async (payload: { projectId: string; appId?: string }): Promise<boolean> => {
       if (!payload?.projectId) return false
       try {
-        const partition = partitionForCard(payload.projectId, (payload.appId as any) || 'slack')
+        const appId = (payload.appId as any) || 'slack'
+        if (deps.browserViewManager?.isCardSessionAuthenticated) {
+          return await deps.browserViewManager.isCardSessionAuthenticated(payload.projectId, appId)
+        }
+        const partition = partitionForCard(payload.projectId, appId)
         const sess = session.fromPartition(partition)
-        const cookies = await sess.cookies.get({ domain: '.slack.com' })
-        return cookies.some((c) => (c.name === 'd' || c.name === 'd-s') && Boolean(c.value))
+        if (appId === 'slack') {
+          const cookies = await sess.cookies.get({ domain: '.slack.com' })
+          return cookies.some((c) => (c.name === 'd' || c.name === 'd-s') && Boolean(c.value))
+        }
+        if (appId === 'teams') {
+          const cookies = await sess.cookies.get({})
+          return cookies.some((c) =>
+            /(?:^|\.)(?:microsoft\.com|microsoftonline\.com|live\.com|teams\.microsoft\.com)$/i.test(c.domain || '') &&
+            Boolean(c.value)
+          )
+        }
+        if (appId === 'whatsapp') {
+          const cookies = await sess.cookies.get({})
+          return cookies.some((c) =>
+            /(?:^|\.)(?:whatsapp\.com|wa\.me)$/i.test(c.domain || '') && Boolean(c.value)
+          )
+        }
+        return false
       } catch {
         return false
       }

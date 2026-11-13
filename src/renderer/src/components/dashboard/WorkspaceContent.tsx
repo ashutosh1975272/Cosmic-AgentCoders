@@ -18,7 +18,6 @@ import AgentChatPanel from './AgentChatPanel'
 import AgentCodersPanel from './AgentCodersPanel'
 import { requestMessageJump } from './jump-to-message'
 import SchedulesPage from './SchedulesPage'
-import { AppIcon } from '../AppIcon'
 import { SourceChannelPicker } from './SourceChannelPicker'
 import { PlatformThinBar } from '../../platforms/components/PlatformThinBar'
 import { PlatformControlModal } from '../../platforms/components/PlatformControlModal'
@@ -122,26 +121,52 @@ export default function WorkspaceContent({
   const sel = nav.selection
 
   const profiles = useProfileStore((s) => s.profiles)
-  const startAppLogin = useProfileStore((s) => s.startAppLogin)
   const targetProfile = profiles.find((p) => p.id === project.profileId) ?? profiles[0]
 
   const [authBusyApp, setAuthBusyApp] = useState<'slack' | 'teams' | 'whatsapp' | null>(null)
   const [authError, setAuthError] = useState<string | null>(null)
   const [slackViewMode, setSlackViewMode] = useState<'messages' | 'live'>('live')
   const [cardAuthenticated, setCardAuthenticated] = useState<boolean | null>(null)
+  const [cardAuth, setCardAuth] = useState<{
+    slack: boolean | null
+    teams: boolean | null
+    whatsapp: boolean | null
+  }>({
+    slack: null,
+    teams: null,
+    whatsapp: null
+  })
   const [channelPickerSourceId, setChannelPickerSourceId] = useState<string | null>(null)
   const [controlSource, setControlSource] = useState<ProjectSource | null>(null)
 
   useEffect(() => {
     let cancelled = false
     if (!project?.id) return
-    window.api?.dashboard?.checkCardAuth?.({ projectId: project.id, appId: 'slack' })
-      .then((isAuth) => {
-        if (!cancelled) setCardAuthenticated(Boolean(isAuth))
-      })
-      .catch(() => {
-        if (!cancelled) setCardAuthenticated(false)
-      })
+
+    const checkAll = async () => {
+      try {
+        const [slackAuth, teamsAuth, whatsappAuth] = await Promise.all([
+          window.api?.dashboard?.checkCardAuth?.({ projectId: project.id, appId: 'slack' }).catch(() => false),
+          window.api?.dashboard?.checkCardAuth?.({ projectId: project.id, appId: 'teams' }).catch(() => false),
+          window.api?.dashboard?.checkCardAuth?.({ projectId: project.id, appId: 'whatsapp' }).catch(() => false)
+        ])
+        if (!cancelled) {
+          setCardAuth({
+            slack: Boolean(slackAuth),
+            teams: Boolean(teamsAuth),
+            whatsapp: Boolean(whatsappAuth)
+          })
+          setCardAuthenticated(Boolean(slackAuth))
+        }
+      } catch {
+        if (!cancelled) {
+          setCardAuth({ slack: false, teams: false, whatsapp: false })
+          setCardAuthenticated(false)
+        }
+      }
+    }
+
+    void checkAll()
     return () => {
       cancelled = true
     }
@@ -286,14 +311,17 @@ export default function WorkspaceContent({
     setAuthBusyApp(appId)
     setAuthError(null)
     try {
-      if (appId === 'slack' && window.api?.profiles?.startCardAppLogin) {
+      if (window.api?.profiles?.startCardAppLogin) {
         await window.api.profiles.startCardAppLogin({
           projectId,
           profileId,
-          appId: 'slack'
+          appId
         })
-        const isAuth = await window.api.dashboard.checkCardAuth({ projectId, appId: 'slack' })
-        setCardAuthenticated(Boolean(isAuth))
+        const isAuth = await window.api.dashboard.checkCardAuth({ projectId, appId })
+        setCardAuth((prev) => ({ ...prev, [appId]: Boolean(isAuth) }))
+        if (appId === 'slack') {
+          setCardAuthenticated(Boolean(isAuth))
+        }
         if (isAuth) {
           await useDashboardStore.getState().loadSnapshot()
           const currentProject =
@@ -301,18 +329,20 @@ export default function WorkspaceContent({
               .getState()
               .snapshot?.projects.find((p) => p.project.id === projectId)?.project ?? project
           let existingSource = (currentProject.sources ?? []).find(
-            (s) => s.kind === 'browser' && s.platform === 'slack' && s.enabled !== false
+            (s) => s.kind === 'browser' && s.platform === appId && s.enabled !== false
           )
           if (!existingSource) {
             const now = new Date().toISOString()
-            const newSourceId = `src-browser-${Date.now()}`
+            const newSourceId = `src-${appId}-${Date.now()}`
+            const defaultWsName =
+              appId === 'teams' ? 'Microsoft Teams' : appId === 'whatsapp' ? 'WhatsApp' : 'Slack Workspace'
             const newSource: ProjectSource = {
               id: newSourceId,
               kind: 'browser',
-              platform: 'slack',
+              platform: appId,
               profileId,
-              workspaceId: effectiveSlackTeamId || currentProject.teamId || 'team',
-              workspaceName: currentProject.teamName || 'Slack Workspace',
+              workspaceId: appId === 'slack' ? (effectiveSlackTeamId || currentProject.teamId || 'team') : appId,
+              workspaceName: currentProject.teamName || defaultWsName,
               channels: [],
               role: 'client',
               enabled: true,
@@ -333,38 +363,12 @@ export default function WorkspaceContent({
             setChannelPickerSourceId(existingSource.id)
           }
         }
-      } else {
-        await startAppLogin(profileId, appId)
       }
     } catch (err) {
       console.error('Card app login error', err)
       setAuthError(String(err))
     } finally {
       setAuthBusyApp(null)
-    }
-  }
-
-  const handleStartAppLogin = async (profileId?: string, appId?: 'slack' | 'teams' | 'whatsapp') => {
-    if (!profileId || !appId) return
-    setAuthBusyApp(appId)
-    setAuthError(null)
-    try {
-      await startAppLogin(profileId, appId)
-    } catch (err) {
-      console.error('App login error', err)
-      setAuthError(String(err))
-    } finally {
-      setAuthBusyApp(null)
-    }
-  }
-
-  const handleCancelAppLogin = async (profileId?: string) => {
-    if (!profileId) return
-    setAuthBusyApp(null)
-    try {
-      await window.api?.profiles?.clearStuckAuth?.()
-    } catch (err) {
-      console.warn('Cancel login error', err)
     }
   }
 
@@ -635,198 +639,59 @@ export default function WorkspaceContent({
         </div>
       )
     } else if (sel && sel.startsWith('c:teams')) {
-      const teamsStatus = targetProfile?.apps?.teams?.sessionStatus ?? 'not-signed-in'
-      if (teamsStatus === 'signed-in') {
-        body = (
-          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: 'var(--bg-page)' }}>
-            <PlatformThinBar
-              platform="teams"
-              workspaceName="Microsoft Teams"
-              subtitle={targetProfile?.displayName}
-              isConnected={true}
-              channelCount={effectiveTeamsSource.channels.filter((c) => c.enabled !== false).length}
-              onOpenControl={() => setControlSource(effectiveTeamsSource)}
-              onReauthenticate={() => void handleStartAppLogin(targetProfile?.id, 'teams')}
+      const isConnected =
+        cardAuth.teams === true ||
+        (cardAuth.teams === null && targetProfile?.apps?.teams?.sessionStatus === 'signed-in') ||
+        teamsSource?.status === 'connected'
+      body = (
+        <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: 'var(--bg-page)' }}>
+          <PlatformThinBar
+            platform="teams"
+            workspaceName="Microsoft Teams"
+            subtitle={targetProfile?.displayName}
+            isConnected={isConnected}
+            channelCount={effectiveTeamsSource.channels.filter((c) => c.enabled !== false).length}
+            onOpenControl={() => setControlSource(effectiveTeamsSource)}
+            onReauthenticate={() => void handleStartCardAppLogin(project.id, targetProfile?.id, 'teams')}
+          />
+          <div style={{ flex: '1 1 0%', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
+            <CardLiveSlackEmbed
+              key={`live-embed-teams-${project.id}`}
+              appId="teams"
+              projectId={project.id}
+              profileId={targetProfile?.id}
+              hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)}
             />
-            <div style={{ flex: '1 1 0%', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
-              <CardLiveSlackEmbed
-                key={`live-embed-teams-${project.id}`}
-                appId="teams"
-                projectId={project.id}
-                profileId={targetProfile?.id}
-                hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)}
-              />
-            </div>
           </div>
-        )
-      } else if (teamsStatus === 'signing-in' || authBusyApp === 'teams') {
-        body = (
-          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: 'var(--bg-page)' }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '8px 14px',
-              background: 'color-mix(in srgb, var(--accent) 15%, var(--surface))',
-              borderBottom: '1px solid var(--border)',
-              fontSize: 12,
-              color: 'var(--text)'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{ width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#6366f1', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-                <span style={{ fontWeight: 600, color: '#f8fafc' }}>Signing in to Microsoft Teams...</span>
-                <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>Enter credentials in the window below</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => void handleCancelAppLogin(targetProfile?.id)}
-                style={{
-                  background: 'rgba(255, 255, 255, 0.08)',
-                  border: '1px solid rgba(255, 255, 255, 0.15)',
-                  color: '#fff',
-                  fontSize: 11,
-                  borderRadius: 6,
-                  padding: '3px 10px',
-                  cursor: 'pointer'
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-            <div style={{ flex: '1 1 0%', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
-              <CardLiveSlackEmbed
-                key={`live-embed-teams-${project.id}`}
-                appId="teams"
-                projectId={project.id}
-                profileId={targetProfile?.id}
-                hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)}
-              />
-            </div>
-          </div>
-        )
-      } else {
-        body = (
-          <div className="ws-agent" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-            <div className="ws-agent-empty" style={{ maxWidth: 420, padding: 24, textAlign: 'center' }}>
-              <span className="ws-agent-empty-icon" style={{ display: 'inline-flex', padding: 12, background: 'rgba(98, 100, 167, 0.15)', borderRadius: 16 }}>
-                <AppIcon appId="teams" size={48} />
-              </span>
-              <h3 style={{ margin: '14px 0 6px', fontSize: 18, color: '#f8fafc', fontWeight: 650 }}>
-                Microsoft Teams
-              </h3>
-              <p style={{ margin: '0 0 16px', fontSize: 13, color: '#94a3b8', lineHeight: 1.5 }}>
-                Sign in with your Microsoft work, school, or personal account to view channels and chats for this project card.
-              </p>
-              <div style={{ fontSize: 11, color: '#64748b', marginBottom: 18 }}>
-                Associated Profile: <strong style={{ color: '#cbd5e1' }}>{targetProfile?.displayName}</strong>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
-                <button
-                  type="button"
-                  disabled={authBusyApp !== null}
-                  onClick={() => void handleStartAppLogin(targetProfile?.id, 'teams')}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 8,
-                    padding: '8px 20px',
-                    fontSize: 13,
-                    fontWeight: 650,
-                    borderRadius: 8,
-                    background: '#6264a7',
-                    border: '1px solid #7b7db7',
-                    color: '#fff',
-                    cursor: 'pointer',
-                    width: '100%',
-                    maxWidth: 240
-                  }}
-                >
-                  <AppIcon appId="teams" size={16} />
-                  <span>Sign in with Microsoft</span>
-                </button>
-              </div>
-              {authError && (
-                <p style={{ color: '#f87171', fontSize: 12, marginTop: 12 }}>{authError}</p>
-              )}
-            </div>
-          </div>
-        )
-      }
+        </div>
+      )
     } else if (sel && sel.startsWith('c:whatsapp')) {
-      const whatsappStatus = targetProfile?.apps?.whatsapp?.sessionStatus ?? 'not-signed-in'
-      if (whatsappStatus === 'signed-in') {
-        body = (
-          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: '#111b21' }}>
-            <PlatformThinBar
-              platform="whatsapp"
-              workspaceName="WhatsApp Web"
-              subtitle={targetProfile?.displayName}
-              isConnected={true}
-              channelCount={effectiveWhatsAppSource.channels.filter((c) => c.enabled !== false).length}
-              onOpenControl={() => setControlSource(effectiveWhatsAppSource)}
-              onReauthenticate={() => void handleStartAppLogin(targetProfile?.id, 'whatsapp')}
+      const isConnected =
+        cardAuth.whatsapp === true ||
+        (cardAuth.whatsapp === null && targetProfile?.apps?.whatsapp?.sessionStatus === 'signed-in') ||
+        effectiveWhatsAppSource?.status === 'connected'
+      body = (
+        <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: '#111b21' }}>
+          <PlatformThinBar
+            platform="whatsapp"
+            workspaceName="WhatsApp Web"
+            subtitle={targetProfile?.displayName}
+            isConnected={isConnected}
+            channelCount={effectiveWhatsAppSource.channels.filter((c) => c.enabled !== false).length}
+            onOpenControl={() => setControlSource(effectiveWhatsAppSource)}
+            onReauthenticate={() => void handleStartCardAppLogin(project.id, targetProfile?.id, 'whatsapp')}
+          />
+          <div style={{ flex: '1 1 0%', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
+            <CardLiveSlackEmbed
+              key={`live-embed-whatsapp-${project.id}`}
+              appId="whatsapp"
+              projectId={project.id}
+              profileId={targetProfile?.id}
+              hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)}
             />
-            <div style={{ flex: '1 1 0%', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
-              <CardLiveSlackEmbed
-                key={`live-embed-whatsapp-${project.id}`}
-                appId="whatsapp"
-                projectId={project.id}
-                profileId={targetProfile?.id}
-                hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)}
-              />
-            </div>
           </div>
-        )
-      } else {
-        body = (
-          <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: '#111b21' }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '8px 14px',
-              background: 'color-mix(in srgb, #22c55e 12%, var(--surface))',
-              borderBottom: '1px solid var(--border)',
-              fontSize: 12,
-              color: 'var(--text)'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <AppIcon appId="whatsapp" size={16} />
-                <span style={{ fontWeight: 650, color: '#f8fafc' }}>Scan WhatsApp QR Code</span>
-                <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>
-                  Open WhatsApp on your phone ➔ Linked Devices ➔ Link a Device
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => void handleStartAppLogin(targetProfile?.id, 'whatsapp')}
-                style={{
-                  background: '#25d366',
-                  border: 'none',
-                  color: '#000',
-                  fontWeight: 650,
-                  fontSize: 11,
-                  borderRadius: 6,
-                  padding: '4px 12px',
-                  cursor: 'pointer'
-                }}
-              >
-                {authBusyApp === 'whatsapp' ? 'Watching for QR Scan…' : 'Start QR Scan'}
-              </button>
-            </div>
-            <div style={{ flex: '1 1 0%', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
-              <CardLiveSlackEmbed
-                key={`live-embed-whatsapp-${project.id}`}
-                appId="whatsapp"
-                projectId={project.id}
-                profileId={targetProfile?.id}
-                hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)}
-              />
-            </div>
-          </div>
-        )
-      }
+        </div>
+      )
     } else if (
       cardAuthenticated === false ||
       (cardAuthenticated === null && !channels.teamConnected && targetProfile?.apps?.slack?.sessionStatus === 'not-signed-in')
