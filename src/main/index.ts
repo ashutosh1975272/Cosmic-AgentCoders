@@ -20,6 +20,7 @@ import { registerOauthIpc } from './ipc/oauth.ipc'
 import { registerProfileIpc } from './ipc/profiles.ipc'
 import { registerSlackDataIpc } from './ipc/slack-data.ipc'
 import { registerDashboardIpc } from './ipc/dashboard.ipc'
+import { initializePlatformSuites } from './platforms/index'
 import { registerLogsIpc } from './ipc/logs.ipc'
 import { registerStorageIpc } from './ipc/storage.ipc'
 import { StorageCleanerService } from './storage/storage-cleaner'
@@ -685,6 +686,7 @@ if (!gotSingleInstanceLock) {
       getOauthConfig
     })
     registerSlackDataIpc({ tokenStore })
+    initializePlatformSuites()
     registerDashboardIpc({
       monitorStore: dashboardMonitorStore,
       engine: dashboardEngine,
