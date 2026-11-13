@@ -623,7 +623,13 @@ export default function WorkspaceContent({
               onReauthenticate={() => void handleStartAppLogin(targetProfile?.id, 'teams')}
             />
             <div style={{ flex: '1 1 0%', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
-              <CardLiveSlackEmbed appId="teams" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)} />
+              <CardLiveSlackEmbed
+                key={`live-embed-teams-${project.id}`}
+                appId="teams"
+                projectId={project.id}
+                profileId={targetProfile?.id}
+                hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)}
+              />
             </div>
           </div>
         )
@@ -662,7 +668,13 @@ export default function WorkspaceContent({
               </button>
             </div>
             <div style={{ flex: '1 1 0%', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
-              <CardLiveSlackEmbed appId="teams" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)} />
+              <CardLiveSlackEmbed
+                key={`live-embed-teams-${project.id}`}
+                appId="teams"
+                projectId={project.id}
+                profileId={targetProfile?.id}
+                hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)}
+              />
             </div>
           </div>
         )
@@ -730,7 +742,13 @@ export default function WorkspaceContent({
               onReauthenticate={() => void handleStartAppLogin(targetProfile?.id, 'whatsapp')}
             />
             <div style={{ flex: '1 1 0%', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
-              <CardLiveSlackEmbed appId="whatsapp" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)} />
+              <CardLiveSlackEmbed
+                key={`live-embed-whatsapp-${project.id}`}
+                appId="whatsapp"
+                projectId={project.id}
+                profileId={targetProfile?.id}
+                hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)}
+              />
             </div>
           </div>
         )
@@ -772,7 +790,13 @@ export default function WorkspaceContent({
               </button>
             </div>
             <div style={{ flex: '1 1 0%', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
-              <CardLiveSlackEmbed appId="whatsapp" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)} />
+              <CardLiveSlackEmbed
+                key={`live-embed-whatsapp-${project.id}`}
+                appId="whatsapp"
+                projectId={project.id}
+                profileId={targetProfile?.id}
+                hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)}
+              />
             </div>
           </div>
         )

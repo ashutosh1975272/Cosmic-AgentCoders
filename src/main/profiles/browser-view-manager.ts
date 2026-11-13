@@ -1224,12 +1224,11 @@ export class BrowserViewManager {
     this.cardEmbedKey = key
     this.cardEmbedBounds = bounds
 
-    if (!this.embedHidden) {
-      if (!mainWindow.contentView.children.includes(view)) {
-        mainWindow.contentView.addChildView(view)
-      }
-      view.setBounds(bounds)
+    this.embedHidden = false
+    if (!mainWindow.contentView.children.includes(view)) {
+      mainWindow.contentView.addChildView(view)
     }
+    view.setBounds(bounds)
 
     // Ensure we are navigated appropriately
     if (appId === 'slack') {
@@ -1328,12 +1327,11 @@ export class BrowserViewManager {
     this.cardEmbedKey = key
     this.cardEmbedBounds = bounds
 
-    if (!this.embedHidden) {
-      if (!mainWindow.contentView.children.includes(view)) {
-        mainWindow.contentView.addChildView(view)
-      }
-      view.setBounds(bounds)
+    this.embedHidden = false
+    if (!mainWindow.contentView.children.includes(view)) {
+      mainWindow.contentView.addChildView(view)
     }
+    view.setBounds(bounds)
 
     this.noteActivity()
     log.info('card web embed activated', { projectId, profileId, linkId, url, bounds })
@@ -1392,8 +1390,12 @@ export class BrowserViewManager {
     return Boolean(this.cardEmbedKey && this.cardEmbedBounds)
   }
 
-  clearCardSlackEmbed(mainWindow: BrowserWindow): void {
+  clearCardSlackEmbed(mainWindow: BrowserWindow, targetKey?: string): void {
     if (!this.cardEmbedKey) return
+    if (targetKey && this.cardEmbedKey !== targetKey) {
+      log.info('card live slack embed clear ignored for outdated key', { targetKey, activeKey: this.cardEmbedKey })
+      return
+    }
     const view = this.views.get(this.cardEmbedKey)
     if (view && mainWindow.contentView.children.includes(view)) {
       mainWindow.contentView.removeChildView(view)
