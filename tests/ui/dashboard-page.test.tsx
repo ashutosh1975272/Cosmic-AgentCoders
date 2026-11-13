@@ -133,8 +133,8 @@ describe('DashboardPage — rich data', () => {
     await waitFor(() => expect(within(latest).getAllByRole('listitem')).toHaveLength(6))
     expect(within(latest).getAllByText('Maya Chen')).toHaveLength(2)
     expect(within(latest).getAllByText('#aurora-build')).toHaveLength(2)
-    expect(within(latest).getAllByText('Client Slack')).toHaveLength(3)
-    expect(within(latest).getAllByText('Our Slack')).toHaveLength(3)
+    expect(within(latest).getAllByText('Client')).toHaveLength(3)
+    expect(within(latest).getAllByText('Our Team')).toHaveLength(3)
   })
 
   it('jumps to the correct source channel from a message row', async () => {

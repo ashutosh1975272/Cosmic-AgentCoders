@@ -163,7 +163,7 @@ export default function CardHead({
             disabled={scraping || syncing}
             onClick={onScrape}
             aria-label="Scrape channels"
-            title="Scrape Slack messages via browser session"
+            title="Scrape workspace messages via browser session"
           >
             {scraping ? 'Scraping…' : '🕷 Scrape'}
           </button>

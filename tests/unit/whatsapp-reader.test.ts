@@ -87,4 +87,27 @@ describe('WhatsAppReaderView', () => {
     expect(messages[0].user).toBe('Charlie')
     expect(messages[0].text).toBe('Project update ready')
   })
+
+  it('selects chat and posts message', async () => {
+    const mockWebContents = {
+      isDestroyed: vi.fn().mockReturnValue(false),
+      executeJavaScript: vi.fn().mockImplementation(async (script: string) => {
+        if (script.includes('openChatAt')) return true
+        if (script.includes('conversation-compose-box-input')) return true
+        return true
+      })
+    }
+    const mockView = { webContents: mockWebContents } as any
+
+    const reader = new WhatsAppReaderView({
+      profileId: 'prof-1',
+      existingView: mockView
+    })
+
+    const selected = await reader.selectChat('chat-alice')
+    expect(selected).toBe(true)
+
+    const posted = await reader.postMessage('chat-alice', 'Hello on WhatsApp!')
+    expect(posted).toBe(true)
+  })
 })

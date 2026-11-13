@@ -84,4 +84,27 @@ describe('TeamsReaderView', () => {
     expect(messages[0].user).toBe('Alice')
     expect(messages[0].text).toBe('Sprint review tomorrow')
   })
+
+  it('selects channel and posts message', async () => {
+    const mockWebContents = {
+      isDestroyed: vi.fn().mockReturnValue(false),
+      executeJavaScript: vi.fn().mockImplementation(async (script: string) => {
+        if (script.includes('team-channel-item')) return true
+        if (script.includes('ckeditor-replyConversation')) return true
+        return true
+      })
+    }
+    const mockView = { webContents: mockWebContents } as any
+
+    const reader = new TeamsReaderView({
+      profileId: 'prof-1',
+      existingView: mockView
+    })
+
+    const selected = await reader.selectChannel('ch-1')
+    expect(selected).toBe(true)
+
+    const posted = await reader.postMessage('ch-1', 'Hello from Agent!')
+    expect(posted).toBe(true)
+  })
 })

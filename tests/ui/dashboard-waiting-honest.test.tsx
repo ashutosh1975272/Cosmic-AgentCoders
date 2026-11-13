@@ -147,7 +147,7 @@ describe('DashboardPage — waiting honesty and jumpable chips', () => {
     renderPage(snapshot, onSelect)
 
     const attention = screen.getByRole('region', { name: 'Needs your attention' })
-    const chip = within(attention).getByRole('button', { name: 'Client Slack' })
+    const chip = within(attention).getByRole('button', { name: 'Client' })
     fireEvent.click(chip)
     expect(onSelect).toHaveBeenCalledWith('c:client:C_AURORA')
     expect(takeMessageJump('demo-rich', 'client', 'C_AURORA')).toBe('100.3')
@@ -168,7 +168,7 @@ describe('DashboardPage — waiting honesty and jumpable chips', () => {
     renderPage(snapshot, vi.fn<OnSelect>())
 
     const attention = screen.getByRole('region', { name: 'Needs your attention' })
-    expect(within(attention).getByText('Client Slack').tagName).toBe('SPAN')
-    expect(within(attention).queryByRole('button', { name: 'Client Slack' })).toBeNull()
+    expect(within(attention).getByText('Client').tagName).toBe('SPAN')
+    expect(within(attention).queryByRole('button', { name: 'Client' })).toBeNull()
   })
 })

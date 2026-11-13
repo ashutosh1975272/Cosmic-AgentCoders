@@ -25,6 +25,8 @@ import type { ProjectSource } from '../../../../shared/dashboard-contract'
 import { CardAddModal } from './CardAddModal'
 import { SourceChannelPicker } from './SourceChannelPicker'
 import { WorkspaceControlModal } from './WorkspaceControlModal'
+import { TeamsControlModal } from './TeamsControlModal'
+import { WhatsAppControlModal } from './WhatsAppControlModal'
 
 export type SettingsTabKey = 'general' | 'ai' | 'documents' | 'sources' | 'channels' | 'schedule' | 'sidebar' | 'danger'
 
@@ -1254,8 +1256,8 @@ export default function ProjectSettingsTab({
                                 </button>
                               </>
                             ) : null}
-                            {/* Capability Gating: ONLY show Scrape on Slack browser workspaces where our scraper is implemented */}
-                            {src.kind === 'browser' && (src.platform === 'slack' || (!src.platform && src.workspaceId?.startsWith('T'))) ? (
+                            {/* Scrape button for all supported browser workspaces (Slack, Teams, WhatsApp) */}
+                            {src.kind === 'browser' ? (
                               <button
                                 type="button"
                                 className="dash-subtle"
@@ -2453,6 +2455,26 @@ export default function ProjectSettingsTab({
         ? (() => {
             const ctrlSource = (project.sources ?? []).find((s) => s.id === controlSourceId)
             if (!ctrlSource) return null
+            if (ctrlSource.platform === 'teams') {
+              return (
+                <TeamsControlModal
+                  open
+                  project={project}
+                  source={ctrlSource}
+                  onClose={() => setControlSourceId(null)}
+                />
+              )
+            }
+            if (ctrlSource.platform === 'whatsapp') {
+              return (
+                <WhatsAppControlModal
+                  open
+                  project={project}
+                  source={ctrlSource}
+                  onClose={() => setControlSourceId(null)}
+                />
+              )
+            }
             return (
               <WorkspaceControlModal
                 open
