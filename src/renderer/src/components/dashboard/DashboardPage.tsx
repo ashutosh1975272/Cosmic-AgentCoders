@@ -320,7 +320,7 @@ function SourceChip({
   source: DashboardSource
   onJump?: () => void
 }): React.ReactElement {
-  const label = source === 'ours' ? 'Our Slack' : 'Client Slack'
+  const label = source === 'ours' ? 'Our Team' : 'Client'
   const className = `dash-source ${source === 'ours' ? 'is-ours' : 'is-client'}`
   if (!onJump) return <span className={className}>{label}</span>
   return (

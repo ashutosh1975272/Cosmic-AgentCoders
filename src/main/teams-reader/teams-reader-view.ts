@@ -179,6 +179,88 @@ export class TeamsReaderView {
     }
   }
 
+  async selectChannel(channelId: string): Promise<boolean> {
+    if (!this.view || this.view.webContents.isDestroyed()) {
+      return false
+    }
+    try {
+      const script = `
+        (() => {
+          try {
+            const target = ${JSON.stringify(channelId)}.toLowerCase().trim();
+            const nodes = document.querySelectorAll(
+              '[data-tid="team-channel-item"], [data-tid="channel-list-item"], [data-tid="chat-list-item"], [role="treeitem"], [role="listitem"]'
+            );
+            for (const node of nodes) {
+              const tid = (node.getAttribute('data-tid') || '').toLowerCase();
+              const id = (node.getAttribute('id') || '').toLowerCase();
+              const text = (node.textContent || '').toLowerCase().trim();
+              if (tid === target || id === target || text.includes(target) || target.includes(text)) {
+                const clickable = node.querySelector('button, a, div[role="button"]') || node;
+                clickable.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+                clickable.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+                clickable.click();
+                return true;
+              }
+            }
+            return false;
+          } catch {
+            return false;
+          }
+        })()
+      `
+      const clicked = await this.view.webContents.executeJavaScript(script, true)
+      if (clicked) {
+        // Allow brief DOM hydration for message container
+        await new Promise((r) => setTimeout(r, 600))
+        return true
+      }
+      return false
+    } catch {
+      return false
+    }
+  }
+
+  async postMessage(_channelId: string, text: string): Promise<boolean> {
+    void _channelId
+    if (!this.view || this.view.webContents.isDestroyed()) {
+      return false
+    }
+    try {
+      const script = `
+        (() => {
+          try {
+            const msg = ${JSON.stringify(text)};
+            const box = document.querySelector(
+              '[data-tid="ckeditor-replyConversation"], [role="textbox"][contenteditable="true"], .ck-editor__editable, textarea'
+            );
+            if (!box) return false;
+            box.focus();
+            if (box.isContentEditable) {
+              document.execCommand('insertText', false, msg);
+            } else {
+              box.value = msg;
+              box.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            const sendBtn = document.querySelector(
+              '[data-tid="sendButton"], button[aria-label*="Send"], button[title*="Send"]'
+            );
+            if (sendBtn) {
+              sendBtn.click();
+              return true;
+            }
+            return true;
+          } catch {
+            return false;
+          }
+        })()
+      `
+      return await this.view.webContents.executeJavaScript(script, true)
+    } catch {
+      return false
+    }
+  }
+
   dispose(): void {
     if (this.ownsView && this.view && !this.view.webContents.isDestroyed()) {
       // Allow garbage collector to clean up

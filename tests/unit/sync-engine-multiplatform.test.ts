@@ -1,0 +1,217 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { DashboardDeltaStore } from '../../src/main/dashboard/delta-store'
+import { DashboardSyncEngine } from '../../src/main/dashboard/sync-engine'
+import { MonitorStore } from '../../src/main/dashboard/monitor-store'
+import { RunLogStore } from '../../src/main/dashboard/run-log-store'
+import type { DashboardProject, ProjectSource } from '../../src/shared/dashboard-contract'
+
+const dirs: string[] = []
+afterEach(async () => {
+  await Promise.all(dirs.map((dir) => rm(dir, { recursive: true }).catch(() => {})))
+  dirs.length = 0
+})
+
+async function stores(): Promise<{
+  monitors: MonitorStore
+  delta: DashboardDeltaStore
+  dir: string
+}> {
+  const dir = await mkdtemp(join(tmpdir(), 'multiplatform-sync-'))
+  dirs.push(dir)
+  return {
+    dir,
+    monitors: new MonitorStore({ rootDir: dir, encryptionAvailable: false }),
+    delta: new DashboardDeltaStore({ rootDir: dir })
+  }
+}
+
+describe('SyncEngine Multi-Platform Ingestion (Teams & WhatsApp without Slack)', () => {
+  it('scrapes Microsoft Teams source and populates delta store and run logs', async () => {
+    const { monitors, delta, dir } = await stores()
+    const now = new Date().toISOString()
+
+    const mockTeamsSource: ProjectSource = {
+      id: 'src-teams-1',
+      kind: 'browser',
+      platform: 'teams',
+      profileId: 'prof-teams',
+      workspaceId: 'TEAMS_ORG_1',
+      workspaceName: 'Engineering Teams',
+      channelsReviewedAt: now,
+      channels: [
+        { id: 'ch-sprint', name: 'Sprint Standup', enabled: true, kind: 'public' }
+      ],
+      role: 'client',
+      enabled: true,
+      backfillDays: 7,
+      createdAt: now,
+      updatedAt: now
+    }
+
+    const mockProject: DashboardProject = {
+      id: 'proj-teams-only',
+      name: 'Teams Migration Project',
+      clientName: 'Contoso',
+      profileId: 'prof-teams',
+      teamId: 'TEAMS_ORG_1',
+      appId: 'slack',
+      tokenSource: 'oauth',
+      monitors: [],
+      sources: [mockTeamsSource],
+      createdAt: now
+    }
+
+    await monitors.upsertProject({ project: mockProject })
+
+    // Mock WebContentsView for Teams
+    const mockView = {
+      webContents: {
+        isDestroyed: vi.fn().mockReturnValue(false),
+        executeJavaScript: vi.fn().mockImplementation(async (script: string) => {
+          if (script.includes('team-channel-item') && script.includes('clickable.click')) {
+            return true // channel selected
+          }
+          if (script.includes('message-pane-list-viewport')) {
+            return [
+              {
+                id: 'm1',
+                senderName: 'Alice Dev',
+                text: 'Deployment pipeline green!',
+                timestamp: 1731456100000
+              }
+            ]
+          }
+          return []
+        })
+      }
+    }
+
+    const engine = new DashboardSyncEngine({
+      monitorStore: monitors,
+      deltaStore: delta,
+      oauthTokenProvider: { tryGet: async () => null },
+      pollerFactory: () => ({ fetchHistory: async () => ({ messages: [], hasMore: false }) }),
+      getExistingCardView: (_projId, appId) => (appId === 'teams' ? mockView : null),
+      getExistingBrowserView: (_profId, appId) => (appId === 'teams' ? mockView : null)
+    })
+
+    const result = await (engine as any).scrapeSource(mockProject, mockTeamsSource, { trigger: 'manual' })
+
+    expect(result.status).toBe('success')
+    expect(result.channelsRead).toBe(1)
+    expect(result.newMessages).toBe(1)
+    expect(result.deltas.length).toBe(1)
+    expect(result.deltas[0].channelName).toBe('Sprint Standup')
+
+    // Verify stored messages in delta store
+    const storedDelta = await delta.load('prof-teams', 'TEAMS_ORG_1', 'ch-sprint')
+    expect(storedDelta).not.toBeNull()
+    expect(storedDelta!.messages.length).toBe(1)
+    expect(storedDelta!.messages[0].user).toBe('Alice Dev')
+    expect(storedDelta!.messages[0].text).toBe('Deployment pipeline green!')
+
+    // Verify RunLogStore recorded the run
+    const runLogStore = new RunLogStore({ rootDir: dir })
+    const runs = await runLogStore.read('proj-teams-only')
+    expect(runs.length).toBe(1)
+    expect(runs[0].sourceId).toBe('src-teams-1')
+    expect(runs[0].channelsRead).toBe(1)
+    expect(runs[0].newMessages).toBe(1)
+  })
+
+  it('scrapes WhatsApp Web source and populates delta store and run logs', async () => {
+    const { monitors, delta, dir } = await stores()
+    const now = new Date().toISOString()
+
+    const mockWaSource: ProjectSource = {
+      id: 'src-wa-1',
+      kind: 'browser',
+      platform: 'whatsapp',
+      profileId: 'prof-wa',
+      workspaceId: 'WA_OPS_1',
+      workspaceName: 'Operations WhatsApp',
+      channelsReviewedAt: now,
+      channels: [
+        { id: 'chat-emergency', name: 'Critical Escalations', enabled: true, kind: 'dm' }
+      ],
+      role: 'client',
+      enabled: true,
+      backfillDays: 7,
+      createdAt: now,
+      updatedAt: now
+    }
+
+    const mockProject: DashboardProject = {
+      id: 'proj-wa-only',
+      name: 'WhatsApp Executive Project',
+      clientName: 'Global Corp',
+      profileId: 'prof-wa',
+      teamId: 'WA_OPS_1',
+      appId: 'slack',
+      tokenSource: 'oauth',
+      monitors: [],
+      sources: [mockWaSource],
+      createdAt: now
+    }
+
+    await monitors.upsertProject({ project: mockProject })
+
+    // Mock WebContentsView for WhatsApp
+    const mockView = {
+      webContents: {
+        isDestroyed: vi.fn().mockReturnValue(false),
+        executeJavaScript: vi.fn().mockImplementation(async (script: string) => {
+          if (script.includes('openChatAt') || script.includes('node.click()')) {
+            return true // chat selected
+          }
+          if (script.includes('msg-container') || script.includes('Store.Msg')) {
+            return [
+              {
+                id: 'w1',
+                senderName: 'Bob Lead',
+                text: 'Server scale-out complete, latency normal.',
+                timestamp: 1731456200000,
+                fromMe: false
+              }
+            ]
+          }
+          return []
+        })
+      }
+    }
+
+    const engine = new DashboardSyncEngine({
+      monitorStore: monitors,
+      deltaStore: delta,
+      oauthTokenProvider: { tryGet: async () => null },
+      pollerFactory: () => ({ fetchHistory: async () => ({ messages: [], hasMore: false }) }),
+      getExistingCardView: (_projId, appId) => (appId === 'whatsapp' ? mockView : null),
+      getExistingBrowserView: (_profId, appId) => (appId === 'whatsapp' ? mockView : null)
+    })
+
+    const result = await (engine as any).scrapeSource(mockProject, mockWaSource, { trigger: 'manual' })
+    if (result.error) console.log('WA ERROR:', result.error)
+
+    expect(result.status).toBe('success')
+    expect(result.channelsRead).toBe(1)
+    expect(result.newMessages).toBe(1)
+    expect(result.deltas.length).toBe(1)
+    expect(result.deltas[0].channelName).toBe('Critical Escalations')
+
+    // Verify stored messages in delta store
+    const storedDelta = await delta.load('prof-wa', 'WA_OPS_1', 'chat-emergency')
+    expect(storedDelta).not.toBeNull()
+    expect(storedDelta!.messages.length).toBe(1)
+    expect(storedDelta!.messages[0].user).toBe('Bob Lead')
+    expect(storedDelta!.messages[0].text).toBe('Server scale-out complete, latency normal.')
+
+    // Verify RunLogStore recorded the run
+    const runLogStore = new RunLogStore({ rootDir: dir })
+    const runs = await runLogStore.read('proj-wa-only')
+    expect(runs.length).toBe(1)
+    expect(runs[0].sourceId).toBe('src-wa-1')
+  })
+})

@@ -2,6 +2,8 @@ import { SlackPoller, isSlackAuthFailure } from './slack-poller'
 import { slackTokenKey } from './slack-throttle'
 import type { InsightEngine } from './insight-engine'
 import { SlackReaderView, type ScrapeStepEvent } from '../slack-reader/slack-reader-view'
+import { TeamsReaderView } from '../teams-reader/teams-reader-view'
+import { WhatsAppReaderView } from '../whatsapp-reader/whatsapp-reader-view'
 import { sessionTokenExtractor } from '../slack-reader/session-token-extractor'
 import { SlackApiClient, slackUserCache } from './slack-api-client'
 import { partitionForCard, partitionForProfile } from '../profiles/session-partition'
@@ -27,6 +29,7 @@ import type {
   ScrapeTrigger
 } from '../../shared/dashboard-contract'
 import type { DashboardDeltaStore, DashboardStoredMessage } from './delta-store'
+import type { AppId } from '../../shared/types'
 import type { InsightHistoryEntry } from './history-store'
 import type { MonitorStore } from './monitor-store'
 import type { WorkspaceMappingStore } from './workspace-mapping-store'
@@ -118,8 +121,8 @@ export interface DashboardSyncEngineDeps {
   viewedStore?: { get(projectId: string): Promise<string | null> }
   /** v2.3 — called after a background sync (e.g. to refresh the digest) */
   onSynced?: (snapshots: DashboardProjectSnapshot[]) => void
-  getExistingBrowserView?: (profileId: string, appId: 'slack') => any
-  getExistingCardView?: (projectId: string, appId: 'slack') => any
+  getExistingBrowserView?: (profileId: string, appId: AppId) => any
+  getExistingCardView?: (projectId: string, appId: AppId) => any
   /** Global DM gate (AppSettings.scrapePersonalDms); cards may override. */
   getScrapePersonalDms?: () => boolean | Promise<boolean>
   /** Persist a source's last run so the scheduler survives restarts. */
@@ -165,8 +168,8 @@ export class DashboardSyncEngine {
   protected readonly onSynced: ((snapshots: DashboardProjectSnapshot[]) => void) | undefined
   private readonly getScrapePersonalDms: () => boolean | Promise<boolean>
   private readonly onSourceRun?: (sourceId: string, atIso: string) => void
-  private readonly getExistingBrowserView?: (profileId: string, appId: 'slack') => any
-  private readonly getExistingCardView?: (projectId: string, appId: 'slack') => any
+  private readonly getExistingBrowserView?: (profileId: string, appId: AppId) => any
+  private readonly getExistingCardView?: (projectId: string, appId: AppId) => any
   private scrapeEventListener: ((event: ScrapeStepEvent) => void) | null = null
   private activeWatchReader: SlackReaderView | null = null
   private scrapeQueuePromise: Promise<any> = Promise.resolve()
@@ -888,7 +891,260 @@ export class DashboardSyncEngine {
     try {
       let targetChannels: ProjectSourceChannel[] = source.channels ?? []
 
-      if (requestedEngineMode === 'direct_api') {
+      if (source.platform === 'teams') {
+        activeEngineMode = source.engineMode ?? 'browser'
+        const existingTeamsView =
+          this.getExistingCardView?.(project.id, 'teams') ??
+          this.getExistingBrowserView?.(source.profileId, 'teams') ??
+          null
+        const teamsReader = new TeamsReaderView({
+          profileId: source.profileId,
+          existingView: existingTeamsView
+        })
+        try {
+          if (!existingTeamsView) {
+            await teamsReader.initialize()
+          }
+          const channelsToScrape = targetChannels.filter((c) => c.enabled !== false)
+          const effectiveList = channelsToScrape.length > 0 ? channelsToScrape : targetChannels
+
+          for (const ch of effectiveList) {
+            if (signal.aborted) {
+              status = 'stopped'
+              runError = 'Cancelled by user'
+              break
+            }
+            const name = ch.name || ch.id
+            this.scrapeEventListener?.({
+              type: 'navigate',
+              runId,
+              projectId: project.id,
+              sourceId: source.id,
+              channelName: name,
+              text: `Reading Teams channel ${name}…`
+            })
+            try {
+              await teamsReader.selectChannel(ch.id)
+              let messages = await teamsReader.readMessages(ch.id)
+              if (peopleFilter.size > 0) {
+                messages = messages.filter((m) =>
+                  peopleFilter.has((m.user ?? '').trim().toLowerCase())
+                )
+              }
+              channelsRead++
+              if (messages.length === 0) {
+                channels.push({
+                  channelId: ch.id,
+                  channelName: name,
+                  kind: ch.kind || 'public',
+                  messagesRead: 0,
+                  newMessages: 0,
+                  status: 'empty',
+                  engineMode: activeEngineMode
+                })
+                continue
+              }
+
+              const append = await this.deltaStore.appendMessages({
+                profileId: source.profileId,
+                teamId: source.workspaceId,
+                channelId: ch.id,
+                channelName: name,
+                messages,
+                source: source.role ?? 'client'
+              })
+
+              newMessages += append.added
+              const latestTs = messages[messages.length - 1]?.ts
+              deltas.push({
+                channelId: ch.id,
+                channelName: name,
+                source: source.role ?? 'client',
+                messageCount: messages.length,
+                newMessageCount: append.added,
+                latestMessageAt: latestTs ? new Date(Number(latestTs) * 1000).toISOString() : new Date().toISOString(),
+                lastSyncAt: append.lastSyncAt,
+                cursor: append.cursor
+              })
+
+              for (const m of messages) {
+                if (m.user) {
+                  peopleCounts.set(m.user, (peopleCounts.get(m.user) ?? 0) + 1)
+                }
+                if (snippets.length < 20 && m.text) {
+                  snippets.push({
+                    channelId: ch.id,
+                    channelName: name,
+                    sender: m.user ?? 'Teams Member',
+                    ts: m.ts,
+                    snippet: m.text.slice(0, 140)
+                  })
+                }
+              }
+
+              channels.push({
+                channelId: ch.id,
+                channelName: name,
+                kind: ch.kind || 'public',
+                messagesRead: messages.length,
+                newMessages: append.added,
+                status: 'read',
+                engineMode: activeEngineMode
+              })
+
+              this.scrapeEventListener?.({
+                type: 'read',
+                runId,
+                projectId: project.id,
+                sourceId: source.id,
+                channelName: name,
+                messageCount: messages.length,
+                text: `Read ${messages.length} messages (${append.added} new) from ${name}`
+              })
+            } catch (chErr: any) {
+              channelErrors++
+              channels.push({
+                channelId: ch.id,
+                channelName: name,
+                kind: ch.kind || 'public',
+                messagesRead: 0,
+                newMessages: 0,
+                status: 'error',
+                error: chErr instanceof Error ? chErr.message : String(chErr)
+              })
+            }
+          }
+        } finally {
+          teamsReader.dispose()
+        }
+      } else if (source.platform === 'whatsapp') {
+        activeEngineMode = source.engineMode ?? 'browser'
+        const existingWaView =
+          this.getExistingCardView?.(project.id, 'whatsapp') ??
+          this.getExistingBrowserView?.(source.profileId, 'whatsapp') ??
+          null
+        const waReader = new WhatsAppReaderView({
+          profileId: source.profileId,
+          existingView: existingWaView
+        })
+        try {
+          if (!existingWaView) {
+            await waReader.initialize()
+          }
+          const chatsToScrape = targetChannels.filter((c) => c.enabled !== false)
+          const effectiveList = chatsToScrape.length > 0 ? chatsToScrape : targetChannels
+
+          for (const ch of effectiveList) {
+            if (signal.aborted) {
+              status = 'stopped'
+              runError = 'Cancelled by user'
+              break
+            }
+            const name = ch.name || ch.id
+            this.scrapeEventListener?.({
+              type: 'navigate',
+              runId,
+              projectId: project.id,
+              sourceId: source.id,
+              channelName: name,
+              text: `Reading WhatsApp chat ${name}…`
+            })
+            try {
+              await waReader.selectChat(ch.id)
+              let messages = await waReader.readMessages(ch.id)
+              if (peopleFilter.size > 0) {
+                messages = messages.filter((m) =>
+                  peopleFilter.has((m.user ?? '').trim().toLowerCase())
+                )
+              }
+              channelsRead++
+              if (messages.length === 0) {
+                channels.push({
+                  channelId: ch.id,
+                  channelName: name,
+                  kind: ch.kind || 'dm',
+                  messagesRead: 0,
+                  newMessages: 0,
+                  status: 'empty',
+                  engineMode: activeEngineMode
+                })
+                continue
+              }
+
+              const append = await this.deltaStore.appendMessages({
+                profileId: source.profileId,
+                teamId: source.workspaceId,
+                channelId: ch.id,
+                channelName: name,
+                messages,
+                source: source.role ?? 'client'
+              })
+
+              newMessages += append.added
+              const latestTs = messages[messages.length - 1]?.ts
+              deltas.push({
+                channelId: ch.id,
+                channelName: name,
+                source: source.role ?? 'client',
+                messageCount: messages.length,
+                newMessageCount: append.added,
+                latestMessageAt: latestTs ? new Date(Number(latestTs) * 1000).toISOString() : new Date().toISOString(),
+                lastSyncAt: append.lastSyncAt,
+                cursor: append.cursor
+              })
+
+              for (const m of messages) {
+                if (m.user) {
+                  peopleCounts.set(m.user, (peopleCounts.get(m.user) ?? 0) + 1)
+                }
+                if (snippets.length < 20 && m.text) {
+                  snippets.push({
+                    channelId: ch.id,
+                    channelName: name,
+                    sender: m.user ?? 'WhatsApp Contact',
+                    ts: m.ts,
+                    snippet: m.text.slice(0, 140)
+                  })
+                }
+              }
+
+              channels.push({
+                channelId: ch.id,
+                channelName: name,
+                kind: ch.kind || 'dm',
+                messagesRead: messages.length,
+                newMessages: append.added,
+                status: 'read',
+                engineMode: activeEngineMode
+              })
+
+              this.scrapeEventListener?.({
+                type: 'read',
+                runId,
+                projectId: project.id,
+                sourceId: source.id,
+                channelName: name,
+                messageCount: messages.length,
+                text: `Read ${messages.length} messages (${append.added} new) from ${name}`
+              })
+            } catch (chErr: any) {
+              channelErrors++
+              channels.push({
+                channelId: ch.id,
+                channelName: name,
+                kind: ch.kind || 'dm',
+                messagesRead: 0,
+                newMessages: 0,
+                status: 'error',
+                error: chErr instanceof Error ? chErr.message : String(chErr)
+              })
+            }
+          }
+        } finally {
+          waReader.dispose()
+        }
+      } else {
+        if (requestedEngineMode === 'direct_api') {
         try {
           // Zero-DOM: Resolve credentials using 3-tier fallback (memory -> session/disk -> partition disk)
           // checking candidate partitions directly without instantiating or loading any WebContentsView.
@@ -1260,6 +1516,7 @@ export class DashboardSyncEngine {
           })
           if (!runError) runError = err instanceof Error ? err.message : String(err)
         }
+      }
       }
     } catch (err) {
       status = 'error'

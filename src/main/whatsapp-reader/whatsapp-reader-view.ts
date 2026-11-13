@@ -218,6 +218,96 @@ export class WhatsAppReaderView {
     }
   }
 
+  async selectChat(chatId: string): Promise<boolean> {
+    if (!this.view || this.view.webContents.isDestroyed()) {
+      return false
+    }
+    try {
+      const script = `
+        (() => {
+          try {
+            const target = ${JSON.stringify(chatId)}.toLowerCase().trim();
+            // 1. Try Store.Cmd.openChatAt
+            if (window.Store && window.Store.Cmd && window.Store.Chat && typeof window.Store.Chat.models === 'object') {
+              for (const c of window.Store.Chat.models) {
+                const sId = (c.id?._serialized || '').toLowerCase();
+                const name = (c.formattedTitle || c.name || '').toLowerCase();
+                if (sId === target || name === target || target.includes(name) || name.includes(target)) {
+                  window.Store.Cmd.openChatAt(c);
+                  return true;
+                }
+              }
+            }
+
+            // 2. DOM selection fallback
+            const chatItems = document.querySelectorAll(
+              '#pane-side [role="listitem"], #pane-side div[tabindex="-1"], div[data-testid="cell-frame-container"]'
+            );
+            for (const node of chatItems) {
+              const titleSpan = node.querySelector('span[title], div[title], [data-testid="cell-frame-title"] span');
+              const name = (titleSpan ? (titleSpan.getAttribute('title') || titleSpan.textContent || '') : '').toLowerCase().trim();
+              if (name && (name === target || target.includes(name) || name.includes(target))) {
+                node.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+                node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+                node.click();
+                return true;
+              }
+            }
+            return false;
+          } catch {
+            return false;
+          }
+        })()
+      `
+      const clicked = await this.view.webContents.executeJavaScript(script, true)
+      if (clicked) {
+        await new Promise((r) => setTimeout(r, 600))
+        return true
+      }
+      return false
+    } catch {
+      return false
+    }
+  }
+
+  async postMessage(_chatId: string, text: string): Promise<boolean> {
+    void _chatId
+    if (!this.view || this.view.webContents.isDestroyed()) {
+      return false
+    }
+    try {
+      const script = `
+        (() => {
+          try {
+            const msg = ${JSON.stringify(text)};
+            const box = document.querySelector(
+              'footer [contenteditable="true"], [data-testid="conversation-compose-box-input"], footer div[role="textbox"]'
+            );
+            if (!box) return false;
+            box.focus();
+            document.execCommand('insertText', false, msg);
+            box.dispatchEvent(new Event('input', { bubbles: true }));
+
+            const sendBtn = document.querySelector(
+              'button[data-testid="compose-btn-send"], span[data-icon="send"]'
+            );
+            if (sendBtn) {
+              const clickable = sendBtn.closest('button') || sendBtn;
+              clickable.click();
+              return true;
+            }
+            return true;
+          } catch {
+            return false;
+          }
+        })()
+      `
+      return await this.view.webContents.executeJavaScript(script, true)
+    } catch {
+      return false
+    }
+  }
+
   dispose(): void {
     if (this.ownsView && this.view && !this.view.webContents.isDestroyed()) {
       this.view = null

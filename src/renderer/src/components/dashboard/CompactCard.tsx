@@ -254,7 +254,7 @@ export default function CompactCard({
                 className="proj-icon-btn"
                 disabled={scraping || syncing}
                 aria-label={`Scrape ${name}`}
-                title={scraping ? 'Scraping browser session…' : 'Scrape Slack channels'}
+                title={scraping ? 'Scraping browser session…' : 'Scrape workspace channels & chats'}
                 onClick={() => onScrape(projectId)}
                 style={{ fontSize: '12px' }}
               >
