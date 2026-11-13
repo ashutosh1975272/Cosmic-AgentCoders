@@ -20,9 +20,8 @@ import { requestMessageJump } from './jump-to-message'
 import SchedulesPage from './SchedulesPage'
 import { AppIcon } from '../AppIcon'
 import { SourceChannelPicker } from './SourceChannelPicker'
-import { WorkspaceControlModal } from './WorkspaceControlModal'
-import { TeamsControlModal } from './TeamsControlModal'
-import { WhatsAppControlModal } from './WhatsAppControlModal'
+import { PlatformThinBar } from '../../platforms/components/PlatformThinBar'
+import { PlatformControlModal } from '../../platforms/components/PlatformControlModal'
 import { useProfileStore } from '../../hooks/useProfiles'
 import { useDashboardStore } from '../../hooks/useDashboard'
 import { BASE_APP_PRESETS } from '../../../../shared/base-app-presets'
@@ -360,39 +359,17 @@ export default function WorkspaceContent({
     project.sources?.[0] ||
     null
 
-  const controlModalElement = controlSource ? (
-    controlSource.platform === 'teams' ? (
-      <TeamsControlModal
-        open={Boolean(controlSource)}
-        project={project}
-        source={controlSource}
-        onClose={() => setControlSource(null)}
-        onSaved={() => {
-          void useDashboardStore.getState().loadSnapshot()
-        }}
-      />
-    ) : controlSource.platform === 'whatsapp' ? (
-      <WhatsAppControlModal
-        open={Boolean(controlSource)}
-        project={project}
-        source={controlSource}
-        onClose={() => setControlSource(null)}
-        onSaved={() => {
-          void useDashboardStore.getState().loadSnapshot()
-        }}
-      />
-    ) : (
-      <WorkspaceControlModal
-        open={Boolean(controlSource)}
-        project={project}
-        source={controlSource}
-        onClose={() => setControlSource(null)}
-        onSaved={() => {
-          void useDashboardStore.getState().loadSnapshot()
-        }}
-      />
-    )
-  ) : null
+  const controlModalElement = (
+    <PlatformControlModal
+      open={Boolean(controlSource)}
+      project={project}
+      source={controlSource}
+      onClose={() => setControlSource(null)}
+      onSaved={() => {
+        void useDashboardStore.getState().loadSnapshot()
+      }}
+    />
+  )
 
   // Dashboard brings its own scroll surface and width; the generic panel header
   // would repeat the project name above the freshness line.
@@ -518,81 +495,15 @@ export default function WorkspaceContent({
 
       body = (
         <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: 'var(--bg-page)' }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '6px 14px',
-            background: 'var(--surface)',
-            borderBottom: '1px solid var(--border)',
-            fontSize: 12,
-            color: 'var(--text)'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <AppIcon appId="slack" size={15} />
-              <span style={{ fontWeight: 650, color: '#f8fafc' }}>Slack Workspace</span>
-              <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>· {wsName}</span>
-              <span style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                fontSize: 11,
-                color: '#4ade80',
-                background: 'rgba(74, 222, 128, 0.1)',
-                padding: '2px 7px',
-                borderRadius: 12,
-                fontWeight: 600
-              }}>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4ade80' }} />
-                Connected
-              </span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              {matchingSource ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setControlSource(matchingSource)}
-                    style={{
-                      background: 'rgba(99, 102, 241, 0.22)',
-                      border: '1px solid rgba(99, 102, 241, 0.45)',
-                      color: '#c7d2fe',
-                      fontSize: 11,
-                      borderRadius: 6,
-                      padding: '3px 10px',
-                      cursor: 'pointer',
-                      fontWeight: 650,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4
-                    }}
-                    title="Open Workspace Control: Channels, Schedule & Scrape Logs"
-                  >
-                    <span>⚙️ Control</span>
-                    <span style={{ fontSize: 10, opacity: 0.85, background: 'rgba(0,0,0,0.25)', padding: '1px 5px', borderRadius: 4 }}>
-                      {matchingSource.channels.filter((c) => c.enabled !== false).length}
-                    </span>
-                  </button>
-                </>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => void handleStartCardAppLogin(project.id, pId, 'slack')}
-                style={{
-                  background: 'rgba(255, 255, 255, 0.06)',
-                  border: '1px solid rgba(255, 255, 255, 0.12)',
-                  color: '#cbd5e1',
-                  fontSize: 11,
-                  borderRadius: 6,
-                  padding: '3px 9px',
-                  cursor: 'pointer'
-                }}
-                title="Re-open Slack login flow"
-              >
-                Re-authenticate
-              </button>
-            </div>
-          </div>
+          <PlatformThinBar
+            platform="slack"
+            workspaceName="Slack Workspace"
+            subtitle={wsName}
+            isConnected={true}
+            channelCount={matchingSource?.channels?.filter((c) => c.enabled !== false).length ?? 0}
+            onOpenControl={() => matchingSource && setControlSource(matchingSource)}
+            onReauthenticate={() => void handleStartCardAppLogin(project.id, pId, 'slack')}
+          />
           <div style={{ flex: '1 1 0%', minHeight: 0, height: '100%', width: '100%', position: 'relative' }}>
             <CardLiveSlackEmbed
               key={`global-embed:${pId}:${tId}`}
@@ -714,77 +625,15 @@ export default function WorkspaceContent({
       if (teamsStatus === 'signed-in') {
         body = (
           <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: 'var(--bg-page)' }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '8px 14px',
-              background: 'var(--surface)',
-              borderBottom: '1px solid var(--border)',
-              fontSize: 12,
-              color: 'var(--text)'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <AppIcon appId="teams" size={16} />
-                <span style={{ fontWeight: 650, color: '#f8fafc' }}>Microsoft Teams</span>
-                <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>· {targetProfile?.displayName}</span>
-                <span style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  fontSize: 11,
-                  color: '#4ade80',
-                  background: 'rgba(74, 222, 128, 0.1)',
-                  padding: '2px 7px',
-                  borderRadius: 12,
-                  fontWeight: 600
-                }}>
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4ade80' }} />
-                  Connected
-                </span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <button
-                  type="button"
-                  onClick={() => setControlSource(effectiveTeamsSource)}
-                  style={{
-                    background: 'rgba(99, 102, 241, 0.22)',
-                    border: '1px solid rgba(99, 102, 241, 0.45)',
-                    color: '#c7d2fe',
-                    fontSize: 11,
-                    borderRadius: 6,
-                    padding: '3px 10px',
-                    cursor: 'pointer',
-                    fontWeight: 650,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4
-                  }}
-                  title="Open Teams Control: Channels, 4-Tier Matrix, Schedule & Scrape Logs"
-                >
-                  <span>⚙️ Control</span>
-                  <span style={{ fontSize: 10, opacity: 0.85, background: 'rgba(0,0,0,0.25)', padding: '1px 5px', borderRadius: 4 }}>
-                    {effectiveTeamsSource.channels.filter((c) => c.enabled !== false).length}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleStartAppLogin(targetProfile?.id, 'teams')}
-                  style={{
-                    background: 'rgba(255, 255, 255, 0.06)',
-                    border: '1px solid rgba(255, 255, 255, 0.12)',
-                    color: '#cbd5e1',
-                    fontSize: 11,
-                    borderRadius: 6,
-                    padding: '3px 9px',
-                    cursor: 'pointer'
-                  }}
-                  title="Re-open Microsoft login flow"
-                >
-                  Re-authenticate
-                </button>
-              </div>
-            </div>
+            <PlatformThinBar
+              platform="teams"
+              workspaceName="Microsoft Teams"
+              subtitle={targetProfile?.displayName}
+              isConnected={true}
+              channelCount={effectiveTeamsSource.channels.filter((c) => c.enabled !== false).length}
+              onOpenControl={() => setControlSource(effectiveTeamsSource)}
+              onReauthenticate={() => void handleStartAppLogin(targetProfile?.id, 'teams')}
+            />
             <div style={{ flex: '1 1 0%', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
               <CardLiveSlackEmbed appId="teams" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)} />
             </div>
@@ -883,77 +732,15 @@ export default function WorkspaceContent({
       if (whatsappStatus === 'signed-in') {
         body = (
           <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: '#111b21' }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '8px 14px',
-              background: 'var(--surface)',
-              borderBottom: '1px solid var(--border)',
-              fontSize: 12,
-              color: 'var(--text)'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <AppIcon appId="whatsapp" size={16} />
-                <span style={{ fontWeight: 650, color: '#f8fafc' }}>WhatsApp Web</span>
-                <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>· {targetProfile?.displayName}</span>
-                <span style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  fontSize: 11,
-                  color: '#4ade80',
-                  background: 'rgba(74, 222, 128, 0.1)',
-                  padding: '2px 7px',
-                  borderRadius: 12,
-                  fontWeight: 600
-                }}>
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4ade80' }} />
-                  Connected
-                </span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <button
-                  type="button"
-                  onClick={() => setControlSource(effectiveWhatsAppSource)}
-                  style={{
-                    background: 'rgba(99, 102, 241, 0.22)',
-                    border: '1px solid rgba(99, 102, 241, 0.45)',
-                    color: '#c7d2fe',
-                    fontSize: 11,
-                    borderRadius: 6,
-                    padding: '3px 10px',
-                    cursor: 'pointer',
-                    fontWeight: 650,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4
-                  }}
-                  title="Open WhatsApp Control: Chats, 4-Tier Matrix, Schedule & Scrape Logs"
-                >
-                  <span>⚙️ Control</span>
-                  <span style={{ fontSize: 10, opacity: 0.85, background: 'rgba(0,0,0,0.25)', padding: '1px 5px', borderRadius: 4 }}>
-                    {effectiveWhatsAppSource.channels.filter((c) => c.enabled !== false).length}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleStartAppLogin(targetProfile?.id, 'whatsapp')}
-                  style={{
-                    background: 'rgba(255, 255, 255, 0.06)',
-                    border: '1px solid rgba(255, 255, 255, 0.12)',
-                    color: '#cbd5e1',
-                    fontSize: 11,
-                    borderRadius: 6,
-                    padding: '3px 9px',
-                    cursor: 'pointer'
-                  }}
-                  title="Refresh or reconnect WhatsApp session"
-                >
-                  Re-authenticate
-                </button>
-              </div>
-            </div>
+            <PlatformThinBar
+              platform="whatsapp"
+              workspaceName="WhatsApp Web"
+              subtitle={targetProfile?.displayName}
+              isConnected={true}
+              channelCount={effectiveWhatsAppSource.channels.filter((c) => c.enabled !== false).length}
+              onOpenControl={() => setControlSource(effectiveWhatsAppSource)}
+              onReauthenticate={() => void handleStartAppLogin(targetProfile?.id, 'whatsapp')}
+            />
             <div style={{ flex: '1 1 0%', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
               <CardLiveSlackEmbed appId="whatsapp" profileId={targetProfile?.id} hidden={Boolean(channelPickerSourceId) || Boolean(controlSource)} />
             </div>
@@ -1066,85 +853,15 @@ export default function WorkspaceContent({
       if (isWholeWorkspace && slackViewMode === 'live' && (cardAuthenticated === true || effectiveSlackTeamId || project.teamId || channels.teamConnected)) {
         body = (
           <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', flex: '1 1 0%', minHeight: 0, background: 'var(--bg-page)' }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '6px 14px',
-              background: 'var(--surface)',
-              borderBottom: '1px solid var(--border)',
-              fontSize: 12,
-              color: 'var(--text)'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <AppIcon appId="slack" size={15} />
-                <span style={{ fontWeight: 650, color: '#f8fafc' }}>Slack Workspace</span>
-                <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>
-                  · {project.teamName || effectiveSlackTeamId || (project.teamId && !project.teamId.startsWith('pending-') ? project.teamId : undefined) || targetProfile?.displayName}
-                </span>
-                {(cardAuthenticated === true || Boolean(effectiveSlackTeamId) || (project.teamId && !project.teamId.startsWith('pending-') && project.teamId !== 'team') || channels.teamConnected) && (
-                  <span style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    fontSize: 11,
-                    color: '#4ade80',
-                    background: 'rgba(74, 222, 128, 0.1)',
-                    padding: '2px 7px',
-                    borderRadius: 12,
-                    fontWeight: 600
-                  }}>
-                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4ade80' }} />
-                    Connected
-                  </span>
-                )}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                {slackBrowserSource ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => setControlSource(slackBrowserSource)}
-                      style={{
-                        background: 'rgba(99, 102, 241, 0.22)',
-                        border: '1px solid rgba(99, 102, 241, 0.45)',
-                        color: '#c7d2fe',
-                        fontSize: 11,
-                        borderRadius: 6,
-                        padding: '3px 10px',
-                        cursor: 'pointer',
-                        fontWeight: 650,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4
-                      }}
-                      title="Open Workspace Control: Channels, Schedule & Scrape Logs"
-                    >
-                      <span>⚙️ Control</span>
-                      <span style={{ fontSize: 10, opacity: 0.85, background: 'rgba(0,0,0,0.25)', padding: '1px 5px', borderRadius: 4 }}>
-                        {slackBrowserSource.channels.filter((c) => c.enabled !== false).length}
-                      </span>
-                    </button>
-                  </>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => void handleStartCardAppLogin(project.id, targetProfile?.id, 'slack')}
-                  style={{
-                    background: 'rgba(255, 255, 255, 0.06)',
-                    border: '1px solid rgba(255, 255, 255, 0.12)',
-                    color: '#cbd5e1',
-                    fontSize: 11,
-                    borderRadius: 6,
-                    padding: '3px 9px',
-                    cursor: 'pointer'
-                  }}
-                  title="Re-open Slack login flow"
-                >
-                  Re-authenticate
-                </button>
-              </div>
-            </div>
+            <PlatformThinBar
+              platform="slack"
+              workspaceName="Slack Workspace"
+              subtitle={project.teamName || effectiveSlackTeamId || (project.teamId && !project.teamId.startsWith('pending-') ? project.teamId : undefined) || targetProfile?.displayName}
+              isConnected={Boolean(cardAuthenticated === true || Boolean(effectiveSlackTeamId) || (project.teamId && !project.teamId.startsWith('pending-') && project.teamId !== 'team') || channels.teamConnected)}
+              channelCount={slackBrowserSource?.channels?.filter((c) => c.enabled !== false).length ?? 0}
+              onOpenControl={() => slackBrowserSource && setControlSource(slackBrowserSource)}
+              onReauthenticate={() => void handleStartCardAppLogin(project.id, targetProfile?.id, 'slack')}
+            />
             <div style={{ flex: '1 1 0%', minHeight: 0, width: '100%', position: 'relative', overflow: 'hidden' }}>
               <CardLiveSlackEmbed
                 projectId={project.id}

@@ -71,12 +71,7 @@ import { describeMissingScopes, missingSlackScopes } from '../dashboard/slack-sc
 import type { DashboardViewedStore } from '../dashboard/viewed-store'
 import { RunLogStore } from '../dashboard/run-log-store'
 import type { DashboardDeltaStore } from '../dashboard/delta-store'
-import { SlackReaderView } from '../slack-reader/slack-reader-view'
-import { sessionTokenExtractor } from '../slack-reader/session-token-extractor'
-import { SlackApiClient } from '../dashboard/slack-api-client'
-import { TeamsReaderView } from '../teams-reader/teams-reader-view'
-import { WhatsAppReaderView } from '../whatsapp-reader/whatsapp-reader-view'
-import { log } from '../logging'
+import { platformBackendRegistry } from '../platforms/registry'
 
 export interface DashboardIpcDeps {
   monitorStore: MonitorStore
@@ -247,179 +242,41 @@ export function registerDashboardIpc(deps: DashboardIpcDeps): DashboardIpcRegist
                 ? 'whatsapp'
                 : 'slack')
 
-      // Teams Channel & Chat Discovery
-      if (platform === 'teams') {
-        const existingTeamsView =
-          deps.findViewForApp?.('teams', payload.projectId, profileId) ??
-          (payload.projectId
-            ? deps.getExistingCardView?.(payload.projectId, 'teams')
-            : null) ??
-          deps.getExistingProfileView?.(profileId, 'teams') ??
-          null
-        const reader = new TeamsReaderView({ profileId, existingView: existingTeamsView })
-        try {
-          if (!existingTeamsView) {
-            await reader.initialize()
-          }
-          const discovered = await reader.listChannels()
-          return {
-            channels: discovered.map((ch) => ({
-              id: ch.id,
-              name: ch.name,
-              isPrivate: ch.isPrivate,
-              isDm: ch.isDm,
-              kind: ch.kind,
-              enabled: false
-            }))
-          }
-        } catch (err: any) {
-          return {
-            channels: [],
-            error: err instanceof Error ? err.message : 'Teams channel discovery failed'
-          }
-        } finally {
-          reader.dispose()
-        }
-      }
-
-      // WhatsApp Chat & Contact Discovery
-      if (platform === 'whatsapp') {
-        const existingWaView =
-          deps.findViewForApp?.('whatsapp', payload.projectId, profileId) ??
-          (payload.projectId
-            ? deps.getExistingCardView?.(payload.projectId, 'whatsapp')
-            : null) ??
-          deps.getExistingProfileView?.(profileId, 'whatsapp') ??
-          null
-        const reader = new WhatsAppReaderView({ profileId, existingView: existingWaView })
-        try {
-          if (!existingWaView) {
-            await reader.initialize()
-          }
-          const discovered = await reader.listChats()
-          return {
-            channels: discovered.map((ch) => ({
-              id: ch.id,
-              name: ch.name,
-              isPrivate: true,
-              isDm: ch.isDm,
-              kind: ch.kind,
-              enabled: false
-            }))
-          }
-        } catch (err: any) {
-          return {
-            channels: [],
-            error: err instanceof Error ? err.message : 'WhatsApp chat discovery failed'
-          }
-        } finally {
-          reader.dispose()
-        }
-      }
-
       const existingView =
+        deps.findViewForApp?.(platform, payload.projectId, profileId) ??
         (payload.projectId
-          ? deps.getExistingCardView?.(payload.projectId, 'slack')
+          ? deps.getExistingCardView?.(payload.projectId, platform)
           : null) ??
-        deps.getExistingProfileView?.(profileId, 'slack') ??
+        deps.getExistingProfileView?.(profileId, platform) ??
         null
 
-      // 1. Direct API discovery: Fast, Zero-DOM, queries conversations.list directly
-      const candidatePartitions = [
-        payload.projectId ? `persist:card-${payload.projectId}-slack` : undefined,
-        `persist:profile-${profileId}-slack`,
-        `persist:partition-${profileId}`
-      ].filter(Boolean) as string[]
-
-      const existingViews = existingView ? [existingView] : []
-      const cacheKey = `slack:session:${profileId}:${workspaceId}`
-
       try {
-        const creds = await sessionTokenExtractor.extractSlackSessionTokens(
-          existingViews,
-          cacheKey,
-          { partitions: candidatePartitions }
-        )
-        if (creds) {
-          const client = new SlackApiClient(creds)
-          // Also warm up workspace user names so user IDs resolve
-          void client.loadWorkspaceUsers().catch(() => {})
-          const discovered = await client.listWorkspaceChannels()
-          if (discovered.length > 0) {
-            return {
-              channels: discovered.map((channel) => ({
-                id: channel.id,
-                name: channel.name,
-                isPrivate: channel.isPrivate,
-                isDm: channel.isDm,
-                kind: channel.kind,
-                enabled: false,
-                memberCount: channel.memberCount
-              }))
-            }
-          }
+        const adapter = platformBackendRegistry.get(platform)
+        const result = await adapter.discoverChannels({
+          projectId: payload.projectId,
+          sourceId: payload.sourceId,
+          profileId,
+          workspaceId,
+          existingView
+        })
+        return {
+          channels: result.channels.map((ch) => ({
+            id: ch.id,
+            name: ch.name,
+            isPrivate: ch.isPrivate,
+            isDm: ch.isDm,
+            kind: ch.kind,
+            enabled: false,
+            memberCount: ch.memberCount,
+            created: ch.created
+          })),
+          error: result.error
         }
       } catch (err: any) {
-        log.info('[dashboard-ipc] direct API channel discovery fallback to DOM:', {
-          error: err?.message
-        })
-      }
-
-      // 2. Fallback to browser DOM reader if direct API was unable to discover channels
-      const reader = new SlackReaderView({
-        profileId,
-        workspaceId,
-        projectId: payload.projectId,
-        existingView
-      })
-      try {
-        if (!existingView) {
-          await reader.initialize()
-          const bgView = reader.getView()
-          if (
-            bgView &&
-            !bgView.webContents.isDestroyed() &&
-            !bgView.webContents.getURL().includes('slack.com')
-          ) {
-            const targetUrl = `https://app.slack.com/client/${workspaceId}`
-            try {
-              await bgView.webContents.loadURL(targetUrl)
-              await reader.waitForContent(8000)
-            } catch {
-              // ignore
-            }
-          }
-        }
-        const discovered = await reader.listChannels()
-        if (discovered.length === 0) {
-          return {
-            channels: [],
-            error: 'No channels visible. Log in to Slack in this card, then retry discovery.'
-          }
-        }
-        return {
-          channels: discovered.map((channel) => ({
-            id: channel.id,
-            name: channel.name,
-            isPrivate: channel.isPrivate,
-            isDm: channel.isDm,
-            kind: channel.isDm
-              ? 'dm'
-              : channel.isPrivate
-                ? 'private'
-                : 'public',
-            enabled: false,
-            created: channel.created,
-            memberCount: channel.memberCount
-          }))
-        }
-      } catch (err) {
         return {
           channels: [],
-          error: err instanceof Error ? err.message : 'Channel discovery failed'
+          error: err instanceof Error ? err.message : 'Platform discovery failed'
         }
-      } finally {
-        reader.destroy()
       }
     }
   )
