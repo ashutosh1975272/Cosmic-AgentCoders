@@ -19,6 +19,7 @@ import type {
   ScrapeRunMessageSnippet,
   DashboardChannelDelta
 } from '../../../shared/dashboard-contract'
+import type { DashboardStoredMessage } from '../../dashboard/delta-store'
 
 export const TEAMS_METADATA: PlatformMetadata = {
   id: 'teams',
@@ -26,7 +27,7 @@ export const TEAMS_METADATA: PlatformMetadata = {
   shortName: 'Teams',
   icon: 'teams',
   defaultWorkspaceName: 'Microsoft Teams',
-  supportedEngineModes: ['browser'],
+  supportedEngineModes: ['direct_api', 'browser'],
   supportsGoogleSso: false,
   channelNounPlural: 'Teams & Chats',
   channelNounSingular: 'Chat'
@@ -76,7 +77,8 @@ export class TeamsPlatformSuite implements IPlatformBackendAdapter {
 
   async scrapeChannels(ctx: PlatformScrapeContext): Promise<PlatformScrapeResult> {
     const { project, source, targetChannels, deltaStore, runId, existingView } = ctx
-    const activeEngineMode = 'browser'
+    const requestedEngineMode = source.engineMode ?? 'direct_api'
+    let activeEngineMode = requestedEngineMode
     const channels: ScrapeRunChannel[] = []
     const snippets: ScrapeRunMessageSnippet[] = []
     const deltas: DashboardChannelDelta[] = []
@@ -114,8 +116,26 @@ export class TeamsPlatformSuite implements IPlatformBackendAdapter {
         })
 
         try {
-          await reader.selectChannel(ch.id)
-          let messages = await reader.readMessages(ch.id)
+          let messages: DashboardStoredMessage[] = []
+          let channelEngineMode: 'direct_api' | 'browser' = requestedEngineMode
+
+          if (requestedEngineMode === 'direct_api') {
+            // Rapid Zero-DOM extraction from Teams IndexedDB (~20-50ms)
+            messages = await reader.readMessages(ch.id, name)
+            if (messages.length === 0) {
+              // Direct store returned 0, fall back to DOM selection
+              await reader.selectChannel(ch.id)
+              messages = await reader.readMessages(ch.id, name)
+              if (messages.length > 0) {
+                channelEngineMode = 'browser'
+              }
+            }
+          } else {
+            await reader.selectChannel(ch.id)
+            messages = await reader.readMessages(ch.id, name)
+            channelEngineMode = 'browser'
+          }
+
           if (peopleFilter.size > 0) {
             messages = messages.filter((m) =>
               peopleFilter.has((m.user ?? '').trim().toLowerCase())
@@ -130,7 +150,7 @@ export class TeamsPlatformSuite implements IPlatformBackendAdapter {
               messagesRead: 0,
               newMessages: 0,
               status: 'empty',
-              engineMode: activeEngineMode
+              engineMode: channelEngineMode
             })
             continue
           }
@@ -181,7 +201,7 @@ export class TeamsPlatformSuite implements IPlatformBackendAdapter {
             messagesRead: messages.length,
             newMessages: append.added,
             status: 'read',
-            engineMode: activeEngineMode
+            engineMode: channelEngineMode
           })
 
           ctx.onScrapeEvent?.({

@@ -257,6 +257,201 @@ const TEAMS_READ_MESSAGES_SCRIPT = `
 })()
 `
 
+export function buildTeamsDirectReadScript(targetChatId: string, targetChatName?: string): string {
+  const cleanSlug = targetChatId
+    .replace(/^teams_chat_/i, '')
+    .replace(/^teams_ch_/i, '')
+    .replace(/_+/g, ' ')
+    .toLowerCase()
+    .trim()
+  const cleanName = (targetChatName || '').replace(/^[#@]+/, '').toLowerCase().trim()
+  const targetId = targetChatId.toLowerCase().trim()
+
+  return `
+    (async () => {
+      try {
+        const targetId = ${JSON.stringify(targetId)};
+        const cleanSlug = ${JSON.stringify(cleanSlug)};
+        const targetName = ${JSON.stringify(cleanName)};
+
+        const matches = (candidate) => {
+          if (!candidate) return false;
+          const cand = String(candidate).toLowerCase().trim();
+          const candAlpha = cand.replace(/[^\\p{L}\\p{N}]/gu, '');
+          const slugAlpha = cleanSlug.replace(/[^\\p{L}\\p{N}]/gu, '');
+          const nameAlpha = targetName.replace(/[^\\p{L}\\p{N}]/gu, '');
+          const idAlpha = targetId.replace(/[^\\p{L}\\p{N}]/gu, '');
+
+          if (cand === targetId || cand === cleanSlug || (targetName && cand === targetName)) return true;
+          if (candAlpha.length >= 2) {
+            if (slugAlpha.length >= 2 && (candAlpha === slugAlpha || candAlpha.includes(slugAlpha) || slugAlpha.includes(candAlpha))) return true;
+            if (nameAlpha.length >= 2 && (candAlpha === nameAlpha || candAlpha.includes(nameAlpha) || nameAlpha.includes(candAlpha))) return true;
+            if (idAlpha.length >= 2 && (candAlpha === idAlpha || candAlpha.includes(idAlpha))) return true;
+          }
+          return false;
+        };
+
+        const stripHtml = (html) => {
+          if (!html) return '';
+          return String(html)
+            .replace(/<at id="[^"]*">([^<]+)<\\/at>/gi, '@$1')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'")
+            .replace(/&nbsp;/g, ' ')
+            .replace(/\\s+/g, ' ')
+            .trim();
+        };
+
+        if (typeof window === 'undefined' || !window.indexedDB) return [];
+
+        const idbResult = await new Promise((resolve) => {
+          const timer = setTimeout(() => resolve([]), 1500);
+          try {
+            if (typeof window.indexedDB.databases !== 'function') {
+              clearTimeout(timer);
+              resolve([]);
+              return;
+            }
+
+            window.indexedDB.databases().then(async (dbs) => {
+              try {
+                if (!Array.isArray(dbs) || dbs.length === 0) {
+                  clearTimeout(timer);
+                  resolve([]);
+                  return;
+                }
+
+                // Filter for Teams databases caching replychains or messages
+                const relevantDbs = dbs.filter((d) =>
+                  d.name && (
+                    d.name.includes('replychain') ||
+                    d.name.includes('streams-replychain') ||
+                    d.name.startsWith('Teams:')
+                  )
+                );
+
+                if (relevantDbs.length === 0) {
+                  clearTimeout(timer);
+                  resolve([]);
+                  return;
+                }
+
+                const allExtractedMessages = [];
+
+                for (const dbInfo of relevantDbs) {
+                  try {
+                    const db = await new Promise((resDb, rejDb) => {
+                      const req = window.indexedDB.open(dbInfo.name);
+                      req.onsuccess = () => resDb(req.result);
+                      req.onerror = () => rejDb(req.error);
+                    });
+
+                    const storeNames = Array.from(db.objectStoreNames || []);
+                    for (const storeName of storeNames) {
+                      try {
+                        const items = await new Promise((resItems) => {
+                          const tx = db.transaction(storeName, 'readonly');
+                          const store = tx.objectStore(storeName);
+                          const req = store.getAll();
+                          req.onsuccess = () => resItems(req.result || []);
+                          req.onerror = () => resItems([]);
+                        });
+
+                        for (const item of items) {
+                          if (!item) continue;
+                          const conversationId = item.conversationId || item.chatId || item.id || '';
+                          const threadTopic = item.threadProperties?.topic || item.topic || '';
+                          const isChatMatch = matches(conversationId) || matches(threadTopic);
+
+                          // Check item.messageMap (Teams V2 replychain structure)
+                          const rawMsgs = [];
+                          if (item.messageMap && typeof item.messageMap === 'object') {
+                            for (const k of Object.keys(item.messageMap)) {
+                              rawMsgs.push(item.messageMap[k]);
+                            }
+                          } else if (Array.isArray(item.messages)) {
+                            rawMsgs.push(...item.messages);
+                          } else if (item.lastMessage) {
+                            rawMsgs.push(item.lastMessage);
+                          } else if (item.content || item.body) {
+                            rawMsgs.push(item);
+                          }
+
+                          for (const m of rawMsgs) {
+                            if (!m) continue;
+                            const text = stripHtml(m.content || m.body || m.preview || '');
+                            if (!text) continue;
+
+                            const senderName = (
+                              m.imdisplayName ||
+                              m.imDisplayName ||
+                              m.senderName ||
+                              m.fromDisplayName ||
+                              m.from ||
+                              ''
+                            ).replace(/\\s*\\(You\\)$/i, '').trim();
+
+                            const isMsgMatch = isChatMatch || matches(senderName);
+                            if (!isMsgMatch && targetName && cleanSlug) {
+                              continue;
+                            }
+
+                            const rawTime = m.clientArrivalTime || m.composetime || m.originalArrivalTime || m.timestamp || m.t;
+                            let timestamp = rawTime;
+                            if (typeof rawTime === 'number' && rawTime > 1e11) {
+                              timestamp = new Date(rawTime).toISOString();
+                            }
+
+                            allExtractedMessages.push({
+                              id: String(m.clientmessageid || m.id || m.skypeGuid || Date.now() + Math.random()),
+                              channelId: targetId,
+                              senderName: senderName || (m.isFromMe ? 'You' : targetName || 'Teams Member'),
+                              text,
+                              timestamp: timestamp || new Date().toISOString()
+                            });
+                          }
+                        }
+                      } catch {
+                        // next store
+                      }
+                    }
+                    db.close();
+                  } catch {
+                    // next db
+                  }
+                }
+
+                clearTimeout(timer);
+                resolve(allExtractedMessages.slice(-50));
+              } catch {
+                clearTimeout(timer);
+                resolve([]);
+              }
+            }).catch(() => {
+              clearTimeout(timer);
+              resolve([]);
+            });
+          } catch {
+            clearTimeout(timer);
+            resolve([]);
+          }
+        });
+
+        if (Array.isArray(idbResult) && idbResult.length > 0) {
+          return idbResult;
+        }
+        return [];
+      } catch {
+        return [];
+      }
+    })()
+  `
+}
+
 export class TeamsReaderView {
   private view: WebContentsView | null = null
   private ownsView = false
@@ -328,11 +523,19 @@ export class TeamsReaderView {
     }
   }
 
-  async readMessages(channelId: string): Promise<DashboardStoredMessage[]> {
+  async readMessages(channelId: string, expectedName?: string): Promise<DashboardStoredMessage[]> {
     if (!this.view || this.view.webContents.isDestroyed()) {
       return []
     }
     try {
+      // 1. Direct IndexedDB extraction (Zero-DOM, ~20-50ms)
+      const directScript = buildTeamsDirectReadScript(channelId, expectedName)
+      const directRaw = await this.view.webContents.executeJavaScript(directScript, true)
+      if (Array.isArray(directRaw) && directRaw.length > 0) {
+        return directRaw.map((m: RawTeamsMessage) => normalizeTeamsMessage(m, channelId))
+      }
+
+      // 2. Fallback to DOM extraction
       const raw = await this.view.webContents.executeJavaScript(
         TEAMS_READ_MESSAGES_SCRIPT,
         true

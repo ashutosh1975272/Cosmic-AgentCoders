@@ -77,6 +77,7 @@ function normalizeEntry(raw: unknown): ScrapeRunLog | null {
         newMessages: Number(ch.newMessages ?? 0),
         status: ch.status ?? 'read',
         skippedReason: ch.skippedReason,
+        engineMode: ch.engineMode,
         error: ch.error
       }))
     : []

@@ -74,7 +74,11 @@ describe('SyncEngine Multi-Platform Ingestion (Teams & WhatsApp without Slack)',
           if (script.includes('team-channel-item') && script.includes('clickable.click')) {
             return true // channel selected
           }
-          if (script.includes('message-pane-list-viewport')) {
+          if (
+            script.includes('indexedDB') ||
+            script.includes('replychain') ||
+            script.includes('message-pane-list-viewport')
+          ) {
             return [
               {
                 id: 'm1',
@@ -120,6 +124,8 @@ describe('SyncEngine Multi-Platform Ingestion (Teams & WhatsApp without Slack)',
     expect(runs[0].sourceId).toBe('src-teams-1')
     expect(runs[0].channelsRead).toBe(1)
     expect(runs[0].newMessages).toBe(1)
+    expect(runs[0].engineMode).toBe('direct_api')
+    expect(runs[0].channels[0].engineMode).toBe('direct_api')
   })
 
   it('scrapes WhatsApp Web source and populates delta store and run logs', async () => {
@@ -167,7 +173,12 @@ describe('SyncEngine Multi-Platform Ingestion (Teams & WhatsApp without Slack)',
           if (script.includes('openChatAt') || script.includes('node.click()')) {
             return true // chat selected
           }
-          if (script.includes('msg-container') || script.includes('Store.Msg')) {
+          if (
+            script.includes('model-storage') ||
+            script.includes('indexedDB') ||
+            script.includes('msg-container') ||
+            script.includes('Store.Msg')
+          ) {
             return [
               {
                 id: 'w1',
@@ -213,6 +224,8 @@ describe('SyncEngine Multi-Platform Ingestion (Teams & WhatsApp without Slack)',
     const runs = await runLogStore.read('proj-wa-only')
     expect(runs.length).toBe(1)
     expect(runs[0].sourceId).toBe('src-wa-1')
+    expect(runs[0].engineMode).toBe('direct_api')
+    expect(runs[0].channels[0].engineMode).toBe('direct_api')
   })
 
   it('pools persistent card view via getOrCreateCardView when existing card view is not yet cached', async () => {

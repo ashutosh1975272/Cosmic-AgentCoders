@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { normalizeTeamsMessage } from '../../src/main/teams-reader/teams-normalizer'
-import { TeamsReaderView } from '../../src/main/teams-reader/teams-reader-view'
+import { TeamsReaderView, buildTeamsDirectReadScript } from '../../src/main/teams-reader/teams-reader-view'
 
 describe('Teams Normalizer', () => {
   it('normalizes raw Teams message into standard DashboardStoredMessage', () => {
@@ -104,6 +104,41 @@ describe('TeamsReaderView', () => {
     expect(messages.length).toBe(1)
     expect(messages[0].user).toBe('Alice')
     expect(messages[0].text).toBe('Sprint review tomorrow')
+  })
+
+  it('reads messages directly from IndexedDB replychain-manager via direct script', async () => {
+    const directScript = buildTeamsDirectReadScript('teams_chat_unknown_knp', 'unknown knp')
+    expect(directScript).toContain('indexedDB')
+    expect(directScript).toContain('replychain')
+
+    const mockWebContents = {
+      isDestroyed: vi.fn().mockReturnValue(false),
+      executeJavaScript: vi.fn().mockImplementation(async (script: string) => {
+        if (script.includes('indexedDB') || script.includes('replychain')) {
+          return [
+            {
+              id: '4153168011074496769',
+              channelId: 'teams_chat_unknown_knp',
+              senderName: 'unknown knp',
+              text: '<p>are you ready ?</p>',
+              timestamp: '2026-11-13T18:56:48.170Z'
+            }
+          ]
+        }
+        return []
+      })
+    }
+    const mockView = { webContents: mockWebContents } as any
+
+    const reader = new TeamsReaderView({
+      profileId: 'prof-1',
+      existingView: mockView
+    })
+
+    const messages = await reader.readMessages('teams_chat_unknown_knp', 'unknown knp')
+    expect(messages.length).toBe(1)
+    expect(messages[0].user).toBe('unknown knp')
+    expect(messages[0].text).toBe('are you ready ?')
   })
 
   it('selects channel and posts message', async () => {

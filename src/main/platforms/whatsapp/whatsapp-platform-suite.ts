@@ -19,6 +19,7 @@ import type {
   ScrapeRunMessageSnippet,
   DashboardChannelDelta
 } from '../../../shared/dashboard-contract'
+import type { DashboardStoredMessage } from '../../dashboard/delta-store'
 
 export const WHATSAPP_METADATA: PlatformMetadata = {
   id: 'whatsapp',
@@ -26,7 +27,7 @@ export const WHATSAPP_METADATA: PlatformMetadata = {
   shortName: 'WhatsApp',
   icon: 'whatsapp',
   defaultWorkspaceName: 'WhatsApp Web',
-  supportedEngineModes: ['browser'],
+  supportedEngineModes: ['direct_api', 'browser'],
   supportsGoogleSso: false,
   channelNounPlural: 'Chats & Contacts',
   channelNounSingular: 'Chat'
@@ -75,7 +76,8 @@ export class WhatsAppPlatformSuite implements IPlatformBackendAdapter {
 
   async scrapeChannels(ctx: PlatformScrapeContext): Promise<PlatformScrapeResult> {
     const { project, source, targetChannels, deltaStore, runId, existingView } = ctx
-    const activeEngineMode = 'browser'
+    const requestedEngineMode = source.engineMode ?? 'direct_api'
+    let activeEngineMode = requestedEngineMode
     const channels: ScrapeRunChannel[] = []
     const snippets: ScrapeRunMessageSnippet[] = []
     const deltas: DashboardChannelDelta[] = []
@@ -113,28 +115,47 @@ export class WhatsAppPlatformSuite implements IPlatformBackendAdapter {
         })
 
         try {
-          const selected = await reader.selectChat(ch.id, name)
-          if (!selected) {
-            ctx.onScrapeEvent?.({
-              type: 'step',
-              runId,
-              projectId: project.id,
-              sourceId: source.id,
-              channelName: name,
-              text: `Could not isolate WhatsApp chat ${name}, skipping to avoid cross-chat leakage.`
-            })
-            channels.push({
-              channelId: ch.id,
-              channelName: name,
-              kind: ch.kind || 'dm',
-              messagesRead: 0,
-              newMessages: 0,
-              status: 'empty',
-              engineMode: activeEngineMode
-            })
-            continue
+          let messages: DashboardStoredMessage[] = []
+          let channelEngineMode: 'direct_api' | 'browser' = requestedEngineMode
+
+          if (requestedEngineMode === 'direct_api') {
+            // Rapid Zero-DOM extraction from IndexedDB model-storage
+            messages = await reader.readMessages(ch.id, name)
+            if (messages.length === 0) {
+              const selected = await reader.selectChat(ch.id, name)
+              if (selected) {
+                messages = await reader.readMessages(ch.id, name)
+                if (messages.length > 0) {
+                  channelEngineMode = 'browser'
+                }
+              }
+            }
+          } else {
+            const selected = await reader.selectChat(ch.id, name)
+            if (!selected) {
+              ctx.onScrapeEvent?.({
+                type: 'step',
+                runId,
+                projectId: project.id,
+                sourceId: source.id,
+                channelName: name,
+                text: `Could not isolate WhatsApp chat ${name}, skipping to avoid cross-chat leakage.`
+              })
+              channels.push({
+                channelId: ch.id,
+                channelName: name,
+                kind: ch.kind || 'dm',
+                messagesRead: 0,
+                newMessages: 0,
+                status: 'empty',
+                engineMode: 'browser'
+              })
+              continue
+            }
+            messages = await reader.readMessages(ch.id, name)
+            channelEngineMode = 'browser'
           }
-          let messages = await reader.readMessages(ch.id, name)
+
           if (peopleFilter.size > 0) {
             messages = messages.filter((m) =>
               peopleFilter.has((m.user ?? '').trim().toLowerCase())
@@ -149,7 +170,7 @@ export class WhatsAppPlatformSuite implements IPlatformBackendAdapter {
               messagesRead: 0,
               newMessages: 0,
               status: 'empty',
-              engineMode: activeEngineMode
+              engineMode: channelEngineMode
             })
             continue
           }
@@ -200,7 +221,7 @@ export class WhatsAppPlatformSuite implements IPlatformBackendAdapter {
             messagesRead: messages.length,
             newMessages: append.added,
             status: 'read',
-            engineMode: activeEngineMode
+            engineMode: channelEngineMode
           })
 
           ctx.onScrapeEvent?.({

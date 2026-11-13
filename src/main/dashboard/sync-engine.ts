@@ -893,7 +893,7 @@ export class DashboardSyncEngine {
       let targetChannels: ProjectSourceChannel[] = source.channels ?? []
 
       if (source.platform && source.platform !== 'slack' && platformBackendRegistry.has(source.platform)) {
-        activeEngineMode = source.engineMode ?? 'browser'
+        activeEngineMode = source.engineMode ?? 'direct_api'
         const existingPlatformView =
           this.getExistingCardView?.(project.id, source.platform as any) ??
           this.getOrCreateCardView?.(project.id, source.platform as any) ??
@@ -934,6 +934,7 @@ export class DashboardSyncEngine {
           }
         })
 
+        activeEngineMode = scrapeResult.activeEngineMode ?? activeEngineMode
         channels.push(...scrapeResult.channels)
         deltas.push(...scrapeResult.deltas)
         newMessages += scrapeResult.newMessagesCount
